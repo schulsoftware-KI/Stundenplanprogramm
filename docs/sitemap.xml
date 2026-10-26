@@ -1,15 +1,35 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
   <url>
     <loc>https://schulsoftware-ki.github.io/Stundenplanprogramm/</loc>
-    <lastmod>2026-08-23</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>1.0</priority>
+    <lastmod>2026-10-26</lastmod>
+    <image:image>
+      <image:loc>https://schulsoftware-ki.github.io/Stundenplanprogramm/stundenplan-software-stundentausch.webp</image:loc>
+    </image:image>
+    <image:image>
+      <image:loc>https://schulsoftware-ki.github.io/Stundenplanprogramm/plan-editor.png</image:loc>
+    </image:image>
+    <image:image>
+      <image:loc>https://schulsoftware-ki.github.io/Stundenplanprogramm/plan-editor-vergleich.png</image:loc>
+    </image:image>
+    <image:image>
+      <image:loc>https://schulsoftware-ki.github.io/Stundenplanprogramm/plan-editor-fachgruppen.png</image:loc>
+    </image:image>
+    <image:image>
+      <image:loc>https://schulsoftware-ki.github.io/Stundenplanprogramm/diagnose-tabelle.png</image:loc>
+    </image:image>
+    <image:image>
+      <image:loc>https://schulsoftware-ki.github.io/Stundenplanprogramm/pm-parameter.png</image:loc>
+    </image:image>
+    <image:image>
+      <image:loc>https://schulsoftware-ki.github.io/Stundenplanprogramm/stammdaten-std.png</image:loc>
+    </image:image>
+    <image:image>
+      <image:loc>https://schulsoftware-ki.github.io/Stundenplanprogramm/minimale-aenderungen-dialog.webp</image:loc>
+    </image:image>
   </url>
   <url>
     <loc>https://schulsoftware-ki.github.io/Stundenplanprogramm/Stundenplan-Benutzerhandbuch.pdf</loc>
-    <lastmod>2026-08-23</lastmod>
-    <changefreq>yearly</changefreq>
-    <priority>0.5</priority>
   </url>
 </urlset>

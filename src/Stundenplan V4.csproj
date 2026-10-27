@@ -21,6 +21,7 @@
   <ItemGroup>
     <PackageReference Include="ClosedXML" Version="0.105.0" />
     <PackageReference Include="Google.OrTools" Version="9.15.6755" />
+    <PackageReference Include="QuestPDF" Version="2026.9.1" />
   </ItemGroup>
 
 </Project>

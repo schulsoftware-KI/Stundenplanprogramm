@@ -15,6 +15,11 @@ namespace Stundenplan_V2
     /// MainWindow über Append()/Clear()/SetzeInhalt() gespiegelt.
     /// Alle öffentlichen Methoden auf dem UI-Thread aufrufen.
     ///
+    /// Der Knopf "Leeren" meldet sich über das Ereignis LeerenGeklickt beim
+    /// MainWindow, damit dort TxtLog mitgeleert wird. Sonst wäre das Fenster
+    /// leer, TxtLog aber nicht — und beim nächsten Öffnen käme der alte
+    /// Inhalt über SetzeInhalt(TxtLog.Text) wieder zurück.
+    ///
     /// Als Control wird eine RichTextBox verwendet, damit während der
     /// Ursachensuche einzelne Wörter ("lösbar"/"unlösbar") fett hervorgehoben
     /// werden können – eine normale TextBox kann das nicht.
@@ -25,6 +30,16 @@ namespace Stundenplan_V2
         private readonly Paragraph _para;      // hält alle Zeilen als Inlines
         private readonly CheckBox _autoScroll;
         private readonly TextBlock _titel;     // Kopfzeile "Datei: …" – wird über SetzeDateiname() aktualisiert
+
+        /// <summary>
+        /// Wird ausgelöst, nachdem der Nutzer im Fenster auf "Leeren" geklickt
+        /// hat. Das MainWindow leert daraufhin auch TxtLog, damit beide Anzeigen
+        /// synchron bleiben.
+        /// Bewusst NICHT in Clear() ausgelöst: Clear() ruft auch das MainWindow
+        /// selbst auf (vor jedem Solverlauf), und dort ist TxtLog dann bereits
+        /// geleert.
+        /// </summary>
+        public event Action? LeerenGeklickt;
 
         // Nur während der (automatischen) Infeasible-Ursachensuche aktiv. Solange
         // gesetzt, werden im Ausgabefenster die Wörter "lösbar"/"unlösbar" groß
@@ -60,7 +75,11 @@ namespace Stundenplan_V2
             var kopf = new DockPanel { Margin = new Thickness(0, 0, 0, 8) };
 
             var btnLeeren = new Button { Content = "Leeren", Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(6, 0, 0, 0) };
-            btnLeeren.Click += (s, e) => Clear();
+            btnLeeren.Click += (s, e) =>
+            {
+                Clear();
+                LeerenGeklickt?.Invoke();   // MainWindow leert TxtLog mit
+            };
 
             var btnKopieren = new Button { Content = "Kopieren", Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(6, 0, 0, 0) };
             btnKopieren.Click += (s, e) =>
@@ -174,8 +193,8 @@ namespace Stundenplan_V2
         }
 
         // Marker der Diagnose-Ausgabe.
-        private const char Pfeil = '\u25B6';       // ▶  – Beginn einer Stufe / eines Auslass-Tests
-        private const char Ellipse = '\u2026';     // …  – trennt Bezeichnung von "(max. …s)"
+        private const char Pfeil = '▶';       // ▶  – Beginn einer Stufe / eines Auslass-Tests
+        private const char Ellipse = '…';     // …  – trennt Bezeichnung von "(max. …s)"
 
         /// <summary>Hängt eine Zeile an (spiegelt Log()).</summary>
         public void Append(string text)
@@ -196,7 +215,10 @@ namespace Stundenplan_V2
             if (_autoScroll.IsChecked == true) _box.ScrollToEnd();
         }
 
-        /// <summary>Leert die Anzeige (spiegelt TxtLog.Clear()).</summary>
+        /// <summary>
+        /// Leert die Anzeige (spiegelt TxtLog.Clear()). Löst LeerenGeklickt
+        /// NICHT aus — das tut nur der Knopf "Leeren".
+        /// </summary>
         public void Clear()
         {
             _para.Inlines.Clear();

@@ -1,0 +1,196 @@
+<Window x:Class="Stundenplan_V2.Vertretung.VertretungsDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Vertretung erfassen"
+        Width="1120" Height="760"
+        MinWidth="780" MinHeight="520"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResizeWithGrip">
+
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TabControl Grid.Row="0">
+
+            <!-- ============ Reiter 1: Vertretung erfassen ============ -->
+            <TabItem Header="Vertretung erfassen">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Margin="0,0,0,8" TextWrapping="Wrap"
+                               Text="Abwesenheit eintragen (mehrere Namen kommagetrennt möglich) und 'Betroffene Stunden ermitteln'. Je Stunde Art und ggf. Vertretung wählen – die Liste ist nach fachgerecht, vertretungsbereit und fairem Zähler sortiert. Mehrere markierte Zeilen lassen sich über die Leiste gemeinsam auf eine Art setzen. 'Buchen' schreibt alles in die Vertretungsdatei."/>
+
+                    <!-- Eingabe der Abwesenheit -->
+                    <StackPanel Grid.Row="1" Margin="0,0,0,8">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                            <TextBlock Text="Abwesend:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <ComboBox x:Name="CbSubjekt" Width="110" VerticalAlignment="Center" Margin="0,0,14,0"
+                                      SelectionChanged="CbSubjekt_SelectionChanged"/>
+                            <TextBlock Text="Grund:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <ComboBox x:Name="CbGrund" Width="150" VerticalAlignment="Center" Margin="0,0,14,0"/>
+                            <TextBlock Text="Plan:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <ComboBox x:Name="CbPlan" Width="130" VerticalAlignment="Center"/>
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                            <TextBlock Text="Von:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <DatePicker x:Name="DpVon" Width="130" VerticalAlignment="Center" Margin="0,0,6,0"
+                                        SelectedDateChanged="DpVon_Changed"/>
+                            <TextBlock Text="Std." VerticalAlignment="Center" Margin="0,0,4,0"/>
+                            <TextBox x:Name="TxtVonStunde" Width="40" VerticalAlignment="Center" Margin="0,0,14,0"
+                                     ToolTip="Default 1; leer = ab erster Stunde"/>
+                            <TextBlock Text="Bis:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <DatePicker x:Name="DpBis" Width="130" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <TextBlock Text="Std." VerticalAlignment="Center" Margin="0,0,4,0"/>
+                            <TextBox x:Name="TxtBisStunde" Width="40" VerticalAlignment="Center" Margin="0,0,14,0"
+                                     ToolTip="Default 11; leer = bis letzte Stunde"/>
+                            <Button x:Name="BtnErmitteln" Content="Betroffene Stunden ermitteln" Padding="10,4"
+                                    Click="BtnErmitteln_Click"/>
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="Namen:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <TextBox x:Name="TxtNamen" Width="360" VerticalAlignment="Center" Margin="0,0,10,0"
+                                     ToolTip="z. B. L1, L2  oder  05A, 05B – mehrere mit Komma trennen"/>
+                            <ComboBox x:Name="CbName" Width="140" IsEditable="True" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <Button x:Name="BtnNameHinzu" Content="+ hinzufügen" Padding="8,3" Click="BtnNameHinzu_Click"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- Sammel-Aktion für markierte Zeilen -->
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="Markierte Zeilen → Art:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <ComboBox x:Name="CbBulkArt" Width="150" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <Button x:Name="BtnBulkArt" Content="Setzen" Padding="10,3" Click="BtnBulkArt_Click"/>
+                        <TextBlock Text="  (mehrere Zeilen mit Strg/Umschalt markieren)" VerticalAlignment="Center"
+                                   Foreground="DimGray"/>
+                    </StackPanel>
+
+                    <!-- Betroffene Stunden -->
+                    <DataGrid x:Name="DgInstanzen" Grid.Row="3" Margin="0,0,0,8"
+                              AutoGenerateColumns="False" CanUserAddRows="False"
+                              GridLinesVisibility="All" HeadersVisibility="All"
+                              SelectionMode="Extended" SelectionUnit="FullRow">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Datum" Binding="{Binding DatumText}" IsReadOnly="True" Width="95"/>
+                            <DataGridTextColumn Header="Std" Binding="{Binding Stunde}" IsReadOnly="True" Width="45"/>
+                            <DataGridTextColumn Header="Klasse(n)" Binding="{Binding KlassenText}" IsReadOnly="True" Width="110"/>
+                            <DataGridTextColumn Header="Fach" Binding="{Binding Fach}" IsReadOnly="True" Width="90"/>
+                            <DataGridTextColumn Header="entfällt bei" Binding="{Binding OrigLehrer}" IsReadOnly="True" Width="90"/>
+                            <DataGridTemplateColumn Header="Art" Width="150">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <ComboBox ItemsSource="{Binding AlleArten}"
+                                                  SelectedItem="{Binding Art, Mode=TwoWay}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="Vertretung durch" Width="260">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <ComboBox ItemsSource="{Binding Vorschlaege}"
+                                                  DisplayMemberPath="Anzeige"
+                                                  SelectedValuePath="Lehrer"
+                                                  SelectedValue="{Binding GewaehlterVertreter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  IsEnabled="{Binding BrauchtVertreter}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Header="Bemerkung" Binding="{Binding Bemerkung}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+                        <TextBlock x:Name="TxtStatus" VerticalAlignment="Center" Foreground="DimGray"
+                                   Margin="0,0,16,0" TextTrimming="CharacterEllipsis"/>
+                        <Button x:Name="BtnBuchen" Content="Buchen" Width="140" Click="BtnBuchen_Click"/>
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+
+            <!-- ============ Reiter 2: Tagesübersicht ============ -->
+            <TabItem Header="Tagesübersicht">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
+                        <TextBlock Text="Tag:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <DatePicker x:Name="DpUebersicht" Width="140" VerticalAlignment="Center" Margin="0,0,12,0"
+                                    SelectedDateChanged="DpUebersicht_Changed"/>
+                        <CheckBox x:Name="ChkAlle" Content="alle Tage" VerticalAlignment="Center" Margin="0,0,12,0"
+                                  Checked="ChkAlle_Changed" Unchecked="ChkAlle_Changed"/>
+                        <Button x:Name="BtnUebersicht" Content="Aktualisieren" Padding="10,4" Click="BtnUebersicht_Click"/>
+                        <Button x:Name="BtnPdfLehrer" Content="PDF (Lehrer-Sicht)" Padding="10,4" Margin="12,0,0,0"
+                                Click="BtnPdfLehrer_Click"/>
+                        <Button x:Name="BtnPdfAushang" Content="PDF (Aushang)" Padding="10,4" Margin="6,0,0,0"
+                                Click="BtnPdfAushang_Click"/>
+                        <TextBlock x:Name="TxtUebersichtInfo" VerticalAlignment="Center" Margin="16,0,0,0" Foreground="DimGray"/>
+                    </StackPanel>
+                    <DataGrid x:Name="DgUebersicht" Grid.Row="1"
+                              AutoGenerateColumns="False" CanUserAddRows="False" IsReadOnly="True"
+                              GridLinesVisibility="All" HeadersVisibility="All">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Datum" Binding="{Binding DatumText}" Width="110"/>
+                            <DataGridTextColumn Header="Std" Binding="{Binding Stunde}" Width="45"/>
+                            <DataGridTextColumn Header="Klasse(n)" Binding="{Binding Klasse}" Width="110"/>
+                            <DataGridTextColumn Header="Fach" Binding="{Binding Fach}" Width="80"/>
+                            <DataGridTextColumn Header="entfällt bei" Binding="{Binding Orig}" Width="90"/>
+                            <DataGridTextColumn Header="Art" Binding="{Binding ArtText}" Width="130"/>
+                            <DataGridTextColumn Header="Vertretung" Binding="{Binding Vertreter}" Width="100"/>
+                            <DataGridTextColumn Header="Grund" Binding="{Binding GrundText}" Width="110"/>
+                            <DataGridTextColumn Header="Bemerkung" Binding="{Binding Bemerkung}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+
+            <!-- ============ Reiter 3: Zähler ============ -->
+            <TabItem Header="Zähler">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
+                        <TextBlock Text="Vertretungs- und Entfallzähler für das Schuljahr."
+                                   VerticalAlignment="Center" Margin="0,0,16,0"/>
+                        <Button x:Name="BtnZaehlerAktualisieren" Content="Aktualisieren" Padding="10,4"
+                                Click="BtnZaehlerAktualisieren_Click"/>
+                        <Button x:Name="BtnZaehlerExcel" Content="Als Excel exportieren" Padding="10,4"
+                                Margin="12,0,0,0" Click="BtnZaehlerExcel_Click"/>
+                    </StackPanel>
+                    <DataGrid x:Name="DgZaehler" Grid.Row="1"
+                              AutoGenerateColumns="False" CanUserAddRows="False" IsReadOnly="True"
+                              GridLinesVisibility="All" HeadersVisibility="All">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Lehrkraft" Binding="{Binding Lehrer}" Width="120"/>
+                            <DataGridTextColumn Header="Vertretung" Binding="{Binding Vertretung}" Width="90"/>
+                            <DataGridTextColumn Header="Betreuung" Binding="{Binding Betreuung}" Width="90"/>
+                            <DataGridTextColumn Header="EVA" Binding="{Binding EVA}" Width="60"/>
+                            <DataGridTextColumn Header="Zusammenleg." Binding="{Binding Zusammenlegung}" Width="100"/>
+                            <DataGridTextColumn Header="Eigene Ausfälle" Binding="{Binding EigeneAusfaelle}" Width="100"/>
+                            <DataGridTextColumn Header="Gehalten (gew.)" Binding="{Binding Gehalten}" Width="100"/>
+                            <DataGridTextColumn Header="Saldo" Binding="{Binding Saldo}" Width="70"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+        </TabControl>
+
+        <DockPanel Grid.Row="1" Margin="0,8,0,0" LastChildFill="False">
+            <Button DockPanel.Dock="Right" x:Name="BtnSchliessen" Content="Schließen" Width="120"
+                    IsCancel="True" Click="BtnSchliessen_Click"/>
+        </DockPanel>
+    </Grid>
+</Window>

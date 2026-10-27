@@ -1,0 +1,32 @@
+{
+  "Bundesland": "NRW",
+  "_quelle": "Ministerium für Schule und Bildung NRW (BASS 12-65 Nr. 3), bass.schule.nrw/191.htm",
+  "_hinweis": "Ferientermine amtlich. Die drei beweglichen Ferientage je Schuljahr legt jede Schule selbst fest und sind hier NICHT enthalten - bitte im Kalender-Dialog manuell ergaenzen. Sommerferien sind jeweils die das Schuljahr ABSCHLIESSENDEN Ferien.",
+  "Schuljahre": {
+    "2026/27": [
+      { "Name": "Herbstferien",     "Von": "2026-10-17", "Bis": "2026-10-31" },
+      { "Name": "Weihnachtsferien", "Von": "2026-12-23", "Bis": "2027-01-06" },
+      { "Name": "Osterferien",      "Von": "2027-03-22", "Bis": "2027-04-03" },
+      { "Name": "Pfingstferien",    "Von": "2027-05-18", "Bis": "2027-05-18" },
+      { "Name": "Sommerferien",     "Von": "2027-07-19", "Bis": "2027-08-31" }
+    ],
+    "2027/28": [
+      { "Name": "Herbstferien",     "Von": "2027-10-23", "Bis": "2027-11-06" },
+      { "Name": "Weihnachtsferien", "Von": "2027-12-24", "Bis": "2028-01-08" },
+      { "Name": "Osterferien",      "Von": "2028-04-10", "Bis": "2028-04-22" },
+      { "Name": "Sommerferien",     "Von": "2028-07-10", "Bis": "2028-08-22" }
+    ],
+    "2028/29": [
+      { "Name": "Herbstferien",     "Von": "2028-10-23", "Bis": "2028-11-04" },
+      { "Name": "Weihnachtsferien", "Von": "2028-12-21", "Bis": "2029-01-05" },
+      { "Name": "Osterferien",      "Von": "2029-03-26", "Bis": "2029-04-07" },
+      { "Name": "Pfingstferien",    "Von": "2029-05-22", "Bis": "2029-05-22" },
+      { "Name": "Sommerferien",     "Von": "2029-07-02", "Bis": "2029-08-14" }
+    ],
+    "2029/30": [
+      { "Name": "Herbstferien",     "Von": "2029-10-15", "Bis": "2029-10-27" },
+      { "Name": "Weihnachtsferien", "Von": "2029-12-20", "Bis": "2030-01-04" },
+      { "Name": "Osterferien",      "Von": "2030-04-15", "Bis": "2030-04-27" }
+    ]
+  }
+}

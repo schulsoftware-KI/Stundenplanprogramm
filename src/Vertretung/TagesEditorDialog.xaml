@@ -1,0 +1,120 @@
+<Window x:Class="Stundenplan_V2.Vertretung.TagesEditorDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Vertretungs-Wocheneditor"
+        Width="1280" Height="800"
+        MinWidth="900" MinHeight="560"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResizeWithGrip">
+
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Toolbar -->
+        <WrapPanel Grid.Row="0" Margin="0,0,0,8">
+            <TextBlock Text="Woche um:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+            <Button x:Name="BtnWocheZurueck" Content="◀" Width="30" Padding="0,2" Click="BtnWocheZurueck_Click"/>
+            <DatePicker x:Name="DpTag" Width="140" VerticalAlignment="Center" Margin="2,0,2,0"
+                        SelectedDateChanged="DpTag_Changed"/>
+            <Button x:Name="BtnWocheVor" Content="▶" Width="30" Padding="0,2" Margin="0,0,10,0" Click="BtnWocheVor_Click"/>
+            <CheckBox x:Name="ChkZweiWochen" Content="2 Wochen" VerticalAlignment="Center" Margin="0,0,16,0"
+                      Checked="ZweiWochen_Changed" Unchecked="ZweiWochen_Changed"/>
+
+            <TextBlock Text="Lehrkraft:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+            <Button x:Name="BtnLehrerZurueck" Content="◀" Width="28" Padding="0,2" Click="BtnLehrerZurueck_Click"/>
+            <ComboBox x:Name="CbLehrer" Width="100" VerticalAlignment="Center" Margin="2,0,2,0"
+                      SelectionChanged="Auswahl_Changed"/>
+            <Button x:Name="BtnLehrerVor" Content="▶" Width="28" Padding="0,2" Margin="0,0,14,0" Click="BtnLehrerVor_Click"/>
+
+            <TextBlock Text="Klasse:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+            <Button x:Name="BtnKlasseZurueck" Content="◀" Width="28" Padding="0,2" Click="BtnKlasseZurueck_Click"/>
+            <ComboBox x:Name="CbKlasse" Width="100" VerticalAlignment="Center" Margin="2,0,2,0"
+                      SelectionChanged="Auswahl_Changed"/>
+            <Button x:Name="BtnKlasseVor" Content="▶" Width="28" Padding="0,2" Margin="0,0,14,0" Click="BtnKlasseVor_Click"/>
+
+            <TextBlock Text="Plan:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+            <ComboBox x:Name="CbPlan" Width="110" VerticalAlignment="Center" Margin="0,0,14,0"
+                      SelectionChanged="Auswahl_Changed"/>
+
+            <TextBlock Text="Grund:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+            <ComboBox x:Name="CbGrund" Width="120" VerticalAlignment="Center" Margin="0,0,14,0"/>
+
+            <Button x:Name="BtnLehrerAbwesend" Content="Lehrer am Bezugstag abwesend" Padding="10,3"
+                    Margin="0,0,8,0" Click="BtnLehrerAbwesend_Click"/>
+            <Button x:Name="BtnAktualisieren" Content="Aktualisieren" Padding="10,3" Click="BtnAktualisieren_Click"/>
+
+            <Button x:Name="BtnOnlinePush" Content="Online veröffentlichen" Padding="10,3"
+                    Margin="16,0,6,0" Click="BtnOnlinePush_Click"/>
+            <Button x:Name="BtnOnlineEinst" Content="Online-Einstellungen…" Padding="10,3"
+                    Click="BtnOnlineEinst_Click"/>
+        </WrapPanel>
+
+        <!-- Legende -->
+        <WrapPanel Grid.Row="1" Margin="0,0,0,8">
+            <TextBlock Text="Legende:" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="DimGray"/>
+            <Border Background="#C8E6C9" Padding="6,1" Margin="0,0,6,0"><TextBlock Text="Vertretung"/></Border>
+            <Border Background="#FFCDD2" Padding="6,1" Margin="0,0,6,0"><TextBlock Text="Entfall"/></Border>
+            <Border Background="#FFE0B2" Padding="6,1" Margin="0,0,6,0"><TextBlock Text="Verlegung"/></Border>
+            <Border Background="#BBDEFB" Padding="6,1" Margin="0,0,6,0"><TextBlock Text="Betreuung/EVA"/></Border>
+            <Border Background="#FFF9C4" Padding="6,1" Margin="0,0,6,0"><TextBlock Text="Raumvertretung"/></Border>
+            <TextBlock Text="  ·  Klick = Aktionen; eine Klassenstunde auf eine freie Stunde ziehen = Verlegung."
+                       VerticalAlignment="Center" Foreground="DimGray"/>
+            <TextBlock x:Name="TxtInfo" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="DimGray"/>
+        </WrapPanel>
+
+        <!-- 2×2-Anordnung: Spalten = Lehrer/Klasse, Zeilen = Woche 1 / Woche 2.
+             Die zweite Zeile (Woche 2) wird nur bei „2 Wochen" eingeblendet. -->
+        <Grid Grid.Row="2">
+            <Grid.RowDefinitions>
+                <RowDefinition x:Name="RowW1" Height="*"/>
+                <RowDefinition x:Name="RowW2" Height="0"/>
+            </Grid.RowDefinitions>
+
+            <!-- Woche 1 -->
+            <Grid Grid.Row="0" Margin="0,0,0,3">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0" BorderBrush="#CCC" BorderThickness="1" Margin="0,0,3,0">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="HostLehrerW1" Margin="6"/>
+                    </ScrollViewer>
+                </Border>
+                <Border Grid.Column="1" BorderBrush="#CCC" BorderThickness="1" Margin="3,0,0,0">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="HostKlasseW1" Margin="6"/>
+                    </ScrollViewer>
+                </Border>
+            </Grid>
+
+            <!-- Woche 2 -->
+            <Grid Grid.Row="1" x:Name="ContW2" Margin="0,3,0,0" Visibility="Collapsed">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0" BorderBrush="#CCC" BorderThickness="1" Margin="0,0,3,0">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="HostLehrerW2" Margin="6"/>
+                    </ScrollViewer>
+                </Border>
+                <Border Grid.Column="1" BorderBrush="#CCC" BorderThickness="1" Margin="3,0,0,0">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="HostKlasseW2" Margin="6"/>
+                    </ScrollViewer>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <DockPanel Grid.Row="3" Margin="0,8,0,0" LastChildFill="False">
+            <Button DockPanel.Dock="Right" x:Name="BtnSchliessen" Content="Schließen" Width="120"
+                    IsCancel="True" Click="BtnSchliessen_Click"/>
+        </DockPanel>
+    </Grid>
+</Window>

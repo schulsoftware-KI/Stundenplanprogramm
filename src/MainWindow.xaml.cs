@@ -118,6 +118,11 @@ namespace Stundenplan_V2
                 _ausgabeFenster = new AusgabeFenster(excelPfad) { Owner = this };
                 _ausgabeFenster.Closed += (s, e) => _ausgabeFenster = null;
 
+                // "Leeren" im Ausgabefenster leert auch TxtLog. Sonst bliebe TxtLog
+                // voll und SetzeInhalt(TxtLog.Text) holte beim nächsten Öffnen den
+                // geleerten Inhalt zurück.
+                _ausgabeFenster.LeerenGeklickt += () => TxtLog.Clear();
+
                 // Rechts neben dem Hauptfenster platzieren; sonst links; sonst versetzt.
                 var wa = SystemParameters.WorkArea;
                 double rechtsX = Left + Width + 8;
@@ -143,6 +148,11 @@ namespace Stundenplan_V2
                         _ausgabeFenster.MinHeight, wa.Bottom - _ausgabeFenster.Top - 8);
 
                 _ausgabeFenster.Show();
+
+                // Nur beim NEUEN Öffnen den bisherigen Log-Inhalt übernehmen. Ein schon
+                // offenes Fenster ist über Log()/Clear() ohnehin synchron; ein erneutes
+                // SetzeInhalt würde dort nur die Ursachensuche-Hervorhebung zerstören.
+                _ausgabeFenster.SetzeInhalt(TxtLog.Text);
             }
             else
             {
@@ -150,9 +160,6 @@ namespace Stundenplan_V2
                     _ausgabeFenster.WindowState = WindowState.Normal;
                 _ausgabeFenster.Activate();
             }
-
-            // Aktuellen Log-Inhalt übernehmen, damit im Fenster nichts fehlt.
-            _ausgabeFenster.SetzeInhalt(TxtLog.Text);
         }
 
         // =====================================================
@@ -505,95 +512,8 @@ namespace Stundenplan_V2
             }
         }
 
-        // =====================================================
-        // BUTTON 3 – GPU001.TXT IN SHEET "PLAN" IMPORTIEREN (UNr-Plan importieren)
-        // Importiert die Datei ins Sheet "Plan" und trägt den importierten
-        // Plan anschließend automatisch als Lösung "Plan" in die Lösungen-,
-        // Rank- und Diagnose-Tabellen ein (wie Button 4 – UNr-Plan bewerten).
-        // Liest eine aus Untis exportierte GPU001.TXT (Stundenplan-Zeitraster)
-        // und überträgt die enthaltenen UNr/Tag/Stunde-Zuordnungen direkt ins
-        // Sheet "Plan". Das Sheet "Plan" wird dabei komplett überschrieben —
-        // nach Bestätigung durch den Nutzer.
-        // =====================================================
-        private void BtnPlanImportieren_Click(object sender, RoutedEventArgs e)
-        {
-            if (string.IsNullOrEmpty(excelPfad))
-            {
-                MessageBox.Show("Bitte zuerst Excel-Datei laden (Button 1).");
-                return;
-            }
-
-            var dlgOpen = new Microsoft.Win32.OpenFileDialog
-            {
-                Filter = "Untis GPU001 (*.txt)|*.txt",
-                Title = "GPU001.TXT zum Import in Sheet 'Plan' wählen"
-            };
-            if (dlgOpen.ShowDialog() != true) return;
-
-            var bestaetigung = MessageBox.Show(
-                $"Die Datei\n{dlgOpen.FileName}\n\nwird ins Sheet 'Plan' importiert. " +
-                "Der bisherige Inhalt von 'Plan' wird dabei VOLLSTÄNDIG ÜBERSCHRIEBEN. Fortfahren?",
-                "Import bestätigen", MessageBoxButton.YesNo, MessageBoxImage.Warning);
-            if (bestaetigung != MessageBoxResult.Yes) return;
-
-            try
-            {
-                int anzahl = GpuImportExport.ImportiereGpu001NachPlan(excelPfad, dlgOpen.FileName);
-                Log($"[Diag] Schritt 1/4: Sheet 'Plan' mit {anzahl} Zeitraster-Zeile(n) aus '{dlgOpen.FileName}' neu geschrieben (vollständiges Raster inkl. freier Slots, Sheet vorher geleert).");
-
-                LadeExcelDatenNeu(zeigeWarnungen: false);
-                Log($"[Diag] Schritt 2/4: Excel neu eingelesen. Blocks={input?.Blocks?.Count ?? -1}, " +
-                    $"Slots={input?.Slots?.Count ?? -1}, letzteSolutions vor Bewertung: " +
-                    $"[{string.Join(", ", letzteSolutions.Select(s => s.label))}]");
-
-                // Importierten Plan sofort als Lösung "Plan" bewerten und in
-                // Lösungen/Rank/Diagnose eintragen (dieselbe Logik wie Button 4).
-                BtnUnrPlan_Click(null, null);
-
-                Log($"[Diag] Schritt 3/4: Nach Bewertung — letzteSolutions: " +
-                    $"[{string.Join(", ", letzteSolutions.Select(s => s.label))}]");
-
-                // Direkte, unabhängige Kontrolle: Was steht WIRKLICH auf der Platte
-                // in "Lös" (frisches Öffnen der Datei, ohne jegliches Caching)?
-                try
-                {
-                    using var kontrollWb = new ClosedXML.Excel.XLWorkbook(excelPfad);
-                    if (kontrollWb.Worksheets.Any(ws => ws.Name == "Lös"))
-                    {
-                        var kontrollSheet = kontrollWb.Worksheet("Lös");
-                        var headerZellen = new List<string>();
-                        int maxCol = kontrollSheet.Row(1).LastCellUsed()?.Address.ColumnNumber ?? 2;
-                        for (int c = 3; c <= maxCol; c++)
-                        {
-                            string h = kontrollSheet.Cell(1, c).GetString().Trim();
-                            if (!string.IsNullOrEmpty(h)) headerZellen.Add(h);
-                        }
-                        Log($"[Diag] Schritt 4/4: Kontroll-Lesung 'Lös' DIREKT VON DER PLATTE — " +
-                            $"Spaltenköpfe ab Spalte C: [{string.Join(", ", headerZellen)}]");
-                    }
-                    else
-                    {
-                        Log("[Diag] Schritt 4/4: Sheet 'Lös' existiert laut Kontroll-Lesung NICHT in der Datei!");
-                    }
-                }
-                catch (Exception diagEx)
-                {
-                    Log($"[Diag] Schritt 4/4 fehlgeschlagen: {diagEx.Message}");
-                }
-
-                TxtStatus.Text = $"{anzahl} Slot(s) aus GPU001.TXT importiert und als Lösung 'Plan' eingetragen.";
-                MessageBox.Show($"{anzahl} Slot(s) wurden ins Sheet 'Plan' importiert " +
-                    "und automatisch als Lösung 'Plan' in die Lösungen-Tabelle eingetragen.\n\n" +
-                    "Die Excel-Datei wurde automatisch neu eingelesen.\n\n" +
-                    "Details zum Ablauf stehen jetzt im Log-Fenster (Zeilen mit '[Diag]').",
-                    "Import fertig", MessageBoxButton.OK, MessageBoxImage.Information);
-            }
-            catch (Exception ex)
-            {
-                Log($"[Diag] AUSNAHME in BtnPlanImportieren_Click: {ex.Message}\n{ex.StackTrace}");
-                MessageBox.Show("Fehler beim Import: " + ex.Message);
-            }
-        }
+        // BUTTON 3 – PLAN IMPORTIEREN: BtnPlanImportieren_Click steht in
+        // MainWindow_PlanImport.cs (inkl. optionalem Neuaufbau von "Fix UNrn").
 
         // =====================================================
         // BUTTON 9 – PM-PARAMETER BEARBEITEN
@@ -647,6 +567,132 @@ namespace Stundenplan_V2
             dialog.ShowDialog();
         }
 
+        // Referenzen auf die beiden modeless Vertretungsfenster, damit Button 23/24
+        // sie wiederverwenden, statt sie mehrfach zu öffnen.
+        private Stundenplan_V2.Vertretung.VertretungsDialog? _vertretungsFenster;
+        private Stundenplan_V2.Vertretung.TagesEditorDialog? _tagesEditorFenster;
+
+        // =====================================================
+        // VERTRETUNG: SCHULJAHRESKALENDER (Ferien/Feiertage/freie Tage)
+        // Öffnet den Kalender-Dialog des Vertretungsmoduls. Arbeitet NICHT auf
+        // der Plandatei, sondern auf einer eigenen Datei
+        // "Vertretung_<Schuljahr>.xlsx" neben der Plandatei. Deshalb gibt es hier
+        // auch keinen Neulade-Callback für die Excel-Plandaten.
+        // =====================================================
+        private void BtnKalender_Click(object sender, RoutedEventArgs e)
+        {
+            if (string.IsNullOrEmpty(excelPfad))
+            {
+                MessageBox.Show("Bitte zuerst Excel-Datei laden (Button 1).");
+                return;
+            }
+
+            var dialog = new Stundenplan_V2.Vertretung.KalenderDialog(excelPfad, s => Log(s))
+            { Owner = this };
+            dialog.ShowDialog();
+        }
+        // =====================================================
+        // VERTRETUNG ERFASSEN (Button 23) – öffnet BEIDE Fenster, Fokus auf „erfassen".
+        // =====================================================
+        private void BtnVertretung_Click(object sender, RoutedEventArgs e)
+            => OeffneVertretungsFenster(fokusEditor: false);
+
+        // =====================================================
+        // TAGES-VERTRETUNGSEDITOR (Button 24) – öffnet BEIDE Fenster, Fokus auf Editor.
+        // =====================================================
+        private void BtnTagesEditor_Click(object sender, RoutedEventArgs e)
+            => OeffneVertretungsFenster(fokusEditor: true);
+
+        // =====================================================
+        // Öffnet „Vertretung erfassen" (links) und „Tagesvertretungseditor" (rechts)
+        // gleichzeitig und nebeneinander. Schon offene Fenster werden wiederverwendet.
+        // fokusEditor steuert nur, welches der beiden am Ende in den Vordergrund kommt.
+        // =====================================================
+        private void OeffneVertretungsFenster(bool fokusEditor)
+        {
+            if (string.IsNullOrEmpty(excelPfad))
+            {
+                MessageBox.Show("Bitte zuerst Excel-Datei laden (Button 1).");
+                return;
+            }
+
+            // --- Vertretung erfassen (wird links angeordnet) ---
+            if (_vertretungsFenster == null)
+            {
+                _vertretungsFenster = new Stundenplan_V2.Vertretung.VertretungsDialog(excelPfad, s => Log(s))
+                {
+                    Owner = this,
+                    WindowStartupLocation = WindowStartupLocation.Manual
+                };
+                _vertretungsFenster.Closed += (_, __) =>
+                {
+                    _vertretungsFenster = null;
+                    if (_tagesEditorFenster != null) _tagesEditorFenster.Partner = null;
+                };
+                _vertretungsFenster.Show();
+            }
+
+            // --- Tagesvertretungseditor (wird rechts angeordnet) ---
+            if (_tagesEditorFenster == null)
+            {
+                _tagesEditorFenster = new Stundenplan_V2.Vertretung.TagesEditorDialog(excelPfad, s => Log(s))
+                {
+                    Owner = this,
+                    WindowStartupLocation = WindowStartupLocation.Manual
+                };
+                _tagesEditorFenster.Closed += (_, __) =>
+                {
+                    _tagesEditorFenster = null;
+                    if (_vertretungsFenster != null) _vertretungsFenster.Partner = null;
+                };
+                _tagesEditorFenster.Show();
+            }
+
+            // Beide Fenster gegenseitig koppeln (Auswahl-Sync + Daten-Neuladen).
+            if (_vertretungsFenster != null && _tagesEditorFenster != null)
+            {
+                _vertretungsFenster.Partner = _tagesEditorFenster;
+                _tagesEditorFenster.Partner = _vertretungsFenster;
+            }
+
+            OrdneFensterNebeneinander();
+
+            // Das vom gedrückten Button gewünschte Fenster nach vorn holen.
+            Window? ziel = fokusEditor ? _tagesEditorFenster : (Window?)_vertretungsFenster;
+            if (ziel != null)
+            {
+                if (ziel.WindowState == WindowState.Minimized) ziel.WindowState = WindowState.Normal;
+                ziel.Activate();
+            }
+        }
+
+        // Legt die beiden Fenster links/rechts auf den Arbeitsbereich. Passen sie in
+        // Originalbreite nicht nebeneinander, werden sie proportional verkleinert.
+        private void OrdneFensterNebeneinander()
+        {
+            if (_vertretungsFenster == null || _tagesEditorFenster == null) return;
+
+            var wa = SystemParameters.WorkArea;
+            const double luecke = 8;
+
+            double bV = _vertretungsFenster.Width;
+            double bE = _tagesEditorFenster.Width;
+            if (bV + bE + luecke > wa.Width)
+            {
+                double faktor = (wa.Width - luecke) / (bV + bE);
+                bV *= faktor; bE *= faktor;
+                _vertretungsFenster.Width = bV;
+                _tagesEditorFenster.Width = bE;
+            }
+
+            if (_vertretungsFenster.Height > wa.Height) _vertretungsFenster.Height = wa.Height;
+            if (_tagesEditorFenster.Height > wa.Height) _tagesEditorFenster.Height = wa.Height;
+
+            _vertretungsFenster.Left = wa.Left;
+            _vertretungsFenster.Top  = wa.Top;
+            _tagesEditorFenster.Left = wa.Left + bV + luecke;
+            _tagesEditorFenster.Top  = wa.Top;
+        }
         // =====================================================
         // EXCEL-DATEN NEU EINLESEN
         // Baut 'input' (UV/PM/StD/FT/Slots/...) sowie 'letzteSolutions'
@@ -3851,6 +3897,15 @@ namespace Stundenplan_V2
                         ausgangsplanMapped[newB, s] = ausgangsLösung.belegung[oldB, s];
                 }
 
+                // Tauschlösung als Ausgangsplan? Button 11 rechnet mit den Lehrern
+                // aus der UV (input.Blocks), nicht mit den getauschten Lehrern der
+                // Lösung. Der Startplan passt dann meist nicht zu den harten Regeln
+                // (Lehrerkonflikte, Sperren) -> deutlich warnen.
+                if (HatLehrerAbweichung(input.Blocks, ausgangsLösung.blocks))
+                    Log($"⚠ Die Ausgangslösung '{dialog.GewählterAusgangsLabel}' enthält getauschte Lehrer " +
+                        "(Tauschlösung). „Minimale Änderungen“ rechnet mit den Lehrern aus der UV – der Startplan ist " +
+                        "dann meist nicht zulässig. Erst den Tausch in die UV übernehmen (Lösung sichern).");
+
                 var ergebnisse = StundenplanEngine.PlanenMitStabilitaet(
                     excelPfad,
                     input.Blocks,
@@ -3896,7 +3951,8 @@ namespace Stundenplan_V2
                     schwelleStdTagVortag: input.SchwelleStdTagVortag,
                     lehrerSpätFrühMinus2: input.LehrerSpätFrühMinus2,
                     lehrerSpätFrühMinus3: input.LehrerSpätFrühMinus3,
-                    klassenGruppen: input.KlassenGruppen);
+                    klassenGruppen: input.KlassenGruppen,
+                    fixRelaxBeiFixInfeasible: input.FixRelaxBeiFixInfeasible);
 
                 statusFenster.Close();
 

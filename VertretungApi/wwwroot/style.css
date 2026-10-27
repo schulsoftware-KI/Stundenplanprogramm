@@ -1,0 +1,140 @@
+:root {
+  --bg: #f4f6f9;
+  --karte: #ffffff;
+  --text: #1c2430;
+  --dim: #6b7682;
+  --rand: #e2e7ee;
+  --kopf: #2f5d8a;
+
+  --vertretung: #2e9e5b;
+  --entfall: #d64545;
+  --verlegung: #e08a00;
+  --betreuung: #2f74c0;
+  --raum: #c9a800;
+  --normal: #9aa4b0;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-text-size-adjust: 100%;
+}
+
+.topbar {
+  background: var(--kopf);
+  color: #fff;
+  padding: 14px 16px calc(14px + env(safe-area-inset-bottom, 0)) 16px;
+  padding-top: calc(14px + env(safe-area-inset-top, 0));
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.topbar h1 { font-size: 1.15rem; margin: 0; font-weight: 650; }
+.topbar .sub { font-size: .8rem; opacity: .85; }
+
+main { max-width: 680px; margin: 0 auto; padding: 16px; }
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+  margin-bottom: 14px;
+}
+.feld { display: flex; flex-direction: column; gap: 4px; flex: 1 1 120px; }
+.feld span { font-size: .72rem; color: var(--dim); text-transform: uppercase; letter-spacing: .03em; }
+
+input[type="text"], input[type="date"] {
+  font-size: 1rem;
+  padding: 9px 10px;
+  border: 1px solid var(--rand);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text);
+  width: 100%;
+}
+
+.datumzeile { display: flex; align-items: center; gap: 6px; flex: 2 1 220px; }
+.datumzeile input[type="date"] { flex: 1; }
+
+.pfeil {
+  border: 1px solid var(--rand);
+  background: #fff;
+  border-radius: 10px;
+  width: 42px; height: 42px;
+  font-size: 1rem; cursor: pointer;
+  color: var(--text);
+}
+.pfeil:active { background: #eef2f7; }
+
+.laden {
+  flex: 1 1 100%;
+  border: none;
+  background: var(--kopf);
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 11px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.laden:active { opacity: .9; }
+
+.status { color: var(--dim); font-size: .9rem; min-height: 1.1em; margin: 6px 2px; }
+
+.liste { display: flex; flex-direction: column; gap: 10px; }
+
+.karte {
+  background: var(--karte);
+  border: 1px solid var(--rand);
+  border-left: 6px solid var(--normal);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  gap: 4px 12px;
+  align-items: start;
+}
+.karte.vertretung { border-left-color: var(--vertretung); }
+.karte.entfall    { border-left-color: var(--entfall); }
+.karte.verlegung  { border-left-color: var(--verlegung); }
+.karte.betreuung  { border-left-color: var(--betreuung); }
+.karte.eva        { border-left-color: var(--betreuung); }
+.karte.raumvertretung { border-left-color: var(--raum); }
+
+.stunde { grid-row: 1 / span 3; font-size: 1.5rem; font-weight: 700; color: var(--kopf); text-align: center; }
+.kopf { font-weight: 650; }
+.kopf .entfalltext { text-decoration: line-through; color: var(--entfall); }
+.detail { color: var(--dim); font-size: .88rem; }
+.badge {
+  grid-row: 1; grid-column: 3;
+  font-size: .72rem; font-weight: 700;
+  padding: 3px 8px; border-radius: 999px;
+  color: #fff; background: var(--normal); white-space: nowrap;
+}
+.badge.vertretung { background: var(--vertretung); }
+.badge.entfall    { background: var(--entfall); }
+.badge.verlegung  { background: var(--verlegung); }
+.badge.betreuung, .badge.eva { background: var(--betreuung); }
+.badge.raumvertretung { background: var(--raum); color: #2b2b2b; }
+
+.leer { text-align: center; color: var(--dim); padding: 30px 10px; }
+
+.fuss {
+  max-width: 680px; margin: 0 auto; padding: 8px 16px 24px 16px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.linkbtn { background: none; border: none; color: var(--kopf); font-size: .9rem; cursor: pointer; padding: 6px 0; }
+.stand { color: var(--dim); font-size: .78rem; }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12161c; --karte: #1b2026; --text: #e7ecf2; --dim: #9aa6b2;
+    --rand: #2a313a; --kopf: #3f6fa0;
+  }
+  input[type="text"], input[type="date"], .pfeil { background: #1b2026; }
+}

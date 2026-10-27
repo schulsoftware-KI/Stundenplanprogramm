@@ -528,13 +528,13 @@ namespace Stundenplan_V2
         // zusammengefasst; pro Slot zählt die Gruppe nur EINMAL (Boolean-OR
         // über ihre Mitglieder), nicht pro Mitglied.
         // =====================================================
-        private static List<IntVar> BaueFachKlasseTagVars(
-            CpModel model, BoolVar[,] x, List<UnterrichtsBlock> blocks,
-            IEnumerable<int> blockIndizes, List<int> daySlots, string varPrefix)
+        // Blöcke nach KKK gruppieren — leeres KKK = eigene Einzelgruppe je Block.
+        // Gemeinsame Grundlage für BaueFachKlasseTagVars (Solver) und
+        // ZähleFixOccFachKlasseTag (Fix-Relax), damit beide exakt dieselben
+        // "Vorkommen" zählen.
+        private static List<List<int>> BildeKkkGruppen(
+            List<UnterrichtsBlock> blocks, List<int> indizes)
         {
-            var indizes = blockIndizes.ToList();
-
-            // Blöcke nach KKK gruppieren — leeres KKK = eigene Einzelgruppe je Block.
             var kkkGruppen = new List<List<int>>();
             var vergeben = new HashSet<int>();
             foreach (var b in indizes)
@@ -556,6 +556,31 @@ namespace Stundenplan_V2
                     foreach (var b2 in gruppe) vergeben.Add(b2);
                 }
             }
+            return kkkGruppen;
+        }
+
+        // Fix-Relax: wie viele der in BaueFachKlasseTagVars gezählten Vorkommen
+        // (KKK-Gruppe x Slot) sind an diesem Tag schon allein durch Fixierungen
+        // belegt? Gleiche Gruppierung wie dort.
+        private static int ZähleFixOccFachKlasseTag(
+            List<UnterrichtsBlock> blocks, IEnumerable<int> blockIndizes,
+            List<int> daySlots, bool[,] fixSlot)
+        {
+            int n = 0;
+            foreach (var gruppe in BildeKkkGruppen(blocks, blockIndizes.ToList()))
+                foreach (var s in daySlots)
+                    if (gruppe.Any(b => fixSlot[b, s])) n++;
+            return n;
+        }
+
+        private static List<IntVar> BaueFachKlasseTagVars(
+            CpModel model, BoolVar[,] x, List<UnterrichtsBlock> blocks,
+            IEnumerable<int> blockIndizes, List<int> daySlots, string varPrefix)
+        {
+            var indizes = blockIndizes.ToList();
+
+            // Blöcke nach KKK gruppieren — leeres KKK = eigene Einzelgruppe je Block.
+            var kkkGruppen = BildeKkkGruppen(blocks, indizes);
 
             var vars = new List<IntVar>();
             int gIdx = 0;
@@ -3781,11 +3806,11 @@ namespace Stundenplan_V2
             // FIX-RELAX: FixUNrn allein infeasible?
             // Ist der Grundlauf BEWIESEN unlösbar, existieren Fixierungen und
             // ist die Option gesetzt, wird EINMAL erneut gelöst — die
-            // Fixierungen bleiben hart, aber die von IHNEN verursachten harten
-            // Verstöße (Lehrer-/Klassen-/Raum-Kollision zwischen zwei
-            // Fixierungen, gesperrte Slots, überzählige Fixslots) werden
-            // toleriert. Alle übrigen harten Regeln bleiben hart -> es
-            // entstehen keine WEITEREN harten Fehler. Kommt eine Lösung
+            // Fixierungen bleiben hart, aber JEDER harte Verstoß, der
+            // ausschließlich von fixierten Stunden gebildet wird, wird
+            // toleriert (Details: Kopf von PlanenIntern, Parameter fixRelax).
+            // Sobald eine nicht fixierte Stunde beteiligt wäre, bleibt die
+            // Regel hart -> es entstehen keine WEITEREN harten Fehler. Kommt eine Lösung
             // zustande, wird sie verwendet, die Einzel-Diagnose entfällt (da
             // ohneLösungen dann nicht mehr leer ist) und Phase 2 (Tausch) wird
             // übersprungen (der Grundplan trägt bewusst geduldete Konflikte).
@@ -4271,12 +4296,18 @@ namespace Stundenplan_V2
             System.Threading.CancellationToken abbruch = default,
             LiveExportState liveState = null,
             Func<bool> darfDiagnose = null,
-            // Fix-Relax: Fixierungen bleiben hart, aber die von IHNEN
-            // verursachten harten Verstöße werden geduldet (Lehrer-/Klassen-/
-            // Raum-Kollision zwischen zwei Fixierungen, gesperrte Slots,
-            // überzählige Fixslots, fixierte Doppelstd. über Pause / 3 in
-            // Folge). Alle übrigen harten Regeln bleiben hart. false =
-            // unverändertes Verhalten.
+            // Fix-Relax: Fixierungen bleiben hart, aber JEDE harte Regel wird
+            // dort gelockert, wo der Verstoß ausschließlich von fixierten
+            // Stunden gebildet wird:
+            //   Lehrer-/Klassen-/Raum-Kollision zwischen Fixierungen,
+            //   gesperrte Slots (-3 / -2 mit Verbot), überzählige Fixslots,
+            //   Doppelstd. über große Pause, 3 in Folge, Tagesregel,
+            //   Fach pro Klasse pro Tag, Doppelstd.-Maximum, freie Tage und
+            //   freie Stunden (Band), Spät-Früh (-3), harte StD-Regeln
+            //   (Hohlmax Woche, Doppel-/Dreifachhohl, Std./Tag, Std.Folge).
+            // (Verbot später Doppelstd. und Verbot Bad units nehmen fixierte
+            // Stunden ohnehin immer aus.) Ist eine nicht fixierte Stunde
+            // beteiligt, bleibt die Regel hart. false = unverändertes Verhalten.
             bool fixRelax = false,
             // Ursachensuche vorerst zurückstellen: bei Infeasible NUR die Basis-
             // und die erweiterte FixUNr-Prüfung ausgeben und dann sofort
@@ -4290,7 +4321,11 @@ namespace Stundenplan_V2
             // platzierbare UNr werden komplett fallengelassen (alle x=0).
             bool teilplanModus = false,
             // Absoluter Wochenstunden-Gap für Phase A (0 = exakt).
-            int teilplanGapWst = 0)
+            int teilplanGapWst = 0,
+            // Vorabprüfung (Button 11): gesetzt => KEIN Optimierungslauf, sondern
+            // nur prüfen, ob der Ausgangsplan im fertigen Modell zulässig ist;
+            // das Ergebnis landet in diesem Objekt. null = normales Verhalten.
+            StartplanPruefErgebnis startplanPrüfung = null)
         {
             // Standard: nicht bewiesen unlösbar. Wird nur im Infeasible-Zweig auf
             // true gesetzt (Timeout/Unknown bleibt false).
@@ -4299,6 +4334,67 @@ namespace Stundenplan_V2
             var model = new CpModel();
             int B = blocks.Count;
             int S = slots.Count;
+
+            // =====================================================
+            // FIX-RELAX-INFOS: fixSlot[b,s] / fixSlotAnzahl[b]
+            // fixSlot[b,s] == true  <=>  Block b ist per FixUNrn in Slot s
+            // vorgegeben. Wird auch im Normalmodus gebaut (billig) und dort nur
+            // zum Setzen der Fix-Constraints benutzt; die Relax-Zweige unten
+            // greifen ausschließlich, wenn fixRelax == true.
+            // Steht bewusst VOR den freien Tagen/Stunden, weil auch deren
+            // Lockerung die Fixierungen kennen muss.
+            //
+            // GRUNDSATZ FIX-RELAX: Jede harte Regel wird nur dort gelockert,
+            // wo der Verstoß AUSSCHLIESSLICH von fixierten Stunden gebildet
+            // wird. Sobald eine nicht fixierte Stunde beteiligt wäre, bleibt
+            // die Regel hart. Es entstehen also keine zusätzlichen Fehler.
+            // =====================================================
+            bool[,] fixSlot = new bool[B, S];
+            for (int s = 0; s < S; s++)
+                foreach (var unr in slots[s].FixUNrn)
+                    for (int b = 0; b < B; b++)
+                        if (blocks[b].UNr == unr)
+                            fixSlot[b, s] = true;
+
+            int[] fixSlotAnzahl = new int[B];
+            for (int b = 0; b < B; b++)
+                for (int s = 0; s < S; s++)
+                    if (fixSlot[b, s]) fixSlotAnzahl[b]++;
+
+            // Lehrer -> Slots, in denen er eine FIXIERTE Stunde hat.
+            var lehrerFixSlots = new Dictionary<string, HashSet<int>>();
+            for (int b = 0; b < B; b++)
+                for (int s = 0; s < S; s++)
+                {
+                    if (!fixSlot[b, s]) continue;
+                    foreach (var lName in blocks[b].Teile.Select(t => t.Lehrer).Distinct())
+                    {
+                        if (!lehrerFixSlots.TryGetValue(lName, out var set))
+                            lehrerFixSlots[lName] = set = new HashSet<int>();
+                        set.Add(s);
+                    }
+                }
+            bool LehrerFix(string lName, int s) =>
+                fixRelax && lehrerFixSlots.TryGetValue(lName, out var lfSet) && lfSet.Contains(s);
+
+            // Zählt die zusätzlichen Fix-Relax-Lockerungen je Regel (Log-Zeile am Ende).
+            var fixRelaxLockerungen = new Dictionary<string, int>();
+            void Gelockert(string regel) =>
+                fixRelaxLockerungen[regel] =
+                    (fixRelaxLockerungen.TryGetValue(regel, out int glAnz) ? glAnz : 0) + 1;
+
+            // Senkt einen harten Mindestwert nur um den Teil, den die
+            // Fixierungen unerreichbar machen:
+            //   maxOhneFix = höchstens erreichbar, wenn es keine Fixierungen gäbe
+            //   maxMitFix  = höchstens erreichbar mit den Fixierungen
+            // Ist die Forderung schon ohne Fixierungen unerfüllbar, bleibt dieser
+            // (nicht fixierungsbedingte) Teil bestehen.
+            int RelaxZiel(int wunsch, int maxOhneFix, int maxMitFix)
+            {
+                if (wunsch <= maxMitFix) return wunsch;
+                int verlust = Math.Max(0, maxOhneFix - maxMitFix);
+                return Math.Max(maxMitFix, wunsch - verlust);
+            }
 
             // =====================================================
             // FREIE TAGE
@@ -4320,6 +4416,20 @@ namespace Stundenplan_V2
                 for (int day = 0; day < tageListe.Count; day++)
                     free[l, day] = model.NewBoolVar($"free_{l}_{day}");
 
+            // Tag komplett per ZWL (-3) gesperrt -> zählt nie als freier Tag (s. u.).
+            bool IstFixFreiTag(string lName, string tag) => slots
+                .Where(s => s.WTag == tag)
+                .All(s => s.LehrerWunsch.TryGetValue(lName, out int lw) && lw == -3);
+            // Liegt eine fixierte Stunde des Lehrers an diesem Tag?
+            bool HatFixAmTag(string lName, string tag) =>
+                Enumerable.Range(0, S).Any(s => slots[s].WTag == tag && LehrerFix(lName, s));
+
+            // Harte Freie-Tage-Forderung je Lehrer: Original und (ggf.
+            // fixierungsbedingt gesenktes) tatsächliches Ziel. Wird unten von den
+            // freien Stunden (Band) für die Kopplung free + freeBand <= 1 gebraucht.
+            var freiTageWunschHart = new Dictionary<string, int>();
+            var freiTageZielHart = new Dictionary<string, int>();
+
             for (int l = 0; l < lehrerListe.Count; l++)
             {
                 string name = lehrerListe[l];
@@ -4336,9 +4446,28 @@ namespace Stundenplan_V2
                 //   unmarkiert                 -> kommt gar nicht in extraFreieTage (ignoriert)
                 if (hatMinus3 || (hatMinus2 && verbotMinus2Lehrer))
                 {
+                    // Fix-Relax: Tage mit fixierter Stunde können nicht frei
+                    // sein. Fehlen dadurch freie Tage, wird die Forderung genau
+                    // um diese fixierungsbedingten Tage gesenkt.
+                    int ziel = gewünschteFreieTage;
+                    if (fixRelax)
+                    {
+                        int ohneFix = tageListe.Count(tag => !IstFixFreiTag(name, tag));
+                        int mitFix  = tageListe.Count(tag => !IstFixFreiTag(name, tag) && !HatFixAmTag(name, tag));
+                        ziel = RelaxZiel(gewünschteFreieTage, ohneFix, mitFix);
+                        if (ziel < gewünschteFreieTage)
+                        {
+                            Gelockert("freie Tage");
+                            log?.Invoke($"  Fix-Relax: {name} – freie Tage {gewünschteFreieTage} → {ziel} " +
+                                        "(fixierte Stunden belegen die übrigen Tage).");
+                        }
+                    }
+                    freiTageWunschHart[name] = gewünschteFreieTage;
+                    freiTageZielHart[name] = ziel;
+
                     model.Add(LinearExpr.Sum(
                         Enumerable.Range(0, tageListe.Count).Select(day => free[l, day])
-                    ) >= gewünschteFreieTage);
+                    ) >= ziel);
                 }
                 // Soft (hatMinus2 && !verbotMinus2Lehrer): Penalty-Vars werden weiter unten erzeugt
             }
@@ -4384,9 +4513,51 @@ namespace Stundenplan_V2
                     // -3 bzw. -2 mit Verbot -> hart (>= N); -2 ohne Verbot -> Strafe (unten).
                     if (hatMinus3 || (hatMinus2 && verbotMinus2Lehrer))
                     {
+                        // Fix-Relax: ein Band-Tag ist unmöglich, wenn im Band eine
+                        // fixierte Stunde des Lehrers liegt. Die Forderung wird nur
+                        // um diesen fixierungsbedingten Verlust gesenkt – inkl. der
+                        // Kopplung an die freien Tage (ein Tag ist nie beides).
+                        int ziel = gewünschteBandTage;
+                        if (fixRelax)
+                        {
+                            bool BandExistiertUndFrei(string tag)
+                            {
+                                var bs = slots.Where(s => s.WTag == tag &&
+                                    s.Stunde >= bereich.von && s.Stunde <= bereich.bis).ToList();
+                                return bs.Count > 0 && !bs.Any(s =>
+                                    s.LehrerWunsch.TryGetValue(name, out int lw) && lw == -3);
+                            }
+                            bool BandOhneFix(string tag) =>
+                                !Enumerable.Range(0, S).Any(s => slots[s].WTag == tag &&
+                                    slots[s].Stunde >= bereich.von && slots[s].Stunde <= bereich.bis &&
+                                    LehrerFix(name, s));
+
+                            int MaxBand(bool beachteFix, int freiTageZiel)
+                            {
+                                var aBand = tageListe.Where(tag => BandExistiertUndFrei(tag) &&
+                                    (!beachteFix || BandOhneFix(tag))).ToList();
+                                var aFrei = tageListe.Where(tag => !IstFixFreiTag(name, tag) &&
+                                    (!beachteFix || !HatFixAmTag(name, tag))).ToList();
+                                int nurFrei = aFrei.Count(tag => !aBand.Contains(tag));
+                                return aBand.Count - Math.Max(0, freiTageZiel - nurFrei);
+                            }
+
+                            int ohneFix = MaxBand(false,
+                                freiTageWunschHart.TryGetValue(name, out int fw) ? fw : 0);
+                            int mitFix = MaxBand(true,
+                                freiTageZielHart.TryGetValue(name, out int fz) ? fz : 0);
+                            ziel = RelaxZiel(gewünschteBandTage, ohneFix, mitFix);
+                            if (ziel < gewünschteBandTage)
+                            {
+                                Gelockert("freie Stunden (Band)");
+                                log?.Invoke($"  Fix-Relax: {name} – freie Band-Tage {gewünschteBandTage} → {ziel} " +
+                                            "(fixierte Stunden liegen im Band).");
+                            }
+                        }
+
                         model.Add(LinearExpr.Sum(
                             Enumerable.Range(0, tageListe.Count).Select(day => freeBand[l, day])
-                        ) >= gewünschteBandTage);
+                        ) >= ziel);
                     }
 
                     // Fix-Sperre / Additivitaet zu ZWL: beruehrt das Band an
@@ -4432,24 +4603,7 @@ namespace Stundenplan_V2
                 for (int s = 0; s < S; s++)
                     x[b, s] = model.NewBoolVar($"x_b{b}_s{s}");
 
-            // =====================================================
-            // FIX-RELAX-INFOS: fixSlot[b,s] / fixSlotAnzahl[b]
-            // fixSlot[b,s] == true  <=>  Block b ist per FixUNrn in Slot s
-            // vorgegeben. Wird auch im Normalmodus gebaut (billig) und dort nur
-            // zum Setzen der Fix-Constraints benutzt; die Relax-Zweige unten
-            // greifen ausschließlich, wenn fixRelax == true.
-            // =====================================================
-            bool[,] fixSlot = new bool[B, S];
-            for (int s = 0; s < S; s++)
-                foreach (var unr in slots[s].FixUNrn)
-                    for (int b = 0; b < B; b++)
-                        if (blocks[b].UNr == unr)
-                            fixSlot[b, s] = true;
-
-            int[] fixSlotAnzahl = new int[B];
-            for (int b = 0; b < B; b++)
-                for (int s = 0; s < S; s++)
-                    if (fixSlot[b, s]) fixSlotAnzahl[b]++;
+            // (fixSlot / fixSlotAnzahl werden bereits am Anfang gebaut.)
 
             // =====================================================
             // TEILPLAN-MODUS: pro UNr eine platziert-Variable.
@@ -4496,6 +4650,10 @@ namespace Stundenplan_V2
             // =====================================================
             // FIX-UNR
             // =====================================================
+            // Vorabprüfung des Startplans: Fixierungen NICHT hart setzen, sondern
+            // später als Annahmen vorlegen — nur so können sie im Konflikt-Kern
+            // auftauchen (siehe Prüfblock vor der Zielfunktion).
+            var fixAnnahmen = new List<(int b, int s)>();
             for (int b = 0; b < B; b++)
                 for (int s = 0; s < S; s++)
                     if (fixSlot[b, s])
@@ -4504,6 +4662,8 @@ namespace Stundenplan_V2
                             // Fix bleibt gesetzt, WENN die UNr platziert wird;
                             // nur bei nachweisbarer Unlösbarkeit fällt sie (=> 0).
                             model.Add(x[b, s] == platziert[blocks[b].UNr]);
+                        else if (startplanPrüfung != null)
+                            fixAnnahmen.Add((b, s));
                         else
                             model.Add(x[b, s] == 1);
                     }
@@ -4639,6 +4799,28 @@ namespace Stundenplan_V2
                 int minD = g.MinDoppel;
                 int maxD = g.MaxDoppel;
 
+                // Fix-Relax: bilden fixierte Stunden allein schon mehr
+                // Doppelstunden als erlaubt, wird das Maximum genau auf diese
+                // Zahl angehoben – weitere (nicht fixierte) Doppelstunden
+                // bleiben verboten.
+                if (fixRelax)
+                {
+                    int fixPaare = 0;
+                    for (int s = 0; s < S - 1; s++)
+                    {
+                        if (g.D[s] is null) continue;
+                        bool aFix = g.SpurA.Any(b => fixSlot[b, s]) && g.SpurA.Any(b => fixSlot[b, s + 1]);
+                        bool bFix = g.HatABTrennung &&
+                                    g.SpurB.Any(b => fixSlot[b, s]) && g.SpurB.Any(b => fixSlot[b, s + 1]);
+                        if (aFix || bFix) fixPaare++;
+                    }
+                    if (fixPaare > maxD)
+                    {
+                        maxD = fixPaare;
+                        Gelockert("Doppelstunden-Maximum");
+                    }
+                }
+
                 var dVars = new List<BoolVar>();
                 for (int s = 0; s < S - 1; s++)
                     if (g.D[s] != null) dVars.Add(g.D[s]);
@@ -4755,6 +4937,17 @@ namespace Stundenplan_V2
                     if (BlockBeliebigOft(blocks[b])) continue; // "beliebig oft am Tag"
                     int maxD = blocks[b].Teile.Max(t => t.MaxDoppel);
                     int limit = (maxD == 0 && blocks[b].Wst >= 2) ? 1 : 2;
+                    // Fix-Relax: mehr fixierte Stunden des Blocks am Tag als
+                    // erlaubt -> genau diese dulden, aber keine weitere.
+                    if (fixRelax)
+                    {
+                        int fixAmTag = daySlots.Count(z => fixSlot[b, z.i]);
+                        if (fixAmTag > limit)
+                        {
+                            limit = fixAmTag;
+                            Gelockert("Tagesregel");
+                        }
+                    }
                     model.Add(LinearExpr.Sum(daySlots.Select(z => x[b, z.i])) <= limit);
                 }
             }
@@ -4822,8 +5015,32 @@ namespace Stundenplan_V2
                         model.Add(hatDoppel == 0);
                     }
 
-                    // Sum(x) <= 1 + hatDoppel
-                    model.Add(LinearExpr.Sum(vars) <= 1 + hatDoppel);
+                    // Fix-Relax: liegen schon fixierte Stunden dieses Fachs in
+                    // der Klasse >= 2-mal am Tag, werden genau diese geduldet
+                    // (Sum(x) <= Fix-Anzahl) – eine zusätzliche, nicht fixierte
+                    // Stunde desselben Fachs bleibt verboten.
+                    int fixOcc = fixRelax
+                        ? ZähleFixOccFachKlasseTag(blocks, kv.Value, daySlots, fixSlot)
+                        : 0;
+                    if (fixOcc >= 2)
+                    {
+                        model.Add(LinearExpr.Sum(vars) <= fixOcc);
+
+                        // Nur als Lockerung zählen, wenn die fixierten Stunden
+                        // nicht ohnehin eine erlaubte Doppelstunde bilden.
+                        bool fixDoppel = gFpkt != null && daySlots.Any(s =>
+                            s + 1 < S && daySlotsSet.Contains(s + 1) && gFpkt.D[s] is not null &&
+                            ((gFpkt.SpurA.Any(b => fixSlot[b, s]) && gFpkt.SpurA.Any(b => fixSlot[b, s + 1])) ||
+                             (gFpkt.HatABTrennung &&
+                              gFpkt.SpurB.Any(b => fixSlot[b, s]) && gFpkt.SpurB.Any(b => fixSlot[b, s + 1]))));
+                        if (fixOcc > 2 || !fixDoppel)
+                            Gelockert("Fach pro Klasse pro Tag");
+                    }
+                    else
+                    {
+                        // Sum(x) <= 1 + hatDoppel
+                        model.Add(LinearExpr.Sum(vars) <= 1 + hatDoppel);
+                    }
                 }
             }
 
@@ -4995,6 +5212,10 @@ namespace Stundenplan_V2
                     // Sammelt ALLE einzelnen Hohlstunden-Variablen dieses Lehrers (ueber alle Tage),
                     // um spaeter die Wochensumme zu bilden und nur den Ueberschuss zu bestrafen.
                     var hohlVarsLehrer = new List<BoolVar>();
+                    // Fix-Relax: Hohlstunden, die zwischen zwei FIXIERTEN Stunden
+                    // desselben Tages liegen (fixierte Stunde davor UND danach).
+                    // Nur relevant für "Hohlmax Woche hart".
+                    var hohlVarsLehrerFixBegrenzt = new List<BoolVar>();
 
                     // Blöcke dieses Lehrers
                     var lehrerBlöcke = Enumerable.Range(0, B)
@@ -5038,6 +5259,15 @@ namespace Stundenplan_V2
                         }
 
                         int n = tagesSlots.Count;
+
+                        // Fix-Relax: fu[si] = Lehrer hat in diesem Slot eine
+                        // FIXIERTE Stunde (ohne Fix-Relax immer false).
+                        var fu = new bool[n];
+                        for (int si = 0; si < n; si++)
+                            fu[si] = LehrerFix(lName, tagesSlots[si]);
+                        int fixAnzahlTag = fu.Count(f => f);
+                        bool FixVor(int si)  { for (int k = 0; k < si; k++) if (fu[k]) return true; return false; }
+                        bool FixAb(int si)   { for (int k = si; k < n; k++) if (fu[k]) return true; return false; }
 
                         bool brauchtHohl = strafeHohl != 0 || hohlHart;
                         bool brauchtDrei = strafeDreifachHohl != 0 || dreifachHart;
@@ -5112,6 +5342,8 @@ namespace Stundenplan_V2
                                 model.Add(hohlVar <= vorher![si]);
                                 model.Add(hohlVar <= rest![si + 1]);
                                 hohlVarsLehrer.Add(hohlVar); // pro Lehrer sammeln (Freibetrag s.u.)
+                                if (hohlHart && !fu[si] && FixVor(si) && FixAb(si + 1))
+                                    hohlVarsLehrerFixBegrenzt.Add(hohlVar);
                             }
 
                             // Doppelhohlstunde: si-1 und si beide leer, si-2 und si+1 belegt
@@ -5130,7 +5362,10 @@ namespace Stundenplan_V2
                                 // Doppelhohlstunde. Dann ist die Strafvariable
                                 // ohnehin immer 0, also gar nicht erst ins
                                 // Objective haengen.
-                                if (doppelHart) model.Add(doppelVar == 0);
+                                // Fix-Relax: beide begrenzenden Stunden fixiert ->
+                                // die Doppelhohlstunde ist fixierungsbedingt, dulden.
+                                if (doppelHart && fu[si - 2] && fu[si + 1] && !fu[si - 1] && !fu[si]) Gelockert("Doppelhohlstunde hart");
+                                else if (doppelHart) model.Add(doppelVar == 0);
                                 else doppelHohlVars.Add(doppelVar);
                             }
                         }
@@ -5171,7 +5406,10 @@ namespace Stundenplan_V2
 
                                 // HART: keine Hohlfolge der Laenge >= 3 (die
                                 // Formulierung faengt auch 4er, 5er ... ab).
-                                if (dreifachHart) model.Add(dreiVar == 0);
+                                // Fix-Relax: Lücke von fixierten Stunden begrenzt
+                                // (fixiert davor UND irgendwo danach) -> dulden.
+                                if (dreifachHart && fu[si - 1] && !fu[si] && !fu[si + 1] && !fu[si + 2] && FixAb(si + 3)) Gelockert("Dreifachhohlstunde hart");
+                                else if (dreifachHart) model.Add(dreiVar == 0);
                                 else dreifachHohlVars.Add(dreiVar);
                             }
                         }
@@ -5184,6 +5422,14 @@ namespace Stundenplan_V2
                         {
                             int mn = stdTagMin ?? 0;
                             int mx = stdTagMax ?? n;
+
+                            // Fix-Relax (nur harte Regel): mehr fixierte Stunden am
+                            // Tag als erlaubt -> Obergrenze auf genau diese Zahl.
+                            if (stdTagHart && fixRelax && fixAnzahlTag > mx)
+                            {
+                                mx = fixAnzahlTag;
+                                Gelockert("Std./Tag-Maximum hart");
+                            }
 
                             var sumVar = model.NewIntVar(0, n, $"stdtag_sum_{l}_{dayIdx}");
                             model.Add(sumVar == LinearExpr.Sum(u));
@@ -5216,7 +5462,24 @@ namespace Stundenplan_V2
                                 model.Add(unter <= belowMin);
                                 model.Add(unter >= teaches + belowMin - 1);
 
-                                if (stdTagHart) model.Add(unter == 0);
+                                if (stdTagHart && fixRelax && fixAnzahlTag > 0 && fixAnzahlTag < mn)
+                                {
+                                    // Fix-Relax: ein Tag, an dem der Lehrer NUR fixierte
+                                    // Stunden hat (zu wenige), wird geduldet. Kommt eine
+                                    // nicht fixierte Stunde dazu, gilt das Minimum wieder.
+                                    var nfLits = lehrerBlöcke
+                                        .SelectMany(b => tagesSlots.Where(s => !fixSlot[b, s]).Select(s => x[b, s]))
+                                        .ToList();
+                                    if (nfLits.Count > 0)
+                                    {
+                                        var nfAny = model.NewBoolVar($"stdtag_nf_{l}_{dayIdx}");
+                                        foreach (var lit in nfLits) model.Add(nfAny >= lit);
+                                        model.Add(nfAny <= LinearExpr.Sum(nfLits));
+                                        model.Add(unter == 0).OnlyEnforceIf(nfAny);
+                                    }
+                                    Gelockert("Std./Tag-Minimum hart");
+                                }
+                                else if (stdTagHart) model.Add(unter == 0);
                                 else            einzelVars.Add(unter);
                             }
                         }
@@ -5240,7 +5503,12 @@ namespace Stundenplan_V2
                                 // das ist direkt die Aussage der Regel.
                                 if (folgeHart)
                                 {
-                                    model.Add(LinearExpr.Sum(fensterVars) <= limit);
+                                    // Fix-Relax: alle Slots des Fensters fixiert ->
+                                    // die zu lange Folge ist fixierungsbedingt, dulden.
+                                    if (Enumerable.Range(si, limit + 1).All(idx => fu[idx]))
+                                        Gelockert("Std.Folge hart");
+                                    else
+                                        model.Add(LinearExpr.Sum(fensterVars) <= limit);
                                     continue;
                                 }
 
@@ -5272,7 +5540,28 @@ namespace Stundenplan_V2
                     // Der Min-Wert bleibt wie bisher ohne Wirkung im Modell und
                     // wird nur von LehrerDiagnose ausgewertet.
                     if (hohlHart && hohlVarsLehrer.Count > 0)
-                        model.Add(LinearExpr.Sum(hohlVarsLehrer) <= hohlFreibetrag);
+                    {
+                        if (hohlVarsLehrerFixBegrenzt.Count == 0)
+                        {
+                            model.Add(LinearExpr.Sum(hohlVarsLehrer) <= hohlFreibetrag);
+                        }
+                        else
+                        {
+                            // Fix-Relax: Hohlstunden ZWISCHEN fixierten Stunden
+                            // (fb) dürfen das Wochenmaximum überschreiten. Dann
+                            // ist aber keine einzige weitere Hohlstunde erlaubt:
+                            //   fb <= Max  -> Summe <= Max   (Regel normal)
+                            //   fb >  Max  -> Summe <= fb    (nur fixierte Lücken)
+                            var fb = model.NewIntVar(0, hohlVarsLehrerFixBegrenzt.Count, $"hohlFix_{l}");
+                            model.Add(fb == LinearExpr.Sum(hohlVarsLehrerFixBegrenzt));
+                            var fbUeber = model.NewBoolVar($"hohlFixUeber_{l}");
+                            model.Add(fb >= hohlFreibetrag + 1).OnlyEnforceIf(fbUeber);
+                            model.Add(fb <= hohlFreibetrag).OnlyEnforceIf(fbUeber.Not());
+                            model.Add(LinearExpr.Sum(hohlVarsLehrer) <= hohlFreibetrag).OnlyEnforceIf(fbUeber.Not());
+                            model.Add(LinearExpr.Sum(hohlVarsLehrer) <= fb).OnlyEnforceIf(fbUeber);
+                            Gelockert("Hohlmax Woche hart");
+                        }
+                    }
 
                     // Strafstufen nur, wenn die Regel NICHT hart ist: oberhalb
                     // der harten Schranke kann die Summe ohnehin nie liegen,
@@ -5521,7 +5810,19 @@ namespace Stundenplan_V2
                                 triggerLits.Add(vieleStdTag);
                             }
 
-                            if (ist3)
+                            if (ist3 && fixRelax &&
+                                spätSlots.Any(s => LehrerFix(name, s)) &&
+                                frühSlots.Any(s => LehrerFix(name, s)) &&
+                                (schwelleStdTagVortag <= 0 ||
+                                 Enumerable.Range(0, S).Count(s => slots[s].WTag == tagD && LehrerFix(name, s))
+                                     > schwelleStdTagVortag))
+                            {
+                                // Fix-Relax: später Vortag UND früher Beginn sind
+                                // beide schon durch fixierte Stunden erzwungen ->
+                                // dieser Verstoß ist fixierungsbedingt, dulden.
+                                Gelockert("Spät-Früh hart");
+                            }
+                            else if (ist3)
                             {
                                 // Hart: nicht (alle Trigger UND frühStart) zugleich.
                                 // Summe(Trigger + frühStart) <= (#Trigger+1) - 1.
@@ -5651,7 +5952,10 @@ namespace Stundenplan_V2
             // finden schneller eine Lösung". Nur im Schnellmodus und nur, solange
             // der Caps-Fallback (siehe Planen) sie nicht deaktiviert hat.
             // =====================================================
-            if (_schnell != null && !_schnellCapsAus && _schnell.HatCaps)
+            // Im Fix-Relax-Lauf bleiben die Kappungen aus: sie zählen auch
+            // fixierungsbedingte Strafen mit und könnten den geduldeten Plan
+            // sonst wieder unlösbar machen.
+            if (_schnell != null && !_schnellCapsAus && _schnell.HatCaps && !fixRelax)
             {
                 void Cap(List<BoolVar> vars, int? max, string name)
                 {
@@ -5672,6 +5976,12 @@ namespace Stundenplan_V2
                 Cap(doppelSelberTagVars,_schnell.MaxDoppelSelberTagGesamt,"Doppel selber Tag");
                 Cap(badEinheiten,       _schnell.MaxBadUnitsGesamt,       "Bad Units (späte päd. Einheiten)");
             }
+
+            if (fixRelax)
+                log?.Invoke(fixRelaxLockerungen.Count == 0
+                    ? "  Fix-Relax: außer Kollisionen/Sperren/Pausen waren keine weiteren Lockerungen nötig."
+                    : "  Fix-Relax: zusätzlich gelockert (nur rein fixierungsbedingte Fälle): " +
+                      string.Join(", ", fixRelaxLockerungen.Select(kv => $"{kv.Key} {kv.Value}×")) + ".");
 
             // Stabilitätsmodus: Für jeden Block, der im Ausgangsplan einen
             // bekannten Slot hat, wird das Beibehalten dieses Slots belohnt
@@ -5830,6 +6140,222 @@ namespace Stundenplan_V2
                         }
                     }
                 }
+            }
+
+            // =====================================================
+            // VORABPRÜFUNG DES STARTPLANS (nur wenn startplanPrüfung != null)
+            // Der Ausgangsplan wird dem fertigen Modell (alle harten Regeln inkl.
+            // Fix-Relax-Duldungen) als ANNAHMEN vorgelegt: x[b,s] = Startplan.
+            //   lösbar   -> der Startplan ist zulässig
+            //   unlösbar -> CP-SAT nennt eine Teilmenge der Annahmen, die schon
+            //               allein unlösbar ist (Kern). Sie wird per Weglass-Test
+            //               verkleinert, damit nur die beteiligten Stunden bleiben.
+            // Es wird nichts optimiert und keine Lösung zurückgegeben.
+            // =====================================================
+            if (startplanPrüfung != null)
+            {
+                startplanPrüfung.Geprüft = true;
+
+                // Annahmen: (1) jede Zelle des Startplans (x = 1 bzw. x = 0),
+                // (2) jede Fixierung (x = 1). Liegt eine fixierte Stunde im
+                // Startplan, ist es dasselbe Literal (wird als "fix" markiert);
+                // fehlt sie im Startplan, widersprechen sich beide Annahmen.
+                // Unterrichte mit UNVERPLANTEN Stunden (weniger Stunden im Startplan
+                // als gefordert, z. B. geparkt, Teilplan oder neu in der UV): nur
+                // die vorhandenen Stunden festlegen, die übrigen Slots offen lassen
+                // – die fehlenden Stunden platziert der Solver ohnehin frei. Sonst
+                // meldete die Prüfung hier einen Schein-Konflikt.
+                var litNachIndex = new Dictionary<int, (ILiteral lit, int b, int s, bool belegt, bool fix)>();
+                for (int b = 0; b < B; b++)
+                {
+                    int imStartplan = 0;
+                    for (int s = 0; s < S; s++)
+                        if (ausgangsplan != null && ausgangsplan.ContainsKey(b * S + s)) imStartplan++;
+                    int sollWst = (fixRelax && fixSlotAnzahl[b] > blocks[b].Wst) ? fixSlotAnzahl[b] : blocks[b].Wst;
+                    bool unvollständig = imStartplan < sollWst;
+                    if (unvollständig)
+                        startplanPrüfung.Unverplant.Add((b, sollWst - imStartplan));
+
+                    for (int s = 0; s < S; s++)
+                    {
+                        bool belegt = ausgangsplan != null && ausgangsplan.ContainsKey(b * S + s);
+                        if (!belegt && unvollständig) continue;   // offen lassen
+                        ILiteral lit = belegt ? x[b, s] : x[b, s].Not();
+                        litNachIndex[lit.GetIndex()] = (lit, b, s, belegt, false);
+                    }
+                }
+                foreach (var (fbIdx, fsIdx) in fixAnnahmen)
+                {
+                    ILiteral fixLit = x[fbIdx, fsIdx];
+                    litNachIndex[fixLit.GetIndex()] = (fixLit, fbIdx, fsIdx, true, true);
+                }
+
+                // Ein Worker: Annahmen-Kerne werden so verlässlich geliefert, und
+                // bei (fast) vollständig festgelegtem x ist das reine Propagation.
+                var prüfSolver = new CpSolver();
+                CpSolverStatus PrüfeMit(List<int> indizes, int sekunden, bool presolve = true)
+                {
+                    model.ClearAssumptions();
+                    model.AddAssumptions(indizes.Select(i => litNachIndex[i].lit));
+                    prüfSolver.StringParameters = $"max_time_in_seconds:{sekunden} num_search_workers:1" +
+                                                  (presolve ? "" : " cp_model_presolve:false");
+                    return prüfSolver.Solve(model);
+                }
+                List<int> KernAusLetztemSolve(List<int> annahmen)
+                {
+                    var erlaubt = new HashSet<int>(annahmen);
+                    return prüfSolver.SufficientAssumptionsForInfeasibility()
+                        .Where(erlaubt.Contains).Distinct().ToList();
+                }
+
+                var uhrSuche = System.Diagnostics.Stopwatch.StartNew();
+                const int maxKonflikte = 100;
+                const double maxSekundenSuche = 120;      // Konflikte sammeln
+                const double maxSekundenEingrenzen = 120; // danach eingrenzen
+
+                // Eingrenzen GEGEN einen lösbaren Hintergrund (der Rest des
+                // Startplans, der nach dem Sammeln übrig und zulässig ist): jede
+                // Stelle des Konflikts probeweise weglassen; bleibt es unlösbar,
+                // gehört sie nicht dazu. Weil fast alles festliegt, ist jeder
+                // Versuch reine Propagation und damit schnell.
+                List<int> MinimiereMitHintergrund(List<int> kern, List<int> hintergrund,
+                    System.Diagnostics.Stopwatch uhr, out bool minimal)
+                {
+                    minimal = true;
+                    var k = kern.ToList();
+                    foreach (var kandidat in kern)
+                    {
+                        if (k.Count <= 1) break;
+                        if (uhr.Elapsed.TotalSeconds > maxSekundenEingrenzen) { minimal = false; break; }
+                        var probe = new List<int>(hintergrund);
+                        probe.AddRange(k.Where(i => i != kandidat));
+                        if (PrüfeMit(probe, 3) == CpSolverStatus.Infeasible)
+                            k.Remove(kandidat);
+                    }
+                    return k;
+                }
+
+                // Rückfall, wenn der Rest NICHT nachweislich lösbar ist: Weglass-
+                // Test nur innerhalb des Kerns (langsamer, daher begrenzt).
+                List<int> MinimiereOhneHintergrund(List<int> kern,
+                    System.Diagnostics.Stopwatch uhr, out bool minimal)
+                {
+                    minimal = true;
+                    if (kern.Count <= 4) return kern;
+                    if (kern.Count > 400) { minimal = false; return kern; }
+                    int versuche = 0;
+                    foreach (var kandidat in kern.ToList())
+                    {
+                        if (!kern.Contains(kandidat)) continue;
+                        if (kern.Count <= 1) break;
+                        if (versuche >= 20 || uhr.Elapsed.TotalSeconds > maxSekundenEingrenzen)
+                        { minimal = false; break; }
+                        versuche++;
+                        var probe = kern.Where(i => i != kandidat).ToList();
+                        if (PrüfeMit(probe, 3) == CpSolverStatus.Infeasible)
+                        {
+                            var neu = KernAusLetztemSolve(probe);
+                            kern = neu.Count > 0 && neu.Count < probe.Count ? neu : probe;
+                        }
+                    }
+                    return kern;
+                }
+
+                var aktiv = new HashSet<int>(litNachIndex.Keys);
+                var stPrüf = PrüfeMit(aktiv.ToList(), 30);
+
+                if (stPrüf == CpSolverStatus.Optimal || stPrüf == CpSolverStatus.Feasible)
+                {
+                    startplanPrüfung.Zulässig = true;
+                }
+                else if (stPrüf != CpSolverStatus.Infeasible)
+                {
+                    startplanPrüfung.Unklar = true;
+                }
+                else
+                {
+                    // PHASE 1 – ALLE Konflikte sammeln (schnell, ohne Eingrenzen):
+                    // Kern finden, dann die Startplan-Annahmen der beteiligten
+                    // Blöcke freigeben (die Fixierungen bleiben) und weiterprüfen.
+                    // So zeigen sich auch Folgekonflikte einer Fixierung.
+                    var kerne = new List<List<int>>();
+                    bool restLösbar = false;
+                    while (true)
+                    {
+                        var liste = aktiv.ToList();
+                        var kern = KernAusLetztemSolve(liste);
+
+                        // Leerer Kern: oft erkennt der Presolve die Unlösbarkeit und
+                        // liefert dann keinen. Ohne Presolve noch einmal versuchen.
+                        if (kern.Count == 0 && PrüfeMit(liste, 30, presolve: false) == CpSolverStatus.Infeasible)
+                            kern = KernAusLetztemSolve(liste);
+
+                        if (kern.Count == 0)
+                        {
+                            if (kerne.Count == 0)
+                                // Ist das Modell schon ganz ohne Startplan und ohne
+                                // Fixierungen unlösbar? (Dann liegt es nicht am Startplan.)
+                                startplanPrüfung.ModellOhneAnnahmenUnlösbar =
+                                    PrüfeMit(new List<int>(), 20) == CpSolverStatus.Infeasible;
+                            else
+                                startplanPrüfung.WeitereNichtBenannt = true;
+                            break;
+                        }
+                        kerne.Add(kern);
+
+                        // Freigeben: Startplan-Annahmen der beteiligten Blöcke.
+                        // Besteht der Kern NUR aus Fixierungen, diese ebenfalls
+                        // (sonst käme die Suche nicht weiter).
+                        var kernBlöcke = new HashSet<int>(kern.Select(i => litNachIndex[i].b));
+                        bool nurFix = kern.All(i => litNachIndex[i].fix);
+                        aktiv.RemoveWhere(i => kernBlöcke.Contains(litNachIndex[i].b) &&
+                                               (nurFix || !litNachIndex[i].fix));
+
+                        if (kerne.Count >= maxKonflikte || uhrSuche.Elapsed.TotalSeconds > maxSekundenSuche)
+                        {
+                            startplanPrüfung.Abgebrochen = true;
+                            break;
+                        }
+
+                        var stWeiter = PrüfeMit(aktiv.ToList(), 15);
+                        if (stWeiter == CpSolverStatus.Optimal || stWeiter == CpSolverStatus.Feasible)
+                        {
+                            restLösbar = true;                    // alle Konflikte gefunden
+                            break;
+                        }
+                        if (stWeiter != CpSolverStatus.Infeasible)
+                        {
+                            startplanPrüfung.WeitereUnklar = true; // Zeitlimit
+                            break;
+                        }
+                    }
+
+                    // PHASE 2 – jeden Konflikt eingrenzen.
+                    var hintergrund = aktiv.ToList();
+                    var uhrEingrenzen = System.Diagnostics.Stopwatch.StartNew();
+                    foreach (var kernRoh in kerne)
+                    {
+                        bool minimal = true;
+                        var kern = kernRoh.Count <= 1 ? kernRoh
+                            : restLösbar ? MinimiereMitHintergrund(kernRoh, hintergrund, uhrEingrenzen, out minimal)
+                                         : MinimiereOhneHintergrund(kernRoh, uhrEingrenzen, out minimal);
+
+                        var konflikt = new StartplanPruefErgebnis.Konflikt { Minimal = minimal };
+                        foreach (var i in kern)
+                        {
+                            var info = litNachIndex[i];
+                            if (info.fix)
+                                konflikt.FixKern.Add((info.b, info.s,
+                                    ausgangsplan != null && ausgangsplan.ContainsKey(info.b * S + info.s)));
+                            else
+                                konflikt.Kern.Add((info.b, info.s, info.belegt));
+                        }
+                        startplanPrüfung.Konflikte.Add(konflikt);
+                    }
+                }
+
+                model.ClearAssumptions();
+                return new List<(int quality, int badUnits, int[,] belegung, string label)>();
             }
 
             model.Maximize(qualityExpr);
@@ -7174,6 +7700,579 @@ namespace Stundenplan_V2
         }
 
         // =====================================================
+        // VORABPRÜFUNG DES STARTPLANS (Button 11)
+        // Ergebnis der Prüfung "Ist der Ausgangsplan im Solver-Modell zulässig?".
+        // Wird von PlanenIntern (Parameter startplanPrüfung) befüllt.
+        // =====================================================
+        internal sealed class StartplanPruefErgebnis
+        {
+            public bool Geprüft;
+            public bool Zulässig;
+            public bool Unklar;                     // Zeitlimit ohne Aussage
+            public bool ModellOhneAnnahmenUnlösbar; // unlösbar ganz ohne Startplan/Fixierungen
+            public bool Abgebrochen;                // Grenze (Anzahl/Zeit) erreicht
+            public bool WeitereUnklar;              // Weiterprüfen lief ins Zeitlimit
+            public bool WeitereNichtBenannt;        // weiterer Konflikt ohne benannte Stunden
+
+            public sealed class Konflikt
+            {
+                public bool Minimal;
+                // Zellen des Startplans, die zum Konflikt gehören:
+                //   belegt = true  -> Stunde liegt im Startplan in Slot s
+                //   belegt = false -> Startplan lässt Slot s für diesen Block frei
+                public List<(int b, int s, bool belegt)> Kern = new();
+                // Fixierungen, die zum Konflikt gehören (imStartplan = die
+                // fixierte Stunde liegt auch im Startplan dort).
+                public List<(int b, int s, bool imStartplan)> FixKern = new();
+            }
+
+            public List<Konflikt> Konflikte = new();
+
+            // Unterrichte mit unverplanten Stunden (b, Anzahl fehlender Stunden).
+            // Kein Konflikt: der Solver platziert diese Stunden frei.
+            public List<(int b, int fehlend)> Unverplant = new();
+        }
+
+        // Schreibt das Ergebnis der Vorabprüfung ins Log und ins Sheet "ChkStart".
+        // regelVerstöße = PlanValidator.Prüfe(Startplan) — liefert die Regel-
+        // namen; die Solver-Konflikte sagen, welche davon den Plan blockieren.
+        private static void BerichteStartplanPrüfung(
+            string excelPfad,
+            List<UnterrichtsBlock> blocks,
+            List<ZeitSlot> slots,
+            StartplanPruefErgebnis erg,
+            List<PlanValidator.Verletzung> regelVerstöße,
+            bool fixRelaxAktiv,
+            Action<string> log,
+            // für die Ursachen-Erklärung je Konflikt
+            int[,] startBelegung = null,
+            Dictionary<string, int> fachraumLimit = null,
+            bool verbotMinus2Lehrer = false,
+            Dictionary<string, LehrerStammdaten> lehrerStammdaten = null,
+            KlassenGruppen klassenGruppen = null)
+        {
+            string Wo(int s) => $"{slots[s].WTag} Std.{slots[s].Stunde}";
+            string Fächer(UnterrichtsBlock bl) => string.Join("/", bl.Teile.Select(t => t.Fach).Distinct());
+            string Lehrer(UnterrichtsBlock bl) => string.Join("/", bl.Teile.Select(t => t.Lehrer).Distinct());
+            string Klassen(UnterrichtsBlock bl) => string.Join(",", bl.Teile.SelectMany(t => t.Klassen).Distinct());
+            string Bez(int b) => $"UNr {blocks[b].UNr} ({Fächer(blocks[b])}, {Lehrer(blocks[b])}, {Klassen(blocks[b])})";
+            bool IstFix(int b, int s) => slots[s].FixUNrn.Contains(blocks[b].UNr);
+            bool UNrFixIn(int unr, int s) => s >= 0 && s < slots.Count && slots[s].FixUNrn.Contains(unr);
+
+            var tabelle = new List<PlanValidator.Verletzung>();
+            var kernUNrn = new HashSet<int>();
+            var kernNamen = new HashSet<string>(StringComparer.OrdinalIgnoreCase); // Lehrer + Klassen
+            void MerkeKern(int b)
+            {
+                kernUNrn.Add(blocks[b].UNr);
+                foreach (var tl in blocks[b].Teile)
+                {
+                    if (!string.IsNullOrWhiteSpace(tl.Lehrer)) kernNamen.Add(tl.Lehrer.Trim());
+                    foreach (var k in tl.Klassen)
+                        if (!string.IsNullOrWhiteSpace(k)) kernNamen.Add(k.Trim());
+                }
+            }
+            foreach (var kf in erg.Konflikte)
+            {
+                foreach (var k in kf.Kern) MerkeKern(k.b);
+                foreach (var k in kf.FixKern) MerkeKern(k.b);
+            }
+            bool kernBekannt = erg.Konflikte.Count > 0;
+
+            // -----------------------------------------------------------------
+            // URSACHEN eines Konflikts: prüft die beteiligten Stunden direkt gegen
+            // die häufigsten harten Regeln (Sperren, Kollisionen, Fachraum,
+            // Tagesregel) im Startplan und ergänzt passende Einträge der
+            // Planprüfung. Fixierungsbedingte, von Fix-Relax geduldete Fälle
+            // werden dabei ausgelassen.
+            // -----------------------------------------------------------------
+            List<string> Ursachen(StartplanPruefErgebnis.Konflikt kf)
+            {
+                var gründe = new List<string>();
+                void Grund(string g) { if (!gründe.Contains(g)) gründe.Add(g); }
+
+                int nB = blocks.Count, nS = slots.Count;
+                var gr = klassenGruppen ?? KlassenGruppen.Leer;
+                bool Belegt(int b, int s) => startBelegung != null && startBelegung[b, s] == 1;
+
+                var stellen = kf.Kern.Where(k => k.belegt).Select(k => (b: k.b, s: k.s))
+                    .Concat(kf.FixKern.Select(k => (b: k.b, s: k.s)))
+                    .Distinct().ToList();
+
+                foreach (var (b, s) in stellen)
+                {
+                    var bl = blocks[b];
+                    bool fixHier = IstFix(b, s);
+
+                    // 1) Sperren (-3, bzw. -2 bei "Verbot -2")
+                    if (!(fixRelaxAktiv && fixHier))
+                        foreach (var tl in bl.Teile)
+                        {
+                            if (slots[s].LehrerWunsch.TryGetValue(tl.Lehrer, out int lw) &&
+                                (lw == -3 || (verbotMinus2Lehrer && lw == -2)))
+                                Grund($"Lehrer {tl.Lehrer} ist in {Wo(s)} gesperrt ({lw} in ZWL" +
+                                      (lw == -2 ? ", „Verbot −2“ aktiv" : "") + $") – UNr {bl.UNr} darf dort nicht liegen.");
+                            foreach (var k in tl.Klassen)
+                            {
+                                if (AusnahmenZwk.Aktuell.IstIgnoriert(bl, k)) continue;
+                                if (slots[s].KlassenWunsch.TryGetValue(k, out int kw) && kw == -3)
+                                    Grund($"Klasse {k} ist in {Wo(s)} gesperrt (−3 in ZWK) – UNr {bl.UNr} darf dort nicht liegen.");
+                            }
+                        }
+
+                    if (startBelegung == null) continue;
+
+                    // 2) Kollisionen mit anderen Stunden des Startplans im selben Slot
+                    string wg1 = (bl.WochenGruppe ?? "").Trim();
+                    string kkk1 = (bl.KKK ?? "").Trim();
+                    var atome1 = new HashSet<string>(gr.AtomeDesBlocks(bl));
+                    var lehrer1 = new HashSet<string>(bl.Teile.Select(t => t.Lehrer));
+                    for (int b2 = 0; b2 < nB; b2++)
+                    {
+                        if (b2 == b || !Belegt(b2, s)) continue;
+                        var bl2 = blocks[b2];
+                        string wg2 = (bl2.WochenGruppe ?? "").Trim();
+                        if ((wg1 == "A" && wg2 == "B") || (wg1 == "B" && wg2 == "A")) continue;
+                        if (fixRelaxAktiv && fixHier && IstFix(b2, s)) continue;   // geduldet
+
+                        foreach (var l in bl2.Teile.Select(t => t.Lehrer).Where(lehrer1.Contains).Distinct())
+                            Grund($"Lehrer {l} hat in {Wo(s)} zwei Stunden: UNr {bl.UNr} und UNr {bl2.UNr}.");
+
+                        string kkk2 = (bl2.KKK ?? "").Trim();
+                        bool kkkGleich = kkk1.Length > 0 && kkk1 == kkk2;
+                        if (!kkkGleich && gr.AtomeDesBlocks(bl2).Any(atome1.Contains))
+                        {
+                            string kTxt = string.Join(",", bl.Teile.SelectMany(t => t.Klassen)
+                                .Intersect(bl2.Teile.SelectMany(t => t.Klassen)).Distinct());
+                            if (kTxt.Length == 0) kTxt = "(gemeinsame Klassengruppe)";
+                            Grund($"Klasse {kTxt} hat in {Wo(s)} zwei Stunden: UNr {bl.UNr} und UNr {bl2.UNr}.");
+                        }
+                    }
+
+                    // 3) Fachraum-Limit (A/B-Woche getrennt, wie RoomConstraint)
+                    if (fachraumLimit != null)
+                        foreach (var fg in fachraumLimit)
+                        {
+                            if (bl.FachraumBedarf(fg.Key) <= 0) continue;
+                            foreach (string woche in new[] { "A", "B" })
+                            {
+                                int nFix = 0, nFrei = 0;
+                                var beteiligt = new List<int>();
+                                for (int b2 = 0; b2 < nB; b2++)
+                                {
+                                    if (!Belegt(b2, s)) continue;
+                                    int bed = blocks[b2].FachraumBedarf(fg.Key);
+                                    if (bed <= 0) continue;
+                                    string wg = (blocks[b2].WochenGruppe ?? "").Trim();
+                                    if (woche == "A" && wg == "B") continue;
+                                    if (woche == "B" && wg == "A") continue;
+                                    if (fixRelaxAktiv && IstFix(b2, s)) nFix += bed; else nFrei += bed;
+                                    beteiligt.Add(blocks[b2].UNr);
+                                }
+                                bool verletzt = fixRelaxAktiv
+                                    ? nFrei > 0 && nFrei > Math.Max(0, fg.Value - nFix)
+                                    : nFix + nFrei > fg.Value;
+                                if (verletzt)
+                                    Grund($"Fachraum „{fg.Key}“ in {Wo(s)}: {nFix + nFrei} Belegungen, erlaubt {fg.Value} " +
+                                          $"(UNr {string.Join(", ", beteiligt.Distinct())}).");
+                            }
+                        }
+                }
+
+                // 4) Tagesregel (Stunden desselben Unterrichts je Tag)
+                if (startBelegung != null)
+                    foreach (var b in stellen.Select(st => st.b).Distinct())
+                    {
+                        if (BlockBeliebigOft(blocks[b]) || blocks[b].Teile.Count == 0) continue;
+                        int maxD = blocks[b].Teile.Max(t => t.MaxDoppel);
+                        int limit = (maxD == 0 && blocks[b].Wst >= 2) ? 1 : 2;
+                        foreach (var tag in stellen.Where(st => st.b == b).Select(st => slots[st.s].WTag).Distinct())
+                        {
+                            var amTag = Enumerable.Range(0, nS).Where(s => slots[s].WTag == tag && Belegt(b, s)).ToList();
+                            int fixAnz = amTag.Count(s => IstFix(b, s));
+                            int erlaubt = fixRelaxAktiv ? Math.Max(limit, fixAnz) : limit;
+                            if (amTag.Count > erlaubt)
+                                Grund($"UNr {blocks[b].UNr} hat am {tag} {amTag.Count} Stunden, erlaubt {erlaubt} (Tagesregel).");
+                        }
+                    }
+
+                // 5) Passende Einträge der Planprüfung (ohne geduldete/unverplante)
+                var unrs = new HashSet<int>(stellen.Select(st => blocks[st.b].UNr));
+                unrs.UnionWith(kf.Kern.Select(k => blocks[k.b].UNr));
+                var namen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var b in kf.Kern.Select(k => k.b).Concat(kf.FixKern.Select(k => k.b)).Distinct())
+                    foreach (var tl in blocks[b].Teile)
+                    {
+                        if (!string.IsNullOrWhiteSpace(tl.Lehrer)) namen.Add(tl.Lehrer.Trim());
+                        foreach (var k in tl.Klassen) if (!string.IsNullOrWhiteSpace(k)) namen.Add(k.Trim());
+                    }
+                var stellenSlots = new HashSet<(string, int)>(stellen.Select(st => (slots[st.s].WTag, slots[st.s].Stunde)));
+                var stellenTage = new HashSet<string>(stellen.Select(st => slots[st.s].WTag));
+                var unverplanteUNrn = new HashSet<int>(erg.Unverplant.Select(u => blocks[u.b].UNr));
+
+                bool NamenTreffer(PlanValidator.Verletzung v) =>
+                    (!string.IsNullOrWhiteSpace(v.Klasse) && namen.Contains(v.Klasse.Trim())) ||
+                    (!string.IsNullOrWhiteSpace(v.Lehrer) &&
+                     v.Lehrer.Split(new[] { ',', '|', '/' }, StringSplitOptions.RemoveEmptyEntries)
+                             .Any(n => namen.Contains(n.Trim())));
+                bool UNrTreffer(PlanValidator.Verletzung v) =>
+                    (v.UNr > 0 && unrs.Contains(v.UNr)) ||
+                    (v.BetroffeneUNrn != null && v.BetroffeneUNrn.Any(unrs.Contains));
+
+                int ausPrüfung = 0;
+                foreach (var v in regelVerstöße ?? new List<PlanValidator.Verletzung>())
+                {
+                    if (ausPrüfung >= 8) break;
+                    if (v.Kategorie.StartsWith("Hinweis", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (FixBedingt(v)) continue;
+                    if (v.Kategorie == "Wochenstunden" && unverplanteUNrn.Contains(v.UNr)) continue;
+
+                    bool passt;
+                    if (!string.IsNullOrEmpty(v.Tag) && v.Stunde > 0)
+                        passt = stellenSlots.Contains((v.Tag, v.Stunde)) &&
+                                (UNrTreffer(v) || NamenTreffer(v) ||
+                                 (v.Kategorie == "Fachraum-Limit" &&
+                                  stellen.Any(st => blocks[st.b].FachraumBedarf(v.Fach) > 0)));
+                    else if (!string.IsNullOrEmpty(v.Tag))
+                        passt = stellenTage.Contains(v.Tag) && (UNrTreffer(v) || NamenTreffer(v));
+                    else
+                        passt = UNrTreffer(v) || NamenTreffer(v);
+
+                    if (passt)
+                    {
+                        string ort = string.IsNullOrEmpty(v.Tag) ? "" : (v.Stunde > 0 ? $"{v.Tag} Std.{v.Stunde}: " : $"{v.Tag}: ");
+                        Grund($"laut Planprüfung [{v.Kategorie}] {ort}{v.Details}");
+                        ausPrüfung++;
+                    }
+                }
+
+                // 6) Nichts gefunden: Zusammenspiel; harte StD-Regeln nennen
+                if (gründe.Count == 0)
+                {
+                    var hartLehrer = new List<string>();
+                    if (lehrerStammdaten != null)
+                        foreach (var l in kf.Kern.Select(k => k.b).Concat(kf.FixKern.Select(k => k.b))
+                                     .SelectMany(b => blocks[b].Teile.Select(t => t.Lehrer))
+                                     .Where(l => !string.IsNullOrWhiteSpace(l)).Distinct())
+                            if (lehrerStammdaten.TryGetValue(l, out var sd) && sd != null && sd.HatHarteRegel)
+                                hartLehrer.Add(BeschreibeHarteRegeln(sd));
+                    Grund("Keine einzelne Regel direkt erkennbar – vermutlich das Zusammenspiel mehrerer harter Regeln " +
+                          "(z. B. Std./Tag, Hohlstunden, freie Tage, Spät-Früh, Doppelstunden-Vorgaben)." +
+                          (hartLehrer.Count > 0 ? " Beteiligte Lehrer mit harten StD-Regeln: " + string.Join("; ", hartLehrer) + "." : ""));
+                }
+                return gründe;
+            }
+
+            log?.Invoke("=== Vorabprüfung Startplan (harte Regeln des Solver-Modells" +
+                        (fixRelaxAktiv ? ", inkl. Fix-Relax-Duldungen" : ", Fix-Relax aus") + ") ===");
+
+            if (erg.Unklar)
+            {
+                log?.Invoke("  ? Prüfung ohne Ergebnis (Zeitlimit der Prüfung erreicht).");
+            }
+            else if (erg.Zulässig)
+            {
+                log?.Invoke("  ✓ Der Startplan erfüllt alle harten Regeln des Modells" +
+                            (erg.Unverplant.Count > 0 ? " (die unverplanten Stunden lassen sich unterbringen)" : "") +
+                            ". Findet „Minimale Änderungen“ trotzdem keine Lösung, reicht das Zeitlimit nicht – " +
+                            "Zeitlimit im Dialog erhöhen.");
+            }
+            else
+            {
+                log?.Invoke("  ✗ Der Startplan verletzt harte Regeln, die " +
+                            (fixRelaxAktiv ? "auch Fix-Relax nicht duldet" : "der Solver nicht duldet (Fix-Relax ist aus)") +
+                            ". Der Solver kann ihn deshalb nicht übernehmen.");
+
+                if (!kernBekannt)
+                {
+                    if (erg.ModellOhneAnnahmenUnlösbar)
+                        log?.Invoke("    Das Modell ist schon OHNE Startplan und OHNE Fixierungen unlösbar – die Ursache " +
+                                    "liegt in den Daten/Regeln (z. B. StD, freie Tage, Doppelstunden-Vorgaben), nicht im Startplan.");
+                    else
+                        log?.Invoke("    (Der Solver hat keine einzelnen Stunden benannt. Unten sind die Regelverstöße des " +
+                                    "Startplans aufgeführt; fixierungsbedingte, die Fix-Relax duldet, sind gekennzeichnet.)");
+                }
+                else
+                {
+                    string vollständigTxt =
+                        erg.Abgebrochen ? " – Suche an der Grenze (100 Konflikte / 2 min) beendet, es kann weitere geben" :
+                        erg.WeitereUnklar ? " – danach Zeitlimit, es kann weitere geben" :
+                        erg.WeitereNichtBenannt ? " – danach ein weiterer Konflikt ohne benannte Stunden (siehe Regelverstöße)" :
+                        " – das sind ALLE Konflikte";
+                    log?.Invoke($"  {erg.Konflikte.Count} Konflikt(e) im Startplan{vollständigTxt}:");
+
+                    int nr = 0;
+                    foreach (var kf in erg.Konflikte)
+                    {
+                        nr++;
+                        string kat = $"Startplan-Konflikt {nr}";
+                        log?.Invoke($"  Konflikt {nr} ({kf.Kern.Count + kf.FixKern.Count} Stelle(n)" +
+                                    $"{(kf.Minimal ? "" : ", nicht vollständig eingegrenzt")}):");
+
+                        foreach (var (b, s, imStartplan) in kf.FixKern.OrderBy(k => k.s).ThenBy(k => blocks[k.b].UNr))
+                        {
+                            string zusatz = imStartplan ? "" : " – liegt im Startplan aber NICHT dort (Widerspruch zur Fixierung)";
+                            log?.Invoke($"    • {Bez(b)} ist in {Wo(s)} fixiert{zusatz}");
+                            tabelle.Add(new PlanValidator.Verletzung(
+                                kat, slots[s].WTag, slots[s].Stunde, blocks[b].UNr,
+                                Lehrer(blocks[b]) + " | " + Klassen(blocks[b]), Fächer(blocks[b]),
+                                "Fixierung gehört zum Konflikt" + zusatz + ".",
+                                ZeilenText: blocks[b].Zeilentext));
+                        }
+
+                        foreach (var (b, s, _) in kf.Kern.Where(k => k.belegt)
+                                     .OrderBy(k => k.s).ThenBy(k => blocks[k.b].UNr))
+                        {
+                            string fixTxt = IstFix(b, s) ? " [fixiert]" : "";
+                            log?.Invoke($"    • {Bez(b)} liegt in {Wo(s)}{fixTxt}");
+                            tabelle.Add(new PlanValidator.Verletzung(
+                                kat, slots[s].WTag, slots[s].Stunde, blocks[b].UNr,
+                                Lehrer(blocks[b]) + " | " + Klassen(blocks[b]), Fächer(blocks[b]),
+                                "Liegt im Startplan hier" + fixTxt + " und gehört zum Konflikt.",
+                                ZeilenText: blocks[b].Zeilentext));
+                        }
+
+                        foreach (var grp in kf.Kern.Where(k => !k.belegt).GroupBy(k => k.b))
+                        {
+                            string slotsTxt = string.Join(", ", grp.OrderBy(k => k.s).Select(k => Wo(k.s)));
+                            log?.Invoke($"    • {Bez(grp.Key)}: Startplan lässt frei: {slotsTxt} " +
+                                        "– laut Modell fehlt dem Unterricht hier eine Stunde bzw. sie liegt falsch verteilt.");
+                            tabelle.Add(new PlanValidator.Verletzung(
+                                kat, "", 0, blocks[grp.Key].UNr,
+                                Lehrer(blocks[grp.Key]) + " | " + Klassen(blocks[grp.Key]), Fächer(blocks[grp.Key]),
+                                "Startplan lässt frei: " + slotsTxt + " – Stunde fehlt bzw. falsch verteilt.",
+                                ZeilenText: blocks[grp.Key].Zeilentext));
+                        }
+
+                        var gründe = Ursachen(kf);
+                        log?.Invoke(gründe.Count == 1 ? "    Ursache:" : "    Ursachen:");
+                        foreach (var g in gründe)
+                        {
+                            log?.Invoke($"      → {g}");
+                            tabelle.Add(new PlanValidator.Verletzung(kat, "", 0, 0, "", "", "Ursache: " + g));
+                        }
+
+                        bool nurFixiert = kf.Kern.All(k => k.belegt && IstFix(k.b, k.s)) &&
+                                          kf.FixKern.All(k => k.imStartplan);
+                        if (fixRelaxAktiv && nurFixiert)
+                            log?.Invoke("    ⚠ An diesem Konflikt sind NUR fixierte Stunden beteiligt. Das müsste Fix-Relax " +
+                                        "dulden – bitte diesen Auszug melden (mögliche Lücke in Fix-Relax).");
+                    }
+
+                    log?.Invoke("  Hinweis: Hängen Konflikte an einer Fixierung (z. B. „ist fixiert – liegt im Startplan " +
+                                "aber NICHT dort“), sind die folgenden oft Folgekonflikte: Was dort im Startplan liegt, " +
+                                "muss dann ebenfalls weichen.");
+                }
+            }
+
+            // Unverplante Stunden: Hinweis (kein Konflikt).
+            var unverplantUNrn = new HashSet<int>(erg.Unverplant.Select(u => blocks[u.b].UNr));
+            if (erg.Unverplant.Count > 0)
+            {
+                int summe = erg.Unverplant.Sum(u => u.fehlend);
+                log?.Invoke($"  Hinweis: {erg.Unverplant.Count} Unterricht(e) mit zusammen {summe} unverplanten " +
+                            "Stunde(n) im Startplan – kein Konflikt, der Solver platziert sie frei:");
+                int gezeigtU = 0;
+                foreach (var (b, fehlend) in erg.Unverplant.OrderBy(u => blocks[u.b].UNr))
+                {
+                    if (gezeigtU++ < 40)
+                        log?.Invoke($"    • {Bez(b)}: {fehlend} Stunde(n) unverplant");
+                    tabelle.Add(new PlanValidator.Verletzung(
+                        "Unverplant", "", 0, blocks[b].UNr,
+                        Lehrer(blocks[b]) + " | " + Klassen(blocks[b]), Fächer(blocks[b]),
+                        $"{fehlend} Stunde(n) unverplant – wird vom Solver frei platziert (kein Konflikt).",
+                        ZeilenText: blocks[b].Zeilentext));
+                }
+                if (gezeigtU > 40)
+                    log?.Invoke($"    … {gezeigtU - 40} weitere, siehe Sheet 'ChkStart'.");
+            }
+
+            // Beteiligte UNrn eines Regelverstoßes. Reihenfolge: BetroffeneUNrn,
+            // UNr, "UNr: a, b" im Detailtext (z. B. Fach/Klasse/Tag-Doppel-Regel),
+            // sonst alle Unterrichte mit diesem Fach in dieser Klasse (Fach pro
+            // Klasse pro Tag). null = nicht ermittelbar.
+            HashSet<int> BeteiligteUNrn(PlanValidator.Verletzung v)
+            {
+                if (v.BetroffeneUNrn != null && v.BetroffeneUNrn.Count > 0) return new HashSet<int>(v.BetroffeneUNrn);
+                if (v.UNr > 0) return new HashSet<int> { v.UNr };
+                var m = System.Text.RegularExpressions.Regex.Match(v.Details ?? "", @"UNr:\s*([0-9][0-9,\s]*)");
+                if (m.Success)
+                {
+                    var aus = new HashSet<int>(m.Groups[1].Value
+                        .Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries)
+                        .Select(z => int.TryParse(z, out int n) ? n : 0).Where(n => n > 0));
+                    if (aus.Count > 0) return aus;
+                }
+                if (!string.IsNullOrWhiteSpace(v.Klasse) && !string.IsNullOrWhiteSpace(v.Fach))
+                {
+                    var aus = new HashSet<int>(blocks
+                        .Where(bl => bl.Teile.Any(tl => tl.Fach == v.Fach && tl.Klassen.Contains(v.Klasse)))
+                        .Select(bl => bl.UNr));
+                    if (aus.Count > 0) return aus;
+                }
+                return null;
+            }
+
+            // Ist ein Regelverstoß rein fixierungsbedingt (alle beteiligten
+            // Stunden in diesem Slot fixiert)? Dann duldet ihn Fix-Relax.
+            bool FixBedingt(PlanValidator.Verletzung v)
+            {
+                if (!fixRelaxAktiv) return false;
+                // Wochen- bzw. Tagesregeln ohne Slot (Doppelstunden, Hohlstunden,
+                // Std./Tag …): eigene Prüfung über die Stunden der betroffenen UNrn.
+                if (string.IsNullOrEmpty(v.Tag) || v.Stunde <= 0) return WochenregelFixBedingt(v);
+                int s = slots.FindIndex(z => z.WTag == v.Tag && z.Stunde == v.Stunde);
+                if (s < 0) return false;
+                var unrs = BeteiligteUNrn(v)?.ToList();
+                if (unrs == null) return false;
+
+                switch (v.Kategorie)
+                {
+                    case "Keine 3 in Folge":
+                        return s + 2 < slots.Count &&
+                               slots[s + 1].WTag == v.Tag && slots[s + 2].WTag == v.Tag &&
+                               unrs.All(u => UNrFixIn(u, s) && UNrFixIn(u, s + 1) && UNrFixIn(u, s + 2));
+                    case "Pausen-Verletzung":
+                        return s + 1 < slots.Count &&
+                               unrs.All(u => UNrFixIn(u, s) || UNrFixIn(u, s + 1)) &&
+                               unrs.Any(u => UNrFixIn(u, s)) && unrs.Any(u => UNrFixIn(u, s + 1));
+                    default:
+                        return unrs.All(u => UNrFixIn(u, s));
+                }
+            }
+
+            // Regel ohne Slot (Woche oder ganzer Tag): fixierungsbedingt, wenn
+            //  (a) ALLE Stunden der betroffenen UNrn im Startplan (bei Tagesregeln:
+            //      an diesem Tag) fixiert sind – dann bestimmen allein die
+            //      Fixierungen die Lage, wie im Solver (Min/Max entfällt bzw.
+            //      Grenze wird auf die fixierte Zahl angehoben), oder
+            //  (b) bei „Doppelstunden“: JEDE Doppelstunde der Gruppe besteht aus
+            //      zwei fixierten Stunden (Solver hebt maxD auf diese Zahl an).
+            // Ohne Startplan-Belegung oder ohne UNrn: nicht beurteilbar -> false.
+            bool WochenregelFixBedingt(PlanValidator.Verletzung v)
+            {
+                if (startBelegung == null) return false;
+                var unrs = BeteiligteUNrn(v);
+                if (unrs == null) return false;
+
+                var bIdx = Enumerable.Range(0, blocks.Count).Where(b => unrs.Contains(blocks[b].UNr)).ToList();
+                if (bIdx.Count == 0) return false;
+                bool AmTag(int s) => string.IsNullOrEmpty(v.Tag) || slots[s].WTag == v.Tag;
+
+                // (a) alle belegten Stunden fixiert?
+                int belegt = 0;
+                bool alleFix = true;
+                foreach (int b in bIdx)
+                    for (int s = 0; s < slots.Count; s++)
+                    {
+                        if (startBelegung[b, s] != 1 || !AmTag(s)) continue;
+                        belegt++;
+                        if (!IstFix(b, s)) { alleFix = false; break; }
+                    }
+                if (belegt > 0 && alleFix) return true;
+
+                // (b) Doppelstunden: jedes Paar benachbarter Stunden der Gruppe am
+                // selben Tag muss auf beiden Seiten fixiert sein.
+                if (v.Kategorie == "Doppelstunden")
+                {
+                    int paare = 0;
+                    for (int s = 0; s + 1 < slots.Count; s++)
+                    {
+                        if (slots[s].WTag != slots[s + 1].WTag || !AmTag(s)) continue;
+                        var links = bIdx.Where(b => startBelegung[b, s] == 1).ToList();
+                        var rechts = bIdx.Where(b => startBelegung[b, s + 1] == 1).ToList();
+                        if (links.Count == 0 || rechts.Count == 0) continue;
+                        paare++;
+                        bool fixLinks = links.Any(b => IstFix(b, s));
+                        bool fixRechts = rechts.Any(b => IstFix(b, s + 1));
+                        if (!fixLinks || !fixRechts) return false;
+                    }
+                    return paare > 0;
+                }
+                return false;
+            }
+
+            // Betrifft ein Regelverstoß Stunden aus einem der Konflikte?
+            bool BetrifftKern(PlanValidator.Verletzung v)
+            {
+                var beteiligt = BeteiligteUNrn(v);
+                if (beteiligt != null) return beteiligt.Any(kernUNrn.Contains);
+                if (v.UNr > 0 && kernUNrn.Contains(v.UNr)) return true;
+                if (v.BetroffeneUNrn != null && v.BetroffeneUNrn.Any(kernUNrn.Contains)) return true;
+                if (!string.IsNullOrWhiteSpace(v.Klasse) && kernNamen.Contains(v.Klasse.Trim())) return true;
+                if (v.UNr == 0 && v.BetroffeneUNrn == null && !string.IsNullOrWhiteSpace(v.Lehrer))
+                    return v.Lehrer.Split(new[] { ',', '|', '/' }, StringSplitOptions.RemoveEmptyEntries)
+                                   .Any(n => kernNamen.Contains(n.Trim()));
+                return false;
+            }
+
+            // Urteil je Regelverstoß; Rang 0 = zuerst anzeigen.
+            (string urteil, bool rot, int rang) Urteil(PlanValidator.Verletzung v)
+            {
+                if (v.Kategorie == "Wochenstunden" && v.UNr > 0 && unverplantUNrn.Contains(v.UNr))
+                    return ("unverplant – wird vom Solver frei platziert", false, 2);
+                if (erg.Zulässig) return ("geduldet", false, 3);
+                bool fix = FixBedingt(v);
+                if (kernBekannt)
+                {
+                    bool imKern = BetrifftKern(v);
+                    if (fix && imKern) return ("fixierungsbedingt – von Fix-Relax geduldet; die UNr gehört zwar zu " +
+                                               "einem Konflikt, dessen Ursache ist aber eine andere Regel", false, 2);
+                    if (fix)           return ("fixierungsbedingt – von Fix-Relax geduldet", false, 2);
+                    if (imKern)        return ("BLOCKIERT", true, 0);
+                    return ("nicht ausschlaggebend", false, 3);
+                }
+                if (fix) return ("fixierungsbedingt – von Fix-Relax geduldet", false, 2);
+                return ("vermutlich blockierend – Solver hat keine Stunden benannt", true, 1);
+            }
+
+            var harte = (regelVerstöße ?? new List<PlanValidator.Verletzung>())
+                .Where(v => !v.Kategorie.StartsWith("Hinweis", StringComparison.OrdinalIgnoreCase))
+                .Select(v => (v, u: Urteil(v)))
+                .OrderBy(z => z.u.rang)
+                .ToList();
+
+            if (harte.Count == 0)
+            {
+                log?.Invoke("  Planprüfung: keine Regelverstöße im Startplan gefunden.");
+            }
+            else
+            {
+                int geduldet = harte.Count(z => z.u.rang == 2 && z.u.urteil.StartsWith("fixierungsbedingt"));
+                int unverplant = harte.Count(z => z.u.urteil.StartsWith("unverplant"));
+                var teile = new List<string>();
+                if (geduldet > 0) teile.Add($"{geduldet} fixierungsbedingt (von Fix-Relax geduldet)");
+                if (unverplant > 0) teile.Add($"{unverplant} wegen unverplanter Stunden (kein Konflikt)");
+                log?.Invoke($"  Planprüfung: {harte.Count} Regelverstoß/-verstöße im Startplan" +
+                            (teile.Count > 0 ? ", davon " + string.Join(", ", teile) : "") + ":");
+                int gezeigt = 0;
+                foreach (var (v, u) in harte)
+                {
+                    string ort = string.IsNullOrEmpty(v.Tag) ? "" :
+                        (v.Stunde > 0 ? $"{v.Tag} Std.{v.Stunde}: " : $"{v.Tag}: ");
+                    string wer = v.UNr > 0 ? $"UNr {v.UNr} " : (string.IsNullOrWhiteSpace(v.Lehrer) ? "" : v.Lehrer + " ");
+                    if (gezeigt < 40)
+                        log?.Invoke($"    {(u.rot ? "⛔" : "·")} [{v.Kategorie}] {ort}{wer}– {v.Details}  ({u.urteil})");
+                    gezeigt++;
+                    tabelle.Add(v with { Details = $"[{u.urteil}] {v.Details}" });
+                }
+                if (gezeigt > 40)
+                    log?.Invoke($"    … {gezeigt - 40} weitere, siehe Sheet 'ChkStart'.");
+            }
+
+            try
+            {
+                PlanValidator.SchreibeTabelle(excelPfad, tabelle, "ChkStart");
+                log?.Invoke("  Ergebnis der Vorabprüfung auch im Sheet 'ChkStart'.");
+            }
+            catch (Exception ex)
+            {
+                log?.Invoke($"  Sheet 'ChkStart' konnte nicht geschrieben werden: {ex.Message}");
+            }
+            log?.Invoke("=== Ende Vorabprüfung ===");
+        }
+
+        // =====================================================
         // ÖFFENTLICHE METHODE: MINIMALE ÄNDERUNGEN (Button 11)
         // Führt einen Solver-Lauf mit Stabilitätsbelohnung durch.
         // Der Ausgangsplan (als int[,] belegung) gibt vor, welche
@@ -7236,7 +8335,12 @@ namespace Stundenplan_V2
             HashSet<string> lehrerSpätFrühMinus2 = null,
             HashSet<string> lehrerSpätFrühMinus3 = null,
             // Klassengruppen (Untis-Konzept). null => Leer = kein Feature.
-            KlassenGruppen klassenGruppen = null)
+            KlassenGruppen klassenGruppen = null,
+            // Fix-Relax (PM-Option): gesetzt => jeder Nah-Klon wird DIREKT
+            // tolerant gelöst. Fixierungen bleiben hart, nur die von IHNEN
+            // verursachten harten Verstöße werden geduldet (wie in Planen()).
+            // false = unverändertes Verhalten.
+            bool fixRelaxBeiFixInfeasible = false)
         {
             debug = "";
             _infeasibleDetails.Clear();
@@ -7256,6 +8360,14 @@ namespace Stundenplan_V2
 
             int B = blocks.Count;
             int S = slots.Count;
+
+            // Fix-Relax nur, wenn die Option gesetzt ist UND es überhaupt
+            // Fixierungen gibt (sonst wäre der Relax-Modus ohnehin wirkungslos).
+            bool fixRelaxAktiv = fixRelaxBeiFixInfeasible &&
+                slots.Any(sl => sl.FixUNrn != null && sl.FixUNrn.Count > 0);
+            if (fixRelaxAktiv)
+                log?.Invoke("Stabilitätsmodus: Fix-Relax aktiv – Fixierungen bleiben hart, " +
+                            "die von ihnen verursachten harten Verstöße werden geduldet.");
 
             // Ausgangsplan als blockIdx → slotIdx konvertieren.
             // Hat ein Block mehrere Stunden (Wst > 1), wird jede einzeln
@@ -7297,8 +8409,143 @@ namespace Stundenplan_V2
                     if (ausgangsplanBelegung[b, s] == 1)
                         ausgangsCompound[b * S + s] = s; // Value wird in PlanenIntern nicht gebraucht
 
+            // =====================================================
+            // STARTPLAN AN DIE FIXIERUNGEN ANPASSEN
+            // Liegt eine fixierte Stunde im Startplan nicht an ihrem fixierten
+            // Slot, wird sie in dieser (internen) Kopie dorthin gelegt. Damit die
+            // Wochenstundenzahl stimmt, fällt dafür eine NICHT fixierte Stunde
+            // desselben Unterrichts weg (bevorzugt am selben Tag, sonst die
+            // zeitlich nächste). So bekommt der Solver einen Startwert, der zu
+            // den Fixierungen passt, und muss nur noch die dadurch entstehenden
+            // Kollisionen auflösen. Gespeicherte Lösung und "Fix UNrn" bleiben
+            // unverändert; die Abweichungsliste vergleicht weiter mit dem
+            // ursprünglichen Startplan.
+            // =====================================================
+            {
+                int angepasst = 0;
+                for (int b = 0; b < B; b++)
+                {
+                    var fixSlotsB = Enumerable.Range(0, S)
+                        .Where(s => slots[s].FixUNrn.Contains(blocks[b].UNr)).ToList();
+                    if (fixSlotsB.Count == 0) continue;
+
+                    var startSlotsB = Enumerable.Range(0, S)
+                        .Where(s => ausgangsCompound.ContainsKey(b * S + s)).ToList();
+                    var fehlend = fixSlotsB.Where(s => !startSlotsB.Contains(s)).ToList();
+                    if (fehlend.Count == 0) continue;
+
+                    int zielWst = Math.Max(blocks[b].Wst, fixSlotsB.Count);
+                    foreach (var sFix in fehlend)
+                    {
+                        ausgangsCompound[b * S + sFix] = sFix;
+                        startSlotsB.Add(sFix);
+
+                        string von = "";
+                        if (startSlotsB.Count > zielWst)
+                        {
+                            var kandidaten = startSlotsB.Where(s => !fixSlotsB.Contains(s)).ToList();
+                            if (kandidaten.Count > 0)
+                            {
+                                int weg = kandidaten
+                                    .OrderBy(s => slots[s].WTag == slots[sFix].WTag ? 0 : 1)
+                                    .ThenBy(s => Math.Abs(s - sFix))
+                                    .First();
+                                ausgangsCompound.Remove(b * S + weg);
+                                startSlotsB.Remove(weg);
+                                von = $"{slots[weg].WTag} Std.{slots[weg].Stunde} → ";
+                            }
+                        }
+                        angepasst++;
+                        log?.Invoke($"  Startplan angepasst: UNr {blocks[b].UNr} {von}" +
+                                    $"{slots[sFix].WTag} Std.{slots[sFix].Stunde} (fixiert)" +
+                                    (von.Length == 0 ? " – fehlte im Startplan" : ""));
+                    }
+                }
+                if (angepasst > 0)
+                    log?.Invoke($"Stabilitätsmodus: Startplan an {angepasst} Fixierung(en) angepasst " +
+                                "(nur intern für diesen Lauf; die gespeicherte Lösung bleibt unverändert).");
+            }
+
             log?.Invoke($"Stabilitätsmodus: {ausgangsCompound.Count} belegte Ausgangsslots als Referenz, " +
                         $"Gewicht {stabilitaetsGewicht}.");
+
+            // =====================================================
+            // VORABPRÜFUNG: Ist der Startplan im Solver-Modell zulässig?
+            // Gleiches Modell wie die Nah-Klone unten (inkl. Fix-Relax). Ist er
+            // es nicht, werden die blockierenden Stunden und Regeln ins Log und
+            // ins Sheet "ChkStart" geschrieben. Der Solverlauf startet danach
+            // trotzdem (Fehler hier dürfen ihn nie verhindern).
+            // =====================================================
+            try
+            {
+                var prüfErg = new StartplanPruefErgebnis();
+                PlanenIntern(
+                    excelPfad, blocks, slots, fachraumLimit, extraFreieTage,
+                    log, maxLösungen: 1, tauschKey: null,
+                    bewiesenInfeasible: out _,
+                    zeitlimitSekunden: zeitlimitSekunden,
+                    nichtFreieTage: nichtFreieTage,
+                    gewichtFrüh: gewichtFrüh, gewichtSpät: gewichtSpät,
+                    gewichtPäd: gewichtPäd, gewichtFrei: gewichtFrei,
+                    strafeHohl: strafeHohl, strafeDoppelHohl: strafeDoppelHohl,
+                    strafeDreifachHohl: strafeDreifachHohl, strafeStdFolge: strafeStdFolge,
+                    strafeEinzel: strafeEinzel, strafeSpäteLk: strafeSpäteLk, grenzeSpäteLk: grenzeSpäteLk,
+                    lehrerStammdaten: lehrerStammdaten,
+                    grossePausen: grossePausen,
+                    verbotSpäteDoppel: verbotSpäteDoppel,
+                    hauptfachSpätAnteilProzent: hauptfachSpätAnteilProzent,
+                    strafeHauptfachSpät: strafeHauptfachSpät,
+                    verbotMinus2Lehrer: verbotMinus2Lehrer,
+                    strafeMinus2Lehrer: strafeMinus2Lehrer,
+                    lehrerFreiTageMinus2: lehrerFreiTageMinus2,
+                    lehrerFreiTageMinus3: lehrerFreiTageMinus3,
+                    extraFreieStunden: extraFreieStunden,
+                    freieStundenBereich: freieStundenBereich,
+                    lehrerFreieStundenMinus2: lehrerFreieStundenMinus2,
+                    lehrerFreieStundenMinus3: lehrerFreieStundenMinus3,
+                    doppelSelberTagFaecher: doppelSelberTagFaecher,
+                    strafeDoppelSelberTag: strafeDoppelSelberTag,
+                    spätGrenzeFolgetag: spätGrenzeFolgetag,
+                    frühGrenzeFolgetag: frühGrenzeFolgetag,
+                    strafeSpätFrüh: strafeSpätFrüh,
+                    schwelleStdTagVortag: schwelleStdTagVortag,
+                    lehrerSpätFrühMinus2: lehrerSpätFrühMinus2,
+                    lehrerSpätFrühMinus3: lehrerSpätFrühMinus3,
+                    ausgangsplan: ausgangsCompound,
+                    stabilitaetsGewicht: 0,
+                    fixRelax: fixRelaxAktiv,
+                    startplanPrüfung: prüfErg);
+
+                // Startplan als Belegung [B,S] für die Regelprüfung (Regelnamen).
+                var startBelegung = new int[B, S];
+                foreach (var key in ausgangsCompound.Keys)
+                    startBelegung[key / S, key % S] = 1;
+                var regelVerstöße = PlanValidator.Prüfe(
+                    startBelegung, blocks, slots, grossePausen,
+                    meldeLeherMinus2: false,
+                    extraFreieTage: extraFreieTage,
+                    lehrerFreiTageMinus2: lehrerFreiTageMinus2,
+                    lehrerFreiTageMinus3: lehrerFreiTageMinus3,
+                    fachraumLimit: fachraumLimit,
+                    verbotMinus2Lehrer: verbotMinus2Lehrer,
+                    extraFreieStunden: extraFreieStunden,
+                    freieStundenBereich: freieStundenBereich,
+                    lehrerFreieStundenMinus2: lehrerFreieStundenMinus2,
+                    lehrerFreieStundenMinus3: lehrerFreieStundenMinus3,
+                    lehrerStammdaten: lehrerStammdaten,
+                    gruppen: klassenGruppen);
+
+                BerichteStartplanPrüfung(excelPfad, blocks, slots, prüfErg, regelVerstöße, fixRelaxAktiv, log,
+                    startBelegung: startBelegung,
+                    fachraumLimit: fachraumLimit,
+                    verbotMinus2Lehrer: verbotMinus2Lehrer,
+                    lehrerStammdaten: lehrerStammdaten,
+                    klassenGruppen: klassenGruppen);
+            }
+            catch (Exception ex)
+            {
+                log?.Invoke($"Vorabprüfung des Startplans fehlgeschlagen: {ex.Message}");
+            }
 
             var ergebnisse = new List<(int quality, int badUnits, int[,] belegung, string label, List<UnterrichtsBlock> blocks)>();
 
@@ -7339,13 +8586,37 @@ namespace Stundenplan_V2
                     lehrerSpätFrühMinus2: lehrerSpätFrühMinus2,
                     lehrerSpätFrühMinus3: lehrerSpätFrühMinus3,
                     ausgangsplan: ausgangsCompound,
-                    stabilitaetsGewicht: stabilitaetsGewicht);
+                    stabilitaetsGewicht: stabilitaetsGewicht,
+                    fixRelax: fixRelaxAktiv);
 
                 foreach (var sol in intern)
                 {
                     string label = $"{labelPrefix}_{i + 1}";
                     ergebnisse.Add((sol.quality, sol.badUnits, sol.belegung, label, blocks));
                     log?.Invoke($"  [{label}] Qualität: {sol.quality}, BadUnits: {sol.badUnits}");
+                }
+            }
+
+            // Fix-Relax: geduldete, fixierungsbedingte Verstöße auflisten
+            // (gleiche Ausgabe wie in Planen()).
+            if (fixRelaxAktiv && ergebnisse.Count > 0)
+            {
+                try
+                {
+                    var toleriert = PlanValidator.PrüfeFixUNrn(blocks, slots, grossePausen);
+                    if (toleriert.Count > 0)
+                    {
+                        log?.Invoke($"Fix-Relax: {toleriert.Count} durch Fixierungen verursachte " +
+                                    "harte Verstöße werden BEWUSST geduldet:");
+                        foreach (var g in toleriert
+                                     .GroupBy(v => v.Kategorie)
+                                     .OrderByDescending(g => g.Count()))
+                            log?.Invoke($"  ⚠ geduldet – {g.Key}: {g.Count()}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    log?.Invoke($"Fix-Relax: Auflistung der geduldeten Verstöße fehlgeschlagen: {ex.Message}");
                 }
             }
 

@@ -1,0 +1,87 @@
+<Window x:Class="Stundenplan_V2.Vertretung.KalenderDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Vertretung: Schuljahreskalender (Ferien / Feiertage / freie Tage)"
+        Width="900" Height="640"
+        MinWidth="640" MinHeight="420"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResizeWithGrip"
+        Closing="Window_Closing">
+
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Margin="0,0,0,10" TextWrapping="Wrap"
+                   Text="Legt die unterrichtsfreien Zeiten des Schuljahres fest. Diese bestimmen, an welchen Daten überhaupt Unterricht – und damit Vertretung und Zählung – stattfindet. Gesetzliche Feiertage werden berechnet, die NRW-Ferien aus 'ferien_nrw.json' neben dem Programm importiert. Bewegliche Ferientage, Studientage und sonstige freie Tage trägst du von Hand in die Tabelle ein (neue Zeile unten). Gespeichert wird in eine eigene Datei 'Vertretung_&lt;Schuljahr&gt;.xlsx' neben der Plandatei – die Plandatei selbst bleibt unberührt."/>
+
+        <!-- Kopf: Schuljahr, Start/Ende, Land (Zeile 1), Aktionen (Zeile 2) -->
+        <StackPanel Grid.Row="1" Margin="0,0,0,10">
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                <TextBlock Text="Schuljahr:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                <TextBox x:Name="TxtSchuljahr" Width="90" VerticalAlignment="Center"
+                         Margin="0,0,16,0" ToolTip="z. B. 2026/27"/>
+
+                <TextBlock Text="Erster Schultag:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                <DatePicker x:Name="DpStart" Width="130" VerticalAlignment="Center" Margin="0,0,16,0"/>
+
+                <TextBlock Text="Letzter Schultag:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                <DatePicker x:Name="DpEnde" Width="130" VerticalAlignment="Center" Margin="0,0,16,0"/>
+
+                <TextBlock Text="Land:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                <ComboBox x:Name="CbLand" Width="80" VerticalAlignment="Center" SelectedIndex="0">
+                    <ComboBoxItem Content="NRW"/>
+                </ComboBox>
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal">
+                <Button x:Name="BtnFerienDatei" Content="Ferien-JSON wählen …" Padding="10,4"
+                        Margin="0,0,10,0" Click="BtnFerienDatei_Click"/>
+                <Button x:Name="BtnImport" Content="Feiertage + NRW-Ferien importieren" Padding="10,4"
+                        Click="BtnImport_Click"/>
+                <TextBlock x:Name="TxtFerienQuelle" VerticalAlignment="Center" Margin="12,0,0,0"
+                           Foreground="DimGray" TextTrimming="CharacterEllipsis"/>
+            </StackPanel>
+        </StackPanel>
+
+        <DataGrid x:Name="DgKalender" Grid.Row="2" Margin="0,0,0,8"
+                  AutoGenerateColumns="False" CanUserAddRows="True" CanUserDeleteRows="True"
+                  GridLinesVisibility="All" HeadersVisibility="All"
+                  SelectionMode="Extended" SelectionUnit="FullRow">
+            <DataGrid.Columns>
+                <DataGridComboBoxColumn x:Name="ColTyp" Header="Typ" Width="170"
+                                        SelectedItemBinding="{Binding Typ}"/>
+                <DataGridTextColumn Header="Von (JJJJ-MM-TT)" Binding="{Binding Von}" Width="130"/>
+                <DataGridTextColumn Header="Bis (JJJJ-MM-TT)" Binding="{Binding Bis}" Width="130"/>
+                <DataGridTextColumn Header="Bezeichnung" Binding="{Binding Bezeichnung}" Width="*"/>
+                <DataGridTextColumn Header="Klassen (leer = ganze Schule; mit ; trennen)"
+                                    Binding="{Binding Klassen}" Width="220"/>
+            </DataGrid.Columns>
+            <DataGrid.ContextMenu>
+                <ContextMenu>
+                    <MenuItem x:Name="MnuZeileLoeschen" Header="Markierte Zeile(n) löschen"
+                              Click="MnuZeileLoeschen_Click"/>
+                </ContextMenu>
+            </DataGrid.ContextMenu>
+        </DataGrid>
+
+        <TextBlock x:Name="TxtStatus" Grid.Row="3" Margin="0,0,0,8"
+                   TextWrapping="Wrap" Foreground="DimGray"/>
+
+        <DockPanel Grid.Row="4" LastChildFill="True">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="BtnSpeichern" Content="Speichern und schließen" Width="180" Margin="0,0,6,0"
+                        Click="BtnSpeichern_Click"/>
+                <Button x:Name="BtnSchliessen" Content="Verwerfen und schließen" Width="180" IsCancel="True"
+                        Click="BtnSchliessen_Click"/>
+            </StackPanel>
+            <TextBlock VerticalAlignment="Center" Margin="0,0,12,0" TextWrapping="Wrap" Foreground="DimGray"
+                       Text="Tipp: Für einen einzelnen freien Tag Von und Bis gleich setzen. Mehrfach-Import ist unkritisch – schon vorhandene Einträge werden nicht doppelt angelegt."/>
+        </DockPanel>
+    </Grid>
+</Window>

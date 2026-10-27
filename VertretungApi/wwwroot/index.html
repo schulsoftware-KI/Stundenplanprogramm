@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Vertretungsplan</title>
+  <meta name="theme-color" content="#2f5d8a" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>Vertretungsplan</h1>
+    <span class="sub">Lehrer-Ansicht</span>
+  </header>
+
+  <main>
+    <section class="controls">
+      <label class="feld">
+        <span>Kürzel</span>
+        <input id="kuerzel" type="text" inputmode="text" autocapitalize="characters"
+               placeholder="z. B. L1" />
+      </label>
+
+      <div class="datumzeile">
+        <button id="tagZurueck" class="pfeil" aria-label="Tag zurück">◀</button>
+        <input id="datum" type="date" />
+        <button id="tagVor" class="pfeil" aria-label="Tag vor">▶</button>
+      </div>
+
+      <button id="laden" class="laden">Anzeigen</button>
+    </section>
+
+    <p id="status" class="status"></p>
+    <div id="liste" class="liste"></div>
+  </main>
+
+  <footer class="fuss">
+    <button id="heute" class="linkbtn">Heute</button>
+    <span id="stand" class="stand"></span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

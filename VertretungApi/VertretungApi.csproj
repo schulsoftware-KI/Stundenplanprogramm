@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>VertretungApi</RootNamespace>
+
+    <!--
+      NuGet-Audit nur für DIREKTE Pakete. Die gemeldeten Advisories betreffen
+      transitive Pakete ohne verfügbare Fix-Version:
+        - SQLitePCLRaw.lib.e_sqlite3 (nur Entwicklung; produktiv läuft PostgreSQL)
+        - Microsoft.OpenApi        (nur im Development-Modus eingebunden)
+      Sobald gepatchte Versionen verfügbar sind, diese Zeile entfernen und die
+      Pakete aktualisieren.
+    -->
+    <NuGetAuditMode>direct</NuGetAuditMode>
+  </PropertyGroup>
+
+  <!--
+    EF Core mit umschaltbarem Provider:
+      Database:Provider = "Sqlite"   -> Entwicklung (Datei vertretung.db)
+      Database:Provider = "Postgres" -> produktiv (Schulserver)
+    Hinweis: Falls NuGet für .NET 10 andere kompatible Versionen vorschlägt,
+    diese übernehmen (Hauptversion an das .NET-SDK anpassen).
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
+  </ItemGroup>
+
+</Project>

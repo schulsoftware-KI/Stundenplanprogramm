@@ -336,9 +336,9 @@ public static class WochenplanService
 
     private static bool Passt(Std x, WochenZielArt art, HashSet<string> werte)
     {
-        // Vertretungsbereitschaft (VBer) und UV-Stunden sind Dienste der Lehrkraft,
-        // kein Unterricht einer Lerngruppe.
-        bool bereitschaft = x.Art is "VBer" or "UV";
+        // Vertretungsbereitschaft (VBer), UV-Stunden und Pseudofächer (PSF…, Art „Pseudo")
+        // sind Dienste der Lehrkraft, kein Unterricht einer Lerngruppe.
+        bool bereitschaft = x.Art is "VBer" or "UV" or "Pseudo";
         return art switch
         {
             WochenZielArt.Lehrer => werte.Contains(x.Lehrer)

@@ -37,6 +37,16 @@ namespace Stundenplan_V2.Vertretung
 
         public bool IstVber => IstVberFach(Fach);
         public bool IstUv => IstUvFach(Fach);
+        public bool IstPseudo => IstPseudoFach(Fach);
+
+        /// <summary>
+        /// Pseudofach „PSF" bzw. „PSF_A" … „PSF_E": belegt die Lehrkraft (sie steht in
+        /// dieser Zeit NICHT für Vertretungen bereit), muss aber bei Abwesenheit nicht
+        /// vertreten werden und ist kein Unterricht einer Lerngruppe.
+        /// </summary>
+        public static bool IstPseudoFach(string? fach)
+            => !string.IsNullOrWhiteSpace(fach)
+               && fach.Trim().StartsWith("PSF", StringComparison.OrdinalIgnoreCase);
 
         public static bool IstVberFach(string? fach)
             => !string.IsNullOrWhiteSpace(fach)

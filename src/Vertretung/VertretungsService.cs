@@ -137,6 +137,8 @@ namespace Stundenplan_V2.Vertretung
                         if (!plan.Unterrichte.TryGetValue(unr, out var teile)) continue;
                         foreach (var teil in teile)
                         {
+                            // Pseudofächer (PSF…) müssen nicht vertreten werden.
+                            if (teil.IstPseudo) continue;
                             if (!Betrifft(abw, teil)) continue;
                             result.Add(new StundenInstanz
                             {

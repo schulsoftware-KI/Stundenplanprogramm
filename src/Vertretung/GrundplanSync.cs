@@ -22,7 +22,8 @@ namespace Stundenplan_V2.Vertretung
     //    Kurs     Klasse(n) = EF/Q1/Q2          -> Key = Schülergruppe der UV
     //                                              (z. B. "BIG1_EF_L68"), sonst "EF BIG1"
     //    Sonstige AG, Förder-/Differenz.-Gruppen -> Key = Schülergruppe bzw. Bezeichnung
-    //  Art: Unterricht | VBer | UV | Sperre ("ufrei"-Blocker der Teilzeitkräfte).
+    //  Art: Unterricht | VBer | UV | Pseudo (PSF…, nicht zu vertreten) |
+    //       Sperre ("ufrei"-Blocker der Teilzeitkräfte).
     //
     //  Die Plandatei wird nur gelesen (die Schülergruppe liest dieser Code
     //  selbst aus dem UV-Blatt; PlanLeser bleibt unverändert).
@@ -167,6 +168,7 @@ namespace Stundenplan_V2.Vertretung
                         string fach = Regex.Replace(teil.Fach.Trim(), @"\s+", " ");
                         string art = teil.IstUv ? "UV"
                                    : teil.IstVber ? "VBer"
+                                   : teil.IstPseudo ? "Pseudo"
                                    : string.Equals(fach, "ufrei", StringComparison.OrdinalIgnoreCase) ? "Sperre"
                                    : "Unterricht";
 

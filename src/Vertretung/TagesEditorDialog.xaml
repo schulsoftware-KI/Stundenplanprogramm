@@ -50,6 +50,8 @@
 
             <Button x:Name="BtnOnlinePush" Content="Online veröffentlichen" Padding="10,3"
                     Margin="16,0,6,0" Click="BtnOnlinePush_Click"/>
+            <Button x:Name="BtnGrundplanPush" Content="Grundplan veröffentlichen…" Padding="10,3"
+                    Margin="0,0,6,0" Click="BtnGrundplanPush_Click"/>
             <Button x:Name="BtnOnlineEinst" Content="Online-Einstellungen…" Padding="10,3"
                     Click="BtnOnlineEinst_Click"/>
         </WrapPanel>

@@ -19,7 +19,9 @@ public record PlanEintragDto(
     string? Grund,
     string? Bemerkung,
     bool? Fachgerecht,
-    bool IstAenderung);
+    bool IstAenderung,
+    int? UNr = null,          // Phase 2, Schritt 2: UNr der gehaltenen Stunde
+    int? GrundUNr = null);    // UNr der ersetzten Grundplan-Stunde
 
 /// <summary>Öffentliche Sicht (Schüler): OHNE Grund/Bemerkung/Fachgerecht.</summary>
 public record PlanEintragOeffentlichDto(

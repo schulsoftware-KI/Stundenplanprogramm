@@ -74,7 +74,9 @@ public class PlanController : ControllerBase
                 Grund = e.Grund,
                 Bemerkung = e.Bemerkung,
                 Fachgerecht = e.Fachgerecht,
-                IstAenderung = e.IstAenderung
+                IstAenderung = e.IstAenderung,
+                UNr = e.UNr,
+                GrundUNr = e.GrundUNr
             });
         }
 
@@ -142,7 +144,8 @@ public class PlanController : ControllerBase
 
     private static PlanEintragDto ToVoll(VertretungsEintragDb e) => new(
         e.Stunde, e.Klassen, e.Fach, e.Lehrer, e.OriginalLehrer, e.Raum,
-        e.Art.ToString(), e.Status, e.Grund, e.Bemerkung, e.Fachgerecht, e.IstAenderung);
+        e.Art.ToString(), e.Status, e.Grund, e.Bemerkung, e.Fachgerecht, e.IstAenderung,
+        e.UNr, e.GrundUNr);
 
     private static PlanEintragOeffentlichDto ToOeffentlich(VertretungsEintragDb e) => new(
         e.Stunde, e.Klassen, e.Fach, e.Lehrer, e.OriginalLehrer, e.Raum,

@@ -75,6 +75,27 @@ curl "http://localhost:5080/api/plan/klasse/7a?schuljahr=2026_27&datum=2026-10-1
 curl "http://localhost:5080/api/plan/lehrer/L50?schuljahr=2026_27&datum=2026-10-15"
 ```
 
+## Grundplan & Wochenpläne (Phase 2)
+
+| Methode | Pfad | Zweck | Auth |
+|---|---|---|---|
+| POST | `/api/grundplan/push` | Desktop lädt Grundplan-Version („gültig ab") + Kalender hoch | `X-Api-Key` |
+| GET | `/api/grundplan/versionen` | vorhandene Grundplan-Versionen | – |
+| GET | `/api/grundplan/kalender?schuljahr=..` | Schuljahreskalender mit Ferien/Feiertagen | – |
+| GET | `/api/grundplan/slots?lehrer=..&gruppe=..&wtag=..` | Rohdaten einer Version (Kontrolle) | – |
+| GET | `/api/woche/lehrer/{kuerzel}?datum=YYYY-MM-DD&wochen=1` | Wochenplan einer Lehrkraft | – |
+| GET | `/api/woche/klasse/{klasse}?datum=..&wochen=..` | Wochenplan einer Klasse (auch `EF`/`Q1`/`Q2` = ganze Stufe) | – |
+| GET | `/api/woche/gruppe/{schluessel}?datum=..&wochen=..` | Wochenplan einer Lerngruppe (z. B. Kurs `BIG1_EF_L68`) | – |
+| GET | `/api/woche/schueler/{id}?datum=..&wochen=..` | individueller Plan aus Klasse/Kursen | JWT (Personal) |
+
+Wochenplan = Grundplan-Version, die am Tag gilt (größtes „gültig ab" ≤ Datum) × Kalender
+(Ferien/Feiertage; Einträge mit Klassenliste nur für diese Klassen) × veröffentlichte
+Vertretungstage. `datum` fehlt = heute; geliefert wird ab Montag dieser Woche, `wochen` 1–6.
+
+`POST /api/seed/pseudodaten` erzeugt die Pseudo-Klassen/-Kurse aus dem zuletzt gepushten
+Grundplan (Schlüssel passen dann zu den Wochenplänen). Ohne Grundplan bzw. mit
+`?quelle=synthetisch` entstehen frei erfundene Daten wie in Phase 1B.
+
 ## Produktiv: Migrations statt EnsureCreated
 
 `EnsureCreated` ist nur für die Entwicklung gedacht und verträgt sich **nicht** mit Migrations.

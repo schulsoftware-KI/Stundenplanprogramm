@@ -47,6 +47,12 @@ public class VertretungsEintragDb
     public string? Bemerkung { get; set; }           // NICHT in der Schülersicht
     public bool? Fachgerecht { get; set; }
     public bool IstAenderung { get; set; }           // weicht vom Grundplan ab?
+
+    // Phase 2, Schritt 2: Zuordnung zum Grundplan für die Wochenansicht.
+    // Ältere Desktop-Versionen senden beides nicht (null) -> Zuordnung dann
+    // ersatzweise über Stunde + Lehrkraft + Klassen.
+    public int? UNr { get; set; }                    // UNr der gehaltenen Stunde (bei Verlegung: der verlegten)
+    public int? GrundUNr { get; set; }               // UNr der Grundplan-Stunde, an deren Stelle der Eintrag tritt
 }
 
 /// <summary>Backend-Konto (Admin/Lehrer/Schüler). Auth folgt in einem späteren Schritt.</summary>

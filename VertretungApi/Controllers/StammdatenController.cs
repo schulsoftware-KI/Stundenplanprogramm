@@ -26,9 +26,14 @@ public class StammdatenController : ControllerBase
         _cfg = cfg;
     }
 
-    /// <summary>Erzeugt (bzw. ersetzt) die Pseudo-Stammdaten. Schützt per X-Api-Key.</summary>
+    /// <summary>
+    /// Erzeugt (bzw. ersetzt) die Pseudo-Stammdaten. Schützt per X-Api-Key.
+    /// Liegt für das Schuljahr ein Grundplan vor, entstehen Klassen/Kurse genau aus dessen
+    /// Lerngruppen (neueste Version); sonst frei erfundene Daten wie in Phase 1B.
+    /// quelle=synthetisch erzwingt den alten Weg.
+    /// </summary>
     [HttpPost("seed/pseudodaten")]
-    public IActionResult Seed([FromQuery] string? schuljahr, [FromQuery] int? seed)
+    public IActionResult Seed([FromQuery] string? schuljahr, [FromQuery] int? seed, [FromQuery] string? quelle)
     {
         var erwartet = _cfg["Api:PushKey"];
         if (!string.IsNullOrEmpty(erwartet))
@@ -41,8 +46,28 @@ public class StammdatenController : ControllerBase
             ? (_cfg["DefaultSchuljahr"] ?? "2026/27")
             : schuljahr;
 
+        bool synthetischErzwungen = string.Equals(quelle, "synthetisch", StringComparison.OrdinalIgnoreCase);
+        var version = synthetischErzwungen ? null : _db.GrundplanVersionen
+            .Where(v => v.Schuljahr == sj)
+            .OrderByDescending(v => v.GueltigAb).ThenByDescending(v => v.Id)
+            .FirstOrDefault();
+
+        if (version != null)
+        {
+            var slots = _db.GrundplanSlots.Where(s => s.VersionId == version.Id).ToList();
+            var eg = PseudoDatenGenerator.GenerierenAusGrundplan(_db, version, slots, seed ?? 12345);
+            return Ok(new
+            {
+                schuljahr = sj,
+                quelle = "grundplan",
+                grundplan = version.Bezeichnung,
+                gueltigAb = version.GueltigAb,
+                eg.Schueler, eg.Klassen, eg.Kurse, eg.Zuordnungen
+            });
+        }
+
         var e = PseudoDatenGenerator.Generieren(_db, sj, seed ?? 12345);
-        return Ok(new { schuljahr = sj, e.Schueler, e.Klassen, e.Kurse, e.Zuordnungen });
+        return Ok(new { schuljahr = sj, quelle = "synthetisch", e.Schueler, e.Klassen, e.Kurse, e.Zuordnungen });
     }
 
     /// <summary>Lerngruppen (Klassen + Kurse), optional gefiltert. Nur Personal.</summary>

@@ -45,6 +45,13 @@ namespace Stundenplan_V2.Vertretung
         public string? Bemerkung { get; set; }
         public bool? Fachgerecht { get; set; }
         public bool IstAenderung { get; set; }
+
+        // Phase 2, Schritt 2: damit die API die Änderung exakt der Grundplan-
+        // Stunde zuordnen kann (Wochenansicht).
+        /// <summary>UNr der gehaltenen Stunde (bei „verlegt hin": die verlegte).</summary>
+        public int? UNr { get; set; }
+        /// <summary>UNr der Grundplan-Stunde, an deren Stelle die Zelle tritt.</summary>
+        public int? GrundUNr { get; set; }
     }
 
     public class OnlineEinstellungen
@@ -110,7 +117,11 @@ namespace Stundenplan_V2.Vertretung
                     Grund = z.Eintrag?.Grund.ToString(),
                     Bemerkung = string.IsNullOrWhiteSpace(z.Info) ? z.Eintrag?.Bemerkung : z.Info,
                     Fachgerecht = z.Eintrag?.Fachgerecht,
-                    IstAenderung = true
+                    IstAenderung = true,
+                    UNr = z.UNr > 0 ? z.UNr : null,
+                    // Bei „verlegt hin" ersetzt TagesplanBerechnung z.UNr durch die
+                    // verlegte UNr; die Buchung behält die UNr der Grundplan-Zelle.
+                    GrundUNr = (z.Eintrag?.UNr ?? z.UNr) > 0 ? (z.Eintrag?.UNr ?? z.UNr) : null
                 });
             }
             return dto;

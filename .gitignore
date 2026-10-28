@@ -1,0 +1,10 @@
+# Build-Ausgaben von Visual Studio / dotnet
+bin/
+obj/
+.vs/
+*.suo
+
+# Lokale SQLite-Datenbank der VertretungApi (enthält Laufzeitdaten)
+vertretung.db
+vertretung.db-shm
+vertretung.db-wal

@@ -17,6 +17,12 @@ public class AppDbContext : DbContext
     public DbSet<Zugehoerigkeit> Zugehoerigkeiten => Set<Zugehoerigkeit>();
     public DbSet<Lektion> Lektionen => Set<Lektion>();
 
+    // Grundplan + Kalender (Phase 2, Schritt 1)
+    public DbSet<GrundplanVersion> GrundplanVersionen => Set<GrundplanVersion>();
+    public DbSet<GrundplanSlot> GrundplanSlots => Set<GrundplanSlot>();
+    public DbSet<KalenderDb> Kalender => Set<KalenderDb>();
+    public DbSet<FreieZeitDb> FreieZeiten => Set<FreieZeitDb>();
+
     protected override void OnModelCreating(ModelBuilder b)
     {
         b.Entity<VertretungsTag>()
@@ -50,5 +56,28 @@ public class AppDbContext : DbContext
             .HasIndex(z => new { z.SchuelerId, z.LerngruppeId, z.Schuljahr }).IsUnique();
 
         b.Entity<Lektion>().HasIndex(x => new { x.Datum, x.Stunde, x.LerngruppeId });
+
+        // --- Grundplan (versioniert) ---
+        b.Entity<GrundplanVersion>()
+            .HasIndex(v => new { v.Schuljahr, v.GueltigAb }).IsUnique();
+
+        b.Entity<GrundplanVersion>()
+            .HasMany(v => v.Slots)
+            .WithOne(s => s.Version!)
+            .HasForeignKey(s => s.VersionId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        b.Entity<GrundplanSlot>().HasIndex(s => new { s.VersionId, s.Lehrer });
+        b.Entity<GrundplanSlot>().HasIndex(s => new { s.VersionId, s.LerngruppeKey });
+        b.Entity<GrundplanSlot>().HasIndex(s => new { s.VersionId, s.WTagIndex, s.Stunde });
+
+        // --- Kalender ---
+        b.Entity<KalenderDb>().HasIndex(k => k.Schuljahr).IsUnique();
+
+        b.Entity<KalenderDb>()
+            .HasMany(k => k.FreieZeiten)
+            .WithOne(f => f.Kalender!)
+            .HasForeignKey(f => f.KalenderId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

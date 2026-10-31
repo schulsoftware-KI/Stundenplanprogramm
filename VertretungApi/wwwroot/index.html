@@ -3,43 +3,72 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Vertretungsplan</title>
-  <meta name="theme-color" content="#2f5d8a" />
+  <title>Stundenplan</title>
+  <meta name="description" content="Wochenplan mit tagesaktuellen Vertretungen" />
+  <meta name="theme-color" content="#2340a8" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#15201a" media="(prefers-color-scheme: dark)" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header class="topbar">
-    <h1>Vertretungsplan</h1>
-    <span class="sub">Lehrer-Ansicht</span>
+  <header class="kopf">
+    <h1 id="titel">Stundenplan</h1>
+    <button id="aktualisieren" class="symbol" type="button" aria-label="Aktualisieren">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+        <path d="M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
   </header>
 
-  <main>
-    <section class="controls">
-      <label class="feld">
-        <span>Kürzel</span>
-        <input id="kuerzel" type="text" inputmode="text" autocapitalize="characters"
-               placeholder="z. B. L1" />
-      </label>
-
-      <div class="datumzeile">
-        <button id="tagZurueck" class="pfeil" aria-label="Tag zurück">◀</button>
-        <input id="datum" type="date" />
-        <button id="tagVor" class="pfeil" aria-label="Tag vor">▶</button>
+  <main id="inhalt">
+    <section class="auswahl" aria-label="Was möchtest du sehen?">
+      <div class="modi" role="group" aria-label="Ansicht">
+        <button type="button" data-modus="lehrer" aria-pressed="false">Lehrkraft</button>
+        <button type="button" data-modus="klasse" aria-pressed="true">Klasse</button>
+        <button type="button" data-modus="gruppe" aria-pressed="false">Kurs</button>
       </div>
-
-      <button id="laden" class="laden">Anzeigen</button>
+      <label class="wahl">
+        <span id="wahlText" class="vh">Klasse wählen</span>
+        <select id="wert" aria-labelledby="wahlText"></select>
+      </label>
     </section>
 
-    <p id="status" class="status"></p>
-    <div id="liste" class="liste"></div>
+    <nav class="woche" aria-label="Woche">
+      <button id="zurueck" class="pfeil" type="button" aria-label="Vorige Woche">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="woche-titel">
+        <span id="zeitraum" class="zeitraum"></span>
+        <span id="kw" class="kw"></span>
+        <input id="datum" type="date" aria-label="Datum wählen" />
+      </div>
+      <button id="vor" class="pfeil" type="button" aria-label="Nächste Woche">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button id="heute" class="textknopf" type="button">Heute</button>
+    </nav>
+
+    <div id="tage" class="tage" role="tablist" aria-label="Tag"></div>
+
+    <div class="werkzeuge">
+      <h2 id="tagTitel" class="tag-titel"></h2>
+      <label class="schalter">
+        <input id="nurAenderungen" type="checkbox" />
+        <span>Nur Änderungen</span>
+      </label>
+    </div>
+
+    <p id="meldung" class="meldung" role="status" hidden></p>
+    <section id="liste" class="liste" role="tabpanel" aria-labelledby="tagTitel"></section>
+    <div id="raster" class="raster-huelle"></div>
   </main>
 
   <footer class="fuss">
-    <button id="heute" class="linkbtn">Heute</button>
-    <span id="stand" class="stand"></span>
+    <span id="stand" class="stand" aria-live="polite"></span>
+    <span id="grundplan" class="grundplan"></span>
   </footer>
 
   <script src="app.js"></script>

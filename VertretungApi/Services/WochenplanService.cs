@@ -161,6 +161,70 @@ public static class WochenplanService
     }
 
     // =================================================================
+    //  Auswahllisten (Phase 2, Schritt 3): Lehrkräfte, Klassen, Kurse …
+    // =================================================================
+
+    /// <summary>
+    /// Liefert, was sich in der PWA auswählen lässt – aus der Grundplan-Version, die am
+    /// <paramref name="datum"/> gilt. Liegt das Datum vor dem ersten Grundplan des
+    /// Schuljahres, wird dessen erste Version genommen; ohne Grundplan sind alle Listen leer.
+    /// </summary>
+    public static async Task<AuswahlDto> AuswahlAsync(AppDbContext db, DateOnly datum)
+    {
+        var kal = await db.Kalender
+            .Where(k => k.Start <= datum && k.Ende >= datum)
+            .OrderByDescending(k => k.Id)
+            .FirstOrDefaultAsync();
+
+        IQueryable<GrundplanVersion> q = db.GrundplanVersionen;
+        if (kal != null) q = q.Where(v => v.Schuljahr == kal.Schuljahr);
+
+        var ver = await q.Where(v => v.GueltigAb <= datum)
+                      .OrderByDescending(v => v.GueltigAb).ThenByDescending(v => v.Id)
+                      .FirstOrDefaultAsync()
+                  ?? await q.OrderBy(v => v.GueltigAb).ThenBy(v => v.Id)
+                      .FirstOrDefaultAsync();
+
+        if (ver == null)
+            return new AuswahlDto(null, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(),
+                Array.Empty<AuswahlGruppeDto>(), Array.Empty<AuswahlGruppeDto>());
+
+        // „Sperre" (ufrei-Blocker) ist kein Plan-Eintrag und bleibt außen vor.
+        var slots = (await db.GrundplanSlots.Where(s => s.VersionId == ver.Id).ToListAsync())
+            .Where(s => !string.Equals(s.Art, "Sperre", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var unterricht = slots
+            .Where(s => string.Equals(s.Art, "Unterricht", StringComparison.OrdinalIgnoreCase)
+                        && !string.IsNullOrWhiteSpace(s.LerngruppeKey))
+            .ToList();
+
+        var lehrer = slots.Select(s => s.Lehrer.Trim()).Where(l => l.Length > 0)
+            .Distinct(Cmp).OrderBy(l => l, Cmp).ToList();
+
+        var klassen = unterricht.Where(s => s.LerngruppeTyp == "Klasse")
+            .Select(s => s.LerngruppeKey.Trim()).Distinct(Cmp).OrderBy(k => k, Cmp).ToList();
+
+        var stufen = unterricht.Where(s => s.LerngruppeTyp == "Kurs")
+            .Select(s => s.Klasse.Trim().ToUpperInvariant()).Where(k => k.Length > 0)
+            .Distinct(Cmp).OrderBy(k => k, Cmp).ToList();
+
+        List<AuswahlGruppeDto> Gruppiere(string typ) => unterricht
+            .Where(s => s.LerngruppeTyp == typ)
+            .GroupBy(s => s.LerngruppeKey.Trim(), Cmp)
+            .Select(g => new AuswahlGruppeDto(
+                g.Key,
+                g.Select(s => s.Klasse.Trim()).FirstOrDefault(k => k.Length > 0) ?? "",
+                g.GroupBy(s => s.Fach, Cmp).OrderByDescending(f => f.Count()).First().Key,
+                string.Join(", ", g.Select(s => s.Lehrer.Trim()).Where(l => l.Length > 0).Distinct(Cmp))))
+            .OrderBy(a => a.Stufe, Cmp).ThenBy(a => a.Fach, Cmp).ThenBy(a => a.Schluessel, Cmp)
+            .ToList();
+
+        return new AuswahlDto(
+            $"{ver.Bezeichnung} (gültig ab {ver.GueltigAb:dd.MM.yyyy})",
+            lehrer, klassen, stufen, Gruppiere("Kurs"), Gruppiere("Sonstige"));
+    }
+
+    // =================================================================
     //  Ein Tag: Grundplan -> klassenbezogen frei -> Vertretungen
     // =================================================================
 
@@ -175,6 +239,7 @@ public static class WochenplanService
         public string GrundLehrer = ""; // laut Grundplan – für die Zuordnung der Vertretungen
         public string? OriginalLehrer;
         public string? Raum;
+        public string? OriginalRaum;    // gesetzt, wenn eine Raumänderung den Raum ersetzt hat
         public string Art = "Unterricht";
         public string Status = "Normal";
         public string? Info;
@@ -241,7 +306,11 @@ public static class WochenplanService
                 case "Raumvertretung":
                     if (ziel != null)
                     {
-                        if (!string.IsNullOrWhiteSpace(e.Raum)) ziel.Raum = e.Raum;
+                        if (!string.IsNullOrWhiteSpace(e.Raum) && !Gleich(e.Raum, ziel.Raum))
+                        {
+                            ziel.OriginalRaum ??= ziel.Raum;
+                            ziel.Raum = e.Raum;
+                        }
                         Markiere(ziel, status, "Raumwechsel");
                     }
                     break;
@@ -355,6 +424,7 @@ public static class WochenplanService
         x.Lehrer,
         string.IsNullOrWhiteSpace(x.OriginalLehrer) || Gleich(x.OriginalLehrer, x.Lehrer) ? null : x.OriginalLehrer,
         x.Raum,
+        string.IsNullOrWhiteSpace(x.OriginalRaum) || Gleich(x.OriginalRaum, x.Raum) ? null : x.OriginalRaum,
         x.Gruppen.OrderBy(g => g, Cmp).ToList(),
         x.Klassen.OrderBy(k => k, Cmp).ToList(),
         x.Art,

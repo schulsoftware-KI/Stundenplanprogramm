@@ -87,10 +87,16 @@ curl "http://localhost:5080/api/plan/lehrer/L50?schuljahr=2026_27&datum=2026-10-
 | GET | `/api/woche/klasse/{klasse}?datum=..&wochen=..` | Wochenplan einer Klasse (auch `EF`/`Q1`/`Q2` = ganze Stufe) | – |
 | GET | `/api/woche/gruppe/{schluessel}?datum=..&wochen=..` | Wochenplan einer Lerngruppe (z. B. Kurs `BIG1_EF_L68`) | – |
 | GET | `/api/woche/schueler/{id}?datum=..&wochen=..` | individueller Plan aus Klasse/Kursen | JWT (Personal) |
+| GET | `/api/woche/auswahl?datum=..` | Auswahllisten für die PWA (Lehrkräfte, Klassen, Stufen, Kurse, Gruppen) | – |
 
 Wochenplan = Grundplan-Version, die am Tag gilt (größtes „gültig ab" ≤ Datum) × Kalender
 (Ferien/Feiertage; Einträge mit Klassenliste nur für diese Klassen) × veröffentlichte
 Vertretungstage. `datum` fehlt = heute; geliefert wird ab Montag dieser Woche, `wochen` 1–6.
+
+Die PWA unter `/` (Ordner `wwwroot`) zeigt diese Wochenpläne: Auswahl Lehrkraft/Klasse/Kurs,
+Woche vor/zurück, Änderungen farbig markiert; auf dem Handy hochkant als Tagesliste, auf
+breiten Bildschirmen (oder Handy quer) als Wochenraster. Zuletzt geladene Wochen bleiben
+offline lesbar (im Browser gespeichert).
 
 `POST /api/seed/pseudodaten` erzeugt die Pseudo-Klassen/-Kurse aus dem zuletzt gepushten
 Grundplan (Schlüssel passen dann zu den Wochenplänen). Ohne Grundplan bzw. mit

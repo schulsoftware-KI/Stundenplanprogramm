@@ -1,140 +1,494 @@
-:root {
-  --bg: #f4f6f9;
-  --karte: #ffffff;
-  --text: #1c2430;
-  --dim: #6b7682;
-  --rand: #e2e7ee;
-  --kopf: #2f5d8a;
+/* =====================================================================
+   Stundenplan-PWA – Gestaltung „Heft & Rotstift"
+   Hell:   weißes Papier, Königsblau als Tinte, Änderungen wie Korrekturen
+           (alter Wert rot durchgestrichen, Randstrich in der Farbe der Art –
+           dieselben Farben wie im Desktop-Wocheneditor).
+   Dunkel: „Tafel" – Kreideweiß auf Tafelgrün, Kreidegelb als Akzent.
+   Nur Systemschriften (offline, keine externen Dienste).
+   ===================================================================== */
 
-  --vertretung: #2e9e5b;
-  --entfall: #d64545;
-  --verlegung: #e08a00;
-  --betreuung: #2f74c0;
-  --raum: #c9a800;
-  --normal: #9aa4b0;
+:root {
+  --schrift: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  --seite: #eef2f8;
+  --papier: #ffffff;
+  --tinte: #1f2a44;          /* Blauschwarz wie Füllertinte */
+  --leise: #56627c;
+  --linie: #d6deeb;          /* Heftlinien */
+  --kopf-bg: #2340a8;        /* Königsblau */
+  --kopf-text: #ffffff;
+  --akzent: #2340a8;
+  --auf-akzent: #ffffff;
+  --akzent-hell: #e4e9f8;
+  --rot: #d0282d;            /* Rotstift */
+  --auf-farbe: #ffffff;
+
+  --vertretung: #24804a;  --vertretung-t: #e4f3e9;
+  --entfall: #c8262b;     --entfall-t: #fce7e6;
+  --verlegung: #a65e0a;   --verlegung-t: #fcefdc;
+  --betreuung: #0f7690;   --betreuung-t: #dcf0f5;
+  --raum: #8a6b00;        --raum-t: #faf1cf;
+  --frei: #636e83;        --frei-t: #eef1f6;
+  --sonst: #6a4fb3;       --sonst-t: #eeeafa;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --seite: #1c2a23;        /* Tafelgrün */
+    --papier: #22322a;
+    --tinte: #eef3ec;        /* Kreide */
+    --leise: #a9b9ae;
+    --linie: #3a4d43;
+    --kopf-bg: #15201a;
+    --kopf-text: #eef3ec;
+    --akzent: #f0d264;       /* Kreidegelb */
+    --auf-akzent: #1c2a23;
+    --akzent-hell: #33442f;
+    --rot: #ff8070;
+    --auf-farbe: #15201a;
+
+    --vertretung: #7ad49a;  --vertretung-t: #24412f;
+    --entfall: #ff8070;     --entfall-t: #4a2723;
+    --verlegung: #ffb660;   --verlegung-t: #463419;
+    --betreuung: #69cfe3;   --betreuung-t: #1b3b43;
+    --raum: #e9cd52;        --raum-t: #433d1a;
+    --frei: #9fb0a5;        --frei-t: #2a3a31;
+    --sonst: #c3b2ff;       --sonst-t: #34304c;
+  }
 }
 
 * { box-sizing: border-box; }
 
+html { -webkit-text-size-adjust: 100%; }
+
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  -webkit-text-size-adjust: 100%;
+  font-family: var(--schrift);
+  font-size: 16px;
+  line-height: 1.4;
+  background: var(--seite);
+  color: var(--tinte);
 }
 
-.topbar {
-  background: var(--kopf);
-  color: #fff;
-  padding: 14px 16px calc(14px + env(safe-area-inset-bottom, 0)) 16px;
-  padding-top: calc(14px + env(safe-area-inset-top, 0));
+button, select, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+
+:focus-visible { outline: 3px solid var(--akzent); outline-offset: 2px; }
+
+.vh {
+  position: absolute !important; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; margin: -1px; padding: 0; border: 0;
+}
+
+/* ---------------- Kopf ---------------- */
+
+.kopf {
+  background: var(--kopf-bg);
+  color: var(--kopf-text);
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  align-items: center;
+  gap: 12px;
+  padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 12px 16px;
 }
-.topbar h1 { font-size: 1.15rem; margin: 0; font-weight: 650; }
-.topbar .sub { font-size: .8rem; opacity: .85; }
-
-main { max-width: 680px; margin: 0 auto; padding: 16px; }
-
-.controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: flex-end;
-  margin-bottom: 14px;
+.kopf h1 {
+  flex: 1;
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.feld { display: flex; flex-direction: column; gap: 4px; flex: 1 1 120px; }
-.feld span { font-size: .72rem; color: var(--dim); text-transform: uppercase; letter-spacing: .03em; }
+.symbol {
+  display: grid; place-items: center;
+  width: 44px; height: 44px;
+  border: none; border-radius: 50%;
+  background: transparent;
+  color: inherit;
+}
+.symbol:hover { background: rgba(255, 255, 255, 0.12); }
+.laedt .symbol svg { animation: drehen 0.9s linear infinite; }
+@keyframes drehen { to { transform: rotate(360deg); } }
 
-input[type="text"], input[type="date"] {
-  font-size: 1rem;
-  padding: 9px 10px;
-  border: 1px solid var(--rand);
+/* ---------------- Inhalt ---------------- */
+
+main {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 14px 16px 8px 16px;
+}
+
+.auswahl { display: grid; gap: 10px; margin-bottom: 12px; }
+
+.modi {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border: 1px solid var(--linie);
   border-radius: 10px;
-  background: #fff;
-  color: var(--text);
-  width: 100%;
+  background: var(--papier);
+  padding: 3px;
+  gap: 3px;
 }
-
-.datumzeile { display: flex; align-items: center; gap: 6px; flex: 2 1 220px; }
-.datumzeile input[type="date"] { flex: 1; }
-
-.pfeil {
-  border: 1px solid var(--rand);
-  background: #fff;
-  border-radius: 10px;
-  width: 42px; height: 42px;
-  font-size: 1rem; cursor: pointer;
-  color: var(--text);
-}
-.pfeil:active { background: #eef2f7; }
-
-.laden {
-  flex: 1 1 100%;
+.modi button {
   border: none;
-  background: var(--kopf);
-  color: #fff;
-  font-size: 1rem;
+  border-radius: 7px;
+  background: transparent;
+  padding: 8px 6px;
   font-weight: 600;
-  padding: 11px 14px;
+  color: var(--leise);
+}
+.modi button[aria-pressed="true"] { background: var(--akzent); color: var(--auf-akzent); }
+
+.wahl select {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--linie);
   border-radius: 10px;
+  background: var(--papier);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+/* Wochenleiste */
+.woche {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px auto;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.pfeil {
+  display: grid; place-items: center;
+  width: 44px; height: 44px;
+  border: 1px solid var(--linie);
+  border-radius: 10px;
+  background: var(--papier);
+}
+.woche-titel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.2;
+  min-width: 0;
+}
+.zeitraum { font-weight: 650; font-size: 1.02rem; text-align: center; text-wrap: balance; }
+.kw { font-size: 0.8rem; color: var(--leise); font-variant-numeric: tabular-nums; }
+/* Unsichtbares Datumsfeld über dem Titel: Antippen öffnet die Datumsauswahl. */
+.woche-titel input[type="date"] {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  border: 0;
+}
+.woche-titel:focus-within { outline: 3px solid var(--akzent); outline-offset: 2px; border-radius: 8px; }
+.textknopf {
+  border: none;
+  background: none;
+  color: var(--akzent);
+  font-weight: 650;
+  padding: 10px 6px;
+}
+
+/* Tagesreiter (Handy) */
+.tage {
+  display: grid;
+  grid-auto-columns: 1fr;
+  grid-auto-flow: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.tab {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 7px 2px 8px 2px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--tinte);
+}
+.tab .wt { font-size: 0.8rem; color: var(--leise); }
+.tab .dt { font-size: 1.2rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tab .frei-text { font-size: 0.7rem; color: var(--leise); }
+.tab.frei .dt { color: var(--leise); font-weight: 500; }
+.tab.heute .dt { text-decoration: underline 3px var(--akzent); text-underline-offset: 4px; }
+.tab[aria-selected="true"] { background: var(--akzent); color: var(--auf-akzent); }
+.tab[aria-selected="true"] .wt,
+.tab[aria-selected="true"] .frei-text,
+.tab[aria-selected="true"].frei .dt { color: var(--auf-akzent); }
+.tab[aria-selected="true"].heute .dt { text-decoration-color: var(--auf-akzent); }
+/* Roter Punkt: An diesem Tag gibt es Änderungen. */
+.tab.hat-aenderung::after {
+  content: "";
+  position: absolute;
+  top: 6px; right: calc(50% - 22px);
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--rot);
+  box-shadow: 0 0 0 2px var(--seite);
+}
+
+.werkzeuge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0 8px 0;
+}
+.tag-titel { margin: 0; font-size: 1.1rem; font-weight: 700; }
+.schalter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.92rem;
+  color: var(--leise);
+  white-space: nowrap;
   cursor: pointer;
 }
-.laden:active { opacity: .9; }
+.schalter input { width: 20px; height: 20px; accent-color: var(--akzent); margin: 0; }
 
-.status { color: var(--dim); font-size: .9rem; min-height: 1.1em; margin: 6px 2px; }
+.meldung {
+  margin: 18px 4px;
+  padding: 16px;
+  border-left: 4px solid var(--akzent);
+  background: var(--papier);
+  color: var(--tinte);
+}
 
-.liste { display: flex; flex-direction: column; gap: 10px; }
+/* ---------------- Tagesliste (Handy) ---------------- */
 
-.karte {
-  background: var(--karte);
-  border: 1px solid var(--rand);
-  border-left: 6px solid var(--normal);
+.liste {
+  background: var(--papier);
+  border: 1px solid var(--linie);
   border-radius: 12px;
-  padding: 10px 12px;
+  overflow: hidden;
+}
+.liste:empty { display: none; }
+
+.std-zeile {
   display: grid;
-  grid-template-columns: 44px 1fr auto;
-  gap: 4px 12px;
-  align-items: start;
+  grid-template-columns: 2.6rem 1fr;
+  border-top: 1px solid var(--linie);
 }
-.karte.vertretung { border-left-color: var(--vertretung); }
-.karte.entfall    { border-left-color: var(--entfall); }
-.karte.verlegung  { border-left-color: var(--verlegung); }
-.karte.betreuung  { border-left-color: var(--betreuung); }
-.karte.eva        { border-left-color: var(--betreuung); }
-.karte.raumvertretung { border-left-color: var(--raum); }
+.std-zeile:first-child { border-top: none; }
+.std-nr {
+  padding: 10px 8px 0 0;
+  text-align: right;
+  font-size: 1.35rem;
+  font-weight: 750;
+  color: var(--akzent);
+  font-variant-numeric: tabular-nums;
+}
+.std-eintraege { min-width: 0; }
+/* Freie Stunde (Lücke) in der Tagesliste: schmal und zurückgenommen */
+.frei-zeile .std-nr { padding-top: 6px; font-size: 1.1rem; color: var(--leise); font-weight: 650; }
+.keine { padding: 6px 12px 7px 14px; color: var(--leise); }
 
-.stunde { grid-row: 1 / span 3; font-size: 1.5rem; font-weight: 700; color: var(--kopf); text-align: center; }
-.kopf { font-weight: 650; }
-.kopf .entfalltext { text-decoration: line-through; color: var(--entfall); }
-.detail { color: var(--dim); font-size: .88rem; }
+.leer, .tagfrei {
+  padding: 22px 16px;
+  color: var(--leise);
+}
+.tagfrei {
+  font-weight: 650;
+  font-size: 1.05rem;
+  background-image: repeating-linear-gradient(135deg, transparent 0 9px, var(--linie) 9px 10px);
+}
+
+/* ---------------- Eintrag (eine Stunde) ---------------- */
+
+.eintrag {
+  padding: 9px 12px 10px 10px;
+  border-left: 4px solid transparent;
+  min-width: 0;
+}
+.eintrag + .eintrag { border-top: 1px dashed var(--linie); }
+
+.e-oben, .e-unten {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+.e-unten { margin-top: 1px; }
+.fach { font-weight: 700; font-size: 1.05rem; overflow-wrap: anywhere; }
+.raum { color: var(--leise); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wer { color: var(--leise); overflow-wrap: anywhere; }
 .badge {
-  grid-row: 1; grid-column: 3;
-  font-size: .72rem; font-weight: 700;
-  padding: 3px 8px; border-radius: 999px;
-  color: #fff; background: var(--normal); white-space: nowrap;
+  flex: none;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 999px;
+  color: var(--auf-farbe);
+  background: var(--frei);
+  white-space: nowrap;
 }
-.badge.vertretung { background: var(--vertretung); }
-.badge.entfall    { background: var(--entfall); }
-.badge.verlegung  { background: var(--verlegung); }
-.badge.betreuung, .badge.eva { background: var(--betreuung); }
-.badge.raumvertretung { background: var(--raum); color: #2b2b2b; }
 
-.leer { text-align: center; color: var(--dim); padding: 30px 10px; }
+/* Korrektur: alter Wert rot gestrichen, neuer daneben */
+s.alt {
+  color: var(--leise);
+  text-decoration-line: line-through;
+  text-decoration-color: var(--rot);
+  text-decoration-thickness: 2px;
+}
+.neu { font-weight: 700; color: var(--tinte); }
+
+/* Änderungsarten: Randstrich + Tönung + Abzeichen */
+.eintrag.vertretung { border-left-color: var(--vertretung); background: var(--vertretung-t); }
+.eintrag.vertretung .badge { background: var(--vertretung); }
+.eintrag.entfall    { border-left-color: var(--entfall); background: var(--entfall-t); }
+.eintrag.entfall .badge { background: var(--entfall); }
+.eintrag.verlegung  { border-left-color: var(--verlegung); background: var(--verlegung-t); }
+.eintrag.verlegung .badge { background: var(--verlegung); }
+.eintrag.betreuung  { border-left-color: var(--betreuung); background: var(--betreuung-t); }
+.eintrag.betreuung .badge { background: var(--betreuung); }
+.eintrag.raumwechsel { border-left-color: var(--raum); background: var(--raum-t); }
+.eintrag.raumwechsel .badge { background: var(--raum); }
+.eintrag.frei       { border-left-color: var(--frei); background: var(--frei-t); }
+.eintrag.frei .badge { background: var(--frei); }
+.eintrag.sonst      { border-left-color: var(--sonst); background: var(--sonst-t); }
+.eintrag.sonst .badge { background: var(--sonst); }
+
+/* Entfall/verlegt/frei: ganze Stunde mit dem Rotstift gestrichen */
+.eintrag.gestrichen .fach,
+.eintrag.gestrichen .wer,
+.eintrag.gestrichen .raum {
+  text-decoration-line: line-through;
+  text-decoration-color: var(--rot);
+  text-decoration-thickness: 2px;
+}
+.eintrag.gestrichen .fach { color: var(--leise); }
+
+/* Bereitschaft, UV, Pseudofächer: Dienst der Lehrkraft, kein Unterricht */
+.eintrag.dienst { border-left: 4px dotted var(--linie); }
+.eintrag.dienst .fach { font-weight: 550; color: var(--leise); }
+
+/* Lehrersicht: eigene Stunde wird von jemand anderem gehalten */
+.eintrag.fuer-mich-frei .fach { color: var(--leise); }
+
+/* ---------------- Wochenraster (breit / Handy quer) ---------------- */
+
+.raster-huelle { display: none; }
+
+.raster {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  background: var(--papier);
+}
+.raster th, .raster td { border: 1px solid var(--linie); vertical-align: top; }
+.raster thead th {
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: 650;
+  background: var(--papier);
+}
+.raster thead th .wt { display: block; }
+.raster thead th .dt { display: block; font-size: 0.82rem; color: var(--leise); font-weight: 500; font-variant-numeric: tabular-nums; }
+.raster thead th.heute { box-shadow: inset 0 -4px 0 var(--akzent); }
+.raster thead th.hat-aenderung .wt::after {
+  content: "";
+  display: inline-block;
+  width: 8px; height: 8px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--rot);
+  vertical-align: middle;
+}
+.raster .ecke { width: 2.8rem; }
+.raster tbody th {
+  width: 2.8rem;
+  padding-top: 8px;
+  text-align: center;
+  font-size: 1.15rem;
+  font-weight: 750;
+  color: var(--akzent);
+  font-variant-numeric: tabular-nums;
+}
+.raster td { padding: 0; height: 3.4rem; }
+.raster td.tagfrei {
+  vertical-align: middle;
+  text-align: center;
+  font-size: 1rem;
+}
+.raster .eintrag { padding: 6px 8px 7px 7px; font-size: 0.9rem; }
+.raster .wt-kurz { display: none; }
+/* Im Raster darf der Raum unter das Fach rutschen, statt das Fach zu trennen. */
+.raster .e-oben { flex-wrap: wrap; column-gap: 8px; row-gap: 0; }
+.raster .fach { overflow-wrap: normal; }
+.raster .fach { font-size: 0.95rem; }
+.raster .badge { font-size: 0.7rem; padding: 1px 7px; }
+.raster .e-unten { flex-wrap: wrap; gap: 2px 8px; }
+
+/* Breit (oder Handy quer ab 600 px): Auswahl oben, darunter Wochenleiste mit
+   Schalter rechts, dann das Raster. */
+@media (min-width: 760px), (orientation: landscape) and (min-width: 600px) {
+  main {
+    max-width: 1180px;
+    padding-top: 18px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "auswahl auswahl"
+      "woche   werkzeuge"
+      "meldung meldung"
+      "raster  raster";
+    column-gap: 16px;
+    align-items: center;
+  }
+  .auswahl { grid-area: auswahl; grid-template-columns: minmax(280px, 360px) minmax(220px, 360px); justify-content: start; }
+  .woche { grid-area: woche; grid-template-columns: 44px auto 44px auto; justify-content: start; gap: 10px; }
+  .woche-titel { align-items: flex-start; padding: 0 6px; }
+  .zeitraum { text-align: left; white-space: nowrap; }
+  .werkzeuge { grid-area: werkzeuge; margin: 0 0 10px 0; }
+  .meldung { grid-area: meldung; }
+  .tage, .tag-titel, .liste { display: none; }
+  .raster-huelle {
+    grid-area: raster;
+    display: block;
+    overflow-x: auto;
+    border: 1px solid var(--linie);
+    border-radius: 12px;
+  }
+}
+
+/* ---------------- Fuß ---------------- */
 
 .fuss {
-  max-width: 680px; margin: 0 auto; padding: 8px 16px 24px 16px;
-  display: flex; justify-content: space-between; align-items: center;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 10px 16px calc(22px + env(safe-area-inset-bottom, 0px)) 16px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+  font-size: 0.8rem;
+  color: var(--leise);
 }
-.linkbtn { background: none; border: none; color: var(--kopf); font-size: .9rem; cursor: pointer; padding: 6px 0; }
-.stand { color: var(--dim); font-size: .78rem; }
+.stand.offline { color: var(--rot); font-weight: 650; }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #12161c; --karte: #1b2026; --text: #e7ecf2; --dim: #9aa6b2;
-    --rand: #2a313a; --kopf: #3f6fa0;
-  }
-  input[type="text"], input[type="date"], .pfeil { background: #1b2026; }
+/* Handy quer: kurze Tagesnamen im Raster, flacherer Kopf für mehr Plan auf dem Schirm. */
+@media (orientation: landscape) and (max-width: 759px) {
+  .raster .wt-lang { display: none; }
+  .raster .wt-kurz { display: inline; }
+}
+@media (orientation: landscape) and (max-height: 500px) {
+  .kopf { padding-top: calc(6px + env(safe-area-inset-top, 0px)); padding-bottom: 6px; }
+  .kopf h1 { font-size: 1.1rem; }
+  main { padding-top: 8px; }
+  .auswahl { margin-bottom: 6px; }
+  .modi button { padding: 5px 6px; }
+  .wahl select { padding: 6px 10px; }
+  .pfeil { width: 38px; height: 38px; }
+  .woche { grid-template-columns: 38px auto 38px auto; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .laedt .symbol svg { animation: none; }
 }

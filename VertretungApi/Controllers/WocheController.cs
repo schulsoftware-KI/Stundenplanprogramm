@@ -12,6 +12,7 @@ namespace VertretungApi.Controllers;
 ///   GET api/woche/klasse/{klasse}?datum=…&amp;wochen=…   (z. B. 05A, auch EF/Q1/Q2 = ganze Stufe)
 ///   GET api/woche/gruppe/{schluessel}?datum=…&amp;wochen=… (Lerngruppe laut Grundplan, z. B. BIG1_EF_L68)
 ///   GET api/woche/schueler/{id}?datum=…&amp;wochen=…      (individueller Plan; nur Personal, JWT)
+///   GET api/woche/auswahl?datum=…                     (Auswahllisten für die PWA: Lehrkräfte, Klassen, Kurse)
 ///
 /// datum fehlt = heute; es wird immer ab dem Montag dieser Woche geliefert. wochen: 1–6.
 /// Lehrer/Klasse/Gruppe sind wie die bisherigen Plan-Abfragen vorerst offen (nur Plan-,
@@ -26,6 +27,11 @@ public class WocheController : ControllerBase
     public WocheController(AppDbContext db) => _db = db;
 
     private static DateOnly Heute() => DateOnly.FromDateTime(DateTime.Now);
+
+    /// <summary>Was sich in der PWA auswählen lässt (aus dem Grundplan, der am Datum gilt).</summary>
+    [HttpGet("auswahl")]
+    public async Task<IActionResult> Auswahl([FromQuery] DateOnly? datum)
+        => Ok(await WochenplanService.AuswahlAsync(_db, datum ?? Heute()));
 
     [HttpGet("lehrer/{kuerzel}")]
     public async Task<IActionResult> Lehrer(string kuerzel, [FromQuery] DateOnly? datum, [FromQuery] int wochen = 1)

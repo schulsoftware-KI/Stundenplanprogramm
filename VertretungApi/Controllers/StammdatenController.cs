@@ -116,7 +116,11 @@ public class StammdatenController : ControllerBase
         return Ok(new { lg.Id, lg.Bezeichnung, Typ = lg.Typ.ToString(), Anzahl = liste.Count, Schueler = liste });
     }
 
-    /// <summary>Schülerliste, optional nach Stufe/Namenssuche; begrenzt. Nur Personal.</summary>
+    /// <summary>
+    /// Schülerliste, optional nach Stufe/Namenssuche; begrenzt. Nur Personal.
+    /// Suche (Phase 2, Schritt 4): mehrere Wörter möglich („mia mül"), jedes Wort muss im Vor-
+    /// oder Nachnamen vorkommen; Groß-/Kleinschreibung egal (auch bei Umlauten am Wortanfang).
+    /// </summary>
     [Authorize(Roles = "Admin,Lehrer,Klassenlehrer,Stufenkoordination")]
     [HttpGet("schueler")]
     public async Task<IActionResult> SchuelerListe(
@@ -124,13 +128,30 @@ public class StammdatenController : ControllerBase
     {
         var query = _db.Schueler.AsQueryable();
         if (!string.IsNullOrWhiteSpace(stufe)) query = query.Where(s => s.Stufe == stufe);
-        if (!string.IsNullOrWhiteSpace(q))
-            query = query.Where(s => s.Nachname.Contains(q) || s.Vorname.Contains(q));
+
+        var woerter = (q ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var wort in woerter.Take(3))
+        {
+            // SQLite kennt lower() nur für A–Z; „öz" findet „Özdemir" daher über die
+            // zusätzliche Variante mit großem Anfangsbuchstaben.
+            var klein = wort.ToLowerInvariant();
+            var gross = char.ToUpperInvariant(wort[0]) + wort[1..];
+            query = query.Where(s =>
+                s.Nachname.ToLower().Contains(klein) || s.Vorname.ToLower().Contains(klein) ||
+                s.Nachname.Contains(gross) || s.Vorname.Contains(gross));
+        }
 
         var liste = await query
-            .OrderBy(s => s.Nachname).ThenBy(s => s.Vorname)
+            .OrderBy(s => s.Nachname).ThenBy(s => s.Vorname).ThenBy(s => s.Id)
             .Take(Math.Clamp(limit, 1, 1000))
-            .Select(s => new { s.Id, s.Nachname, s.Vorname, s.Stufe })
+            .Select(s => new
+            {
+                s.Id, s.Nachname, s.Vorname, s.Stufe,
+                Klasse = s.Zugehoerigkeiten
+                    .Where(z => z.Lerngruppe!.Typ == LerngruppeTyp.Klasse)
+                    .Select(z => z.Lerngruppe!.Bezeichnung)
+                    .FirstOrDefault()
+            })
             .ToListAsync();
         return Ok(liste);
     }

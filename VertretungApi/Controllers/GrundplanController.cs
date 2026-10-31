@@ -1,7 +1,9 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using VertretungApi.Data;
 using VertretungApi.Dtos;
+using VertretungApi.Helpers;
 using VertretungApi.Model;
 
 namespace VertretungApi.Controllers;
@@ -15,6 +17,8 @@ namespace VertretungApi.Controllers;
 ///
 /// Versionierung: (Schuljahr, GueltigAb) ist eindeutig. Gleicher Schlüssel = Version wird ersetzt,
 /// anderes GueltigAb = neue Version. Der Kalender wird je Schuljahr ersetzt.
+/// Die GET-Abfragen folgen der Richtlinie PlanLesen (Phase 2, Schritt 4: nur Personal,
+/// mit "Woche:OhneLogin": true für alle).
 /// </summary>
 [ApiController]
 [Route("api/grundplan")]
@@ -133,6 +137,7 @@ public class GrundplanController : ControllerBase
         });
     }
 
+    [Authorize(Policy = Rollen.PlanLesen)]
     [HttpGet("versionen")]
     public async Task<IActionResult> Versionen([FromQuery] string? schuljahr)
     {
@@ -146,6 +151,7 @@ public class GrundplanController : ControllerBase
         return Ok(liste);
     }
 
+    [Authorize(Policy = Rollen.PlanLesen)]
     [HttpGet("kalender")]
     public async Task<IActionResult> KalenderAbfrage([FromQuery] string? schuljahr)
     {
@@ -170,6 +176,7 @@ public class GrundplanController : ControllerBase
     }
 
     /// <summary>Kontrollabfrage: Slots einer Version (Standard: neueste), optional nach Lehrer/Lerngruppe/Tag gefiltert.</summary>
+    [Authorize(Policy = Rollen.PlanLesen)]
     [HttpGet("slots")]
     public async Task<IActionResult> Slots(
         [FromQuery] int? versionId, [FromQuery] string? lehrer,

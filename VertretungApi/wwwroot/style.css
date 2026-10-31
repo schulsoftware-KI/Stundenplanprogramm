@@ -59,6 +59,9 @@
 
 * { box-sizing: border-box; }
 
+/* hidden gilt immer – auch für Elemente, denen das Layout ein display gibt. */
+[hidden] { display: none !important; }
+
 html { -webkit-text-size-adjust: 100%; }
 
 body {
@@ -108,6 +111,9 @@ button { cursor: pointer; }
   color: inherit;
 }
 .symbol:hover { background: rgba(255, 255, 255, 0.12); }
+/* Kontoknopf: Ring in Kopffarbe; ohne Anmeldung gestrichelt („nicht angemeldet"). */
+#kontoKnopf { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.35); }
+#kontoKnopf.abgemeldet { box-shadow: none; outline: 2px dashed rgba(255, 255, 255, 0.45); outline-offset: -4px; }
 .laedt .symbol svg { animation: drehen 0.9s linear infinite; }
 @keyframes drehen { to { transform: rotate(360deg); } }
 
@@ -123,20 +129,25 @@ main {
 
 .modi {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   border: 1px solid var(--linie);
   border-radius: 10px;
   background: var(--papier);
   padding: 3px;
   gap: 3px;
 }
+/* Spalten gleich breit, solange der Platz reicht; sonst bekommt das längste Wort
+   („Lehrkraft") etwas mehr Raum – es wird nie abgeschnitten. */
 .modi button {
   border: none;
   border-radius: 7px;
   background: transparent;
-  padding: 8px 6px;
+  padding: 8px 4px;
   font-weight: 600;
+  font-size: 0.95rem;
   color: var(--leise);
+  white-space: nowrap;
 }
 .modi button[aria-pressed="true"] { background: var(--akzent); color: var(--auf-akzent); }
 
@@ -149,6 +160,46 @@ main {
   font-size: 1.05rem;
   font-weight: 600;
 }
+
+/* Schülersuche (Personal) */
+.suche { display: grid; gap: 6px; min-width: 0; }
+.suche input {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--linie);
+  border-radius: 10px;
+  background: var(--papier);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+.suche input::placeholder { color: var(--leise); font-weight: 500; }
+.such-info { margin: 0 2px; font-size: 0.85rem; color: var(--leise); }
+.such-info:empty { display: none; }
+.treffer {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: var(--papier);
+  border: 1px solid var(--linie);
+  border-radius: 10px;
+  max-height: min(50vh, 420px);
+  overflow-y: auto;
+}
+.treffer li + li { border-top: 1px solid var(--linie); }
+.treffer-knopf {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 12px;
+  border: none;
+  background: transparent;
+  text-align: left;
+}
+.treffer-knopf:hover, .treffer-knopf:focus-visible { background: var(--akzent-hell); }
+.t-name { font-weight: 600; overflow-wrap: anywhere; }
+.t-klasse { flex: none; color: var(--leise); font-variant-numeric: tabular-nums; }
 
 /* Wochenleiste */
 .woche {
@@ -429,7 +480,7 @@ s.alt {
 /* Breit (oder Handy quer ab 600 px): Auswahl oben, darunter Wochenleiste mit
    Schalter rechts, dann das Raster. */
 @media (min-width: 760px), (orientation: landscape) and (min-width: 600px) {
-  main {
+  #inhalt {
     max-width: 1180px;
     padding-top: 18px;
     display: grid;
@@ -442,7 +493,7 @@ s.alt {
     column-gap: 16px;
     align-items: center;
   }
-  .auswahl { grid-area: auswahl; grid-template-columns: minmax(280px, 360px) minmax(220px, 360px); justify-content: start; }
+  .auswahl { grid-area: auswahl; grid-template-columns: minmax(300px, 380px) minmax(220px, 360px); justify-content: start; align-items: start; }
   .woche { grid-area: woche; grid-template-columns: 44px auto 44px auto; justify-content: start; gap: 10px; }
   .woche-titel { align-items: flex-start; padding: 0 6px; }
   .zeitraum { text-align: left; white-space: nowrap; }
@@ -456,6 +507,7 @@ s.alt {
     border: 1px solid var(--linie);
     border-radius: 12px;
   }
+  .raster-huelle:empty { display: none; }
 }
 
 /* ---------------- Fuß ---------------- */
@@ -473,6 +525,102 @@ s.alt {
 }
 .stand.offline { color: var(--rot); font-weight: 650; }
 
+/* ---------------- Anmeldung ---------------- */
+
+main.anmeldung {
+  max-width: 440px;
+  padding-top: clamp(18px, 6vh, 56px);
+}
+.karte {
+  display: grid;
+  background: var(--papier);
+  border: 1px solid var(--linie);
+  border-radius: 14px;
+  padding: 22px 20px 18px 20px;
+}
+.karte-titel { margin: 0 0 6px 0; font-size: 1.35rem; font-weight: 750; }
+.feld { margin: 14px 0 6px 0; font-weight: 650; font-size: 0.95rem; }
+.karte input[type="text"],
+.karte input[type="password"] {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--linie);
+  border-radius: 10px;
+  background: var(--seite);
+  font-size: 1.05rem; /* mindestens 16 px: iOS zoomt sonst beim Antippen */
+}
+.passwort { position: relative; }
+.passwort input { padding-right: 104px !important; }
+.passwort .textknopf {
+  position: absolute;
+  top: 50%; right: 4px;
+  transform: translateY(-50%);
+  padding: 8px 10px;
+}
+.textknopf.klein { font-size: 0.88rem; }
+.schalter.bleiben { margin-top: 16px; color: var(--tinte); font-size: 1rem; justify-self: start; }
+.kleingedruckt { margin: 4px 0 0 28px; font-size: 0.82rem; color: var(--leise); }
+.hinweis {
+  margin: 4px 0 2px 0;
+  padding: 10px 12px;
+  border-left: 4px solid var(--akzent);
+  background: var(--akzent-hell);
+  border-radius: 0 8px 8px 0;
+}
+/* Fehler im Rotstift-Stil */
+.fehler {
+  margin: 14px 0 0 0;
+  padding: 10px 12px;
+  border-left: 4px solid var(--rot);
+  background: var(--entfall-t);
+  border-radius: 0 8px 8px 0;
+  font-weight: 600;
+}
+.fehler.klein { margin: 6px 6px; font-size: 0.9rem; font-weight: 500; }
+.hauptknopf {
+  margin-top: 18px;
+  padding: 13px 16px;
+  border: none;
+  border-radius: 10px;
+  background: var(--akzent);
+  color: var(--auf-akzent);
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+.hauptknopf:disabled { opacity: 0.65; cursor: progress; }
+#ohneAnmeldung { margin-top: 8px; justify-self: center; }
+
+/* ---------------- Kontomenü ---------------- */
+
+.konto {
+  margin: calc(62px + env(safe-area-inset-top, 0px)) 12px auto auto;
+  width: min(330px, calc(100vw - 24px));
+  padding: 6px;
+  border: 1px solid var(--linie);
+  border-radius: 14px;
+  background: var(--papier);
+  color: var(--tinte);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
+}
+.konto::backdrop { background: rgba(10, 16, 32, 0.35); }
+.konto-kopf { padding: 12px 12px 10px 12px; border-bottom: 1px solid var(--linie); margin-bottom: 4px; }
+.konto-name { margin: 0; font-weight: 750; font-size: 1.12rem; overflow-wrap: anywhere; }
+.konto-info { margin: 3px 0 0 0; font-size: 0.85rem; color: var(--leise); }
+.menuepunkt {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  text-align: left;
+  font-weight: 600;
+}
+.menuepunkt:hover { background: var(--akzent-hell); }
+.menuepunkt.leise { color: var(--leise); font-weight: 500; }
+.menuepunkt.warnung { color: var(--rot); font-weight: 700; background: var(--entfall-t); }
+.menuepunkt.schliessen { color: var(--akzent); border-top: 1px solid var(--linie); border-radius: 0 0 9px 9px; margin-top: 4px; }
+
 /* Handy quer: kurze Tagesnamen im Raster, flacherer Kopf für mehr Plan auf dem Schirm. */
 @media (orientation: landscape) and (max-width: 759px) {
   .raster .wt-lang { display: none; }
@@ -483,7 +631,7 @@ s.alt {
   .kopf h1 { font-size: 1.1rem; }
   main { padding-top: 8px; }
   .auswahl { margin-bottom: 6px; }
-  .modi button { padding: 5px 6px; }
+  .modi button { padding: 5px 4px; }
   .wahl select { padding: 6px 10px; }
   .pfeil { width: 38px; height: 38px; }
   .woche { grid-template-columns: 38px auto 38px auto; }

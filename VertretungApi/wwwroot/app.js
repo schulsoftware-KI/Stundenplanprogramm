@@ -1,24 +1,48 @@
 "use strict";
 // =====================================================================
-//  Stundenplan-PWA (Phase 2, Schritt 3): Wochenansicht für Lehrkräfte,
-//  Klassen und Kurse. Daten: /api/woche/... (Grundplan × Kalender ×
-//  veröffentlichte Vertretungen). Reines JavaScript ohne Build-Schritt.
+//  Stundenplan-PWA (Phase 2, Schritt 3 + 4): Wochenansicht für Lehrkräfte,
+//  Klassen, Kurse und Schüler – mit Anmeldung. Daten: /api/woche/...
+//  (Grundplan × Kalender × veröffentlichte Vertretungen). Reines JavaScript
+//  ohne Build-Schritt.
 //
+//  Anmeldung (Schritt 4):
+//  - Login per /api/auth/login (JWT). „Angemeldet bleiben" = Token im
+//    dauerhaften Browser-Speicher (30 Tage), sonst nur bis zum Schließen.
+//  - Personal (Admin, Lehrkräfte, Klassenleitung, Stufenkoordination): Lehrkraft,
+//    Klasse, Kurs und Schüler (Namenssuche) wählbar; Lehrkräfte starten mit dem
+//    eigenen Plan („Mein Plan" im Kontomenü).
+//  - Schülerkonten: nur der eigene Plan (/api/woche/ich), keine Auswahl.
+//  - Ohne Anmeldung nur, wenn der Server das erlaubt (/api/auth/optionen).
+//  - Gespeicherte Wochen und Auswahl liegen je Benutzer getrennt im Browser
+//    und werden beim Abmelden gelöscht. Server meldet 401 (abgelaufen,
+//    widerrufen) -> zurück zur Anmeldung.
+//
+//  Wochenansicht (Schritt 3):
 //  - Handy hochkant: Tagesreiter + Liste; breit bzw. quer: Wochenraster.
 //  - Woche vor/zurück, „Heute", Datum wählen; am Wochenende startet die
 //    App mit der kommenden Woche.
-//  - Zuletzt geladene Wochen werden im Browser gespeichert und sind offline
-//    lesbar (Hinweis „Offline" im Fuß).
+//  - Zuletzt geladene Wochen sind offline lesbar (Hinweis „Offline" im Fuß).
 //  - Lädt von selbst nach: beim Zurückwechseln ins Fenster bzw. in die App
 //    und alle 2 Minuten, solange die Seite sichtbar ist.
-//  - Auswahl und Woche stehen in der Adresse (#klasse/05A/2026-11-02),
-//    Links lassen sich also teilen bzw. als Lesezeichen speichern.
+//  - Auswahl und Woche stehen in der Adresse (#klasse/05A/2026-11-02).
 // =====================================================================
 
 const MODI = {
-  lehrer: { name: "Lehrkraft", wahl: "Lehrkraft wählen" },
-  klasse: { name: "Klasse", wahl: "Klasse oder Stufe wählen" },
-  gruppe: { name: "Kurs", wahl: "Kurs oder Gruppe wählen" },
+  lehrer:   { wahl: "Lehrkraft wählen" },
+  klasse:   { wahl: "Klasse oder Stufe wählen" },
+  gruppe:   { wahl: "Kurs oder Gruppe wählen" },
+  schueler: { wahl: "Schülerin oder Schüler suchen" },
+  ich:      { wahl: "" }, // Schülerkonto: eigener Plan
+};
+const AUSWAHL_MODI = ["lehrer", "klasse", "gruppe"]; // Modi mit Auswahlliste
+
+const PERSONAL = ["Admin", "Lehrer", "Klassenlehrer", "Stufenkoordination"];
+const ROLLEN_TEXT = {
+  Admin: "Verwaltung",
+  Lehrer: "Lehrkraft",
+  Klassenlehrer: "Klassenleitung",
+  Stufenkoordination: "Stufenkoordination",
+  Schueler: "Schülerkonto",
 };
 
 const WOCHENTAGE = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
@@ -40,26 +64,34 @@ const STATUS = {
   Frei:           { text: "frei",            art: "frei",      gestrichen: true },
 };
 
+const SUCH_MAX = 20; // so viele Suchtreffer werden gezeigt
+
 const sortierer = new Intl.Collator("de", { numeric: true, sensitivity: "base" });
 const el = (id) => document.getElementById(id);
 
+const leereWerte = () => ({ lehrer: "", klasse: "", gruppe: "", schueler: "", ich: "ich" });
+
 const state = {
+  anmeldung: null,       // { token, benutzername, rolle, anzeige, lehrerKuerzel, dauerhaft, gueltigBis }
+  anmeldungNoetig: true, // laut Server (/api/auth/optionen)
   modus: "klasse",
-  werte: { lehrer: "", klasse: "", gruppe: "" }, // zuletzt gewählter Wert je Ansicht
+  werte: leereWerte(),   // zuletzt gewählter Wert je Ansicht (schueler: Id)
   montag: "",            // ISO-Datum des Montags der angezeigten Woche
   tagIndex: 0,           // gewählter Tag (Handy-Ansicht)
   zielDatum: null,       // nach dem Laden diesen Tag auswählen
   springeZuHeute: true,  // nach dem Laden „heute" auswählen (Start / Heute-Knopf)
   nurAenderungen: false,
   auswahl: null,
+  antwort: null,         // Rohantwort der API (Vergleich beim stillen Nachladen)
   plan: null,
+  person: null,          // Schülerdaten bei Schüler- bzw. eigener Schüleransicht
   fehler: null,
   geladenUm: 0,
   offlineStand: null,    // Zeitstempel, wenn der Plan aus dem Speicher stammt
 };
 
 // ---------------------------------------------------------------------
-//  Hilfen: Elemente bauen (ohne innerHTML), Datum, Speicher
+//  Hilfen: Elemente bauen (ohne innerHTML), Datum
 // ---------------------------------------------------------------------
 
 function h(tag, props, ...kinder) {
@@ -125,50 +157,178 @@ const tagLang = (iso) => { const d = ausIso(iso); return `${WOCHENTAGE[d.getDay(
 const uhrzeit = (t) => new Date(t).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
 const zeitpunkt = (t) => new Date(t).toLocaleString("de-DE",
   { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+const datumKurz = (t) => new Date(t).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
 const gleich = (a, b) => (a || "").trim().toUpperCase() === (b || "").trim().toUpperCase();
 
-// Browser-Speicher nur für Bequemlichkeit (Auswahl, offline lesbare Wochen).
-// Kann leer oder gesperrt sein – die App funktioniert dann trotzdem.
-const speicher = {
-  lesen(k, ersatz) {
-    try { const v = localStorage.getItem(k); return v === null ? ersatz : JSON.parse(v); }
-    catch { return ersatz; }
-  },
-  schreiben(k, v) {
-    try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* voll oder gesperrt */ }
-  },
-  entfernen(k) {
-    try { localStorage.removeItem(k); } catch { /* egal */ }
-  },
+const alsApp = () => {
+  try { return window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true; }
+  catch { return false; }
 };
+
+// ---------------------------------------------------------------------
+//  Browser-Speicher. Kann leer oder gesperrt sein – die App funktioniert
+//  dann trotzdem (nur ohne Merken).
+//  - "anmeldung": dauerhaft -> localStorage, sonst sessionStorage.
+//  - Daten je Benutzer (Präfix „u:<name>|"): Auswahl und offline lesbare
+//    Wochen. Ohne „angemeldet bleiben" ebenfalls nur bis zum Schließen.
+// ---------------------------------------------------------------------
+
+function ablage(holen) {
+  const s = () => { try { return holen(); } catch { return null; } };
+  return {
+    lesen(k, ersatz) {
+      try { const v = s() && s().getItem(k); return v === null || v === undefined ? ersatz : JSON.parse(v); }
+      catch { return ersatz; }
+    },
+    schreiben(k, v) {
+      try { if (!s()) return false; s().setItem(k, JSON.stringify(v)); return true; }
+      catch { return false; /* voll oder gesperrt */ }
+    },
+    entfernen(k) {
+      try { if (s()) s().removeItem(k); } catch { /* egal */ }
+    },
+    schluessel() {
+      try {
+        const x = s();
+        const liste = [];
+        if (x) for (let i = 0; i < x.length; i++) liste.push(x.key(i));
+        return liste;
+      } catch { return []; }
+    },
+  };
+}
+const lokal = ablage(() => window.localStorage);
+const sitzung = ablage(() => window.sessionStorage);
+
+const nutzerAblage = () => (state.anmeldung && !state.anmeldung.dauerhaft ? sitzung : lokal);
+const praefix = () => "u:" + (state.anmeldung ? state.anmeldung.benutzername.toLowerCase() : "-") + "|";
 
 const CACHE_MAX = 30;
 
 function cacheSchreiben(url, daten) {
-  speicher.schreiben("antwort:" + url, { t: Date.now(), d: daten });
-  const index = speicher.lesen("antwort-index", []).filter((u) => u !== url);
+  const a = nutzerAblage();
+  const p = praefix();
+  if (!a.schreiben(p + "antwort:" + url, { t: Date.now(), d: daten })) return;
+  const index = a.lesen(p + "antwort-index", []).filter((u) => u !== url);
   index.push(url);
-  while (index.length > CACHE_MAX) speicher.entfernen("antwort:" + index.shift());
-  speicher.schreiben("antwort-index", index);
+  while (index.length > CACHE_MAX) a.entfernen(p + "antwort:" + index.shift());
+  a.schreiben(p + "antwort-index", index);
 }
 
-/** Holt JSON vom Server; ohne Verbindung die zuletzt gespeicherte Antwort. */
-async function holen(url) {
+const cacheLesen = (url) => nutzerAblage().lesen(praefix() + "antwort:" + url, null);
+
+/** Alles löschen, was für die angemeldete Person gespeichert wurde. */
+function nutzerdatenLoeschen() {
+  const p = praefix();
+  for (const a of [lokal, sitzung])
+    for (const k of a.schluessel()) if (k.startsWith(p)) a.entfernen(k);
+}
+
+/** Speicher der Version vor der Anmeldung (Schritt 3) aufräumen. */
+function altlastenEntfernen() {
+  for (const k of lokal.schluessel())
+    if (k === "zustand" || k === "kuerzel" || k === "antwort-index" || k.startsWith("antwort:")) lokal.entfernen(k);
+}
+
+// ---------------------------------------------------------------------
+//  Anmeldung: Zustand, Rollen, Anfragen
+// ---------------------------------------------------------------------
+
+function anmeldungLesen() {
+  const a = sitzung.lesen("anmeldung", null) || lokal.lesen("anmeldung", null);
+  return a && a.token && a.benutzername && a.rolle ? a : null;
+}
+
+function anmeldungSpeichern() {
+  const a = state.anmeldung;
+  (a.dauerhaft ? lokal : sitzung).schreiben("anmeldung", a);
+  (a.dauerhaft ? sitzung : lokal).entfernen("anmeldung");
+}
+
+const istSchueler = () => !!state.anmeldung && state.anmeldung.rolle === "Schueler";
+const istPersonal = () => !!state.anmeldung && PERSONAL.includes(state.anmeldung.rolle);
+const eigenesKuerzel = () => (state.anmeldung && state.anmeldung.lehrerKuerzel) || "";
+
+function erlaubteModi() {
+  if (istSchueler()) return ["ich"];
+  if (istPersonal()) return ["lehrer", "klasse", "gruppe", "schueler"];
+  return ["lehrer", "klasse", "gruppe"]; // ohne Anmeldung (nur wenn der Server das erlaubt)
+}
+
+const authKopf = () => (state.anmeldung ? { Authorization: "Bearer " + state.anmeldung.token } : {});
+
+class HttpFehler extends Error {
+  constructor(status, text) {
+    super("HTTP " + status);
+    this.status = status;
+    this.text = text || "";
+  }
+}
+
+/**
+ * Holt JSON vom Server. Ohne Verbindung (oder bei Serverfehler) die zuletzt
+ * gespeicherte Antwort; 401/403/404 werden dagegen als HttpFehler gemeldet.
+ */
+async function holen(url, { merken = true } = {}) {
   const abbruch = new AbortController();
   const timer = setTimeout(() => abbruch.abort(), 12000);
   try {
-    const resp = await fetch(url, { cache: "no-store", signal: abbruch.signal });
+    const resp = await fetch(url, { cache: "no-store", signal: abbruch.signal, headers: authKopf() });
+    if (resp.status === 401 || resp.status === 403 || resp.status === 404) {
+      let text = "";
+      try { const j = await resp.json(); text = (j && j.fehler) || ""; } catch { /* kein JSON */ }
+      throw new HttpFehler(resp.status, text);
+    }
     if (!resp.ok) throw new Error("Server antwortet mit " + resp.status);
     const daten = await resp.json();
-    cacheSchreiben(url, daten);
+    if (merken) cacheSchreiben(url, daten);
     return { daten, offlineStand: null };
   } catch (fehler) {
-    const alt = speicher.lesen("antwort:" + url, null);
+    if (fehler instanceof HttpFehler) throw fehler;
+    const alt = merken ? cacheLesen(url) : null;
     if (alt) return { daten: alt.d, offlineStand: alt.t };
     throw fehler;
   } finally {
     clearTimeout(timer);
   }
+}
+
+let sitzungNr = 0;        // wechselt bei An-/Abmeldung: alte Antworten werden verworfen
+let ladeNr = 0;
+let laedtGerade = false;  // eine Woche wird gerade geladen (kein stilles Nachladen dazwischen)
+
+/** Laufende Wochen-Abfrage verwerfen (ihr Ergebnis wird ignoriert) und die Ladeanzeige beenden. */
+function ladenAbbrechen() {
+  ladeNr++;
+  laedtGerade = false;
+  document.body.classList.remove("laedt");
+  el("inhalt").removeAttribute("aria-busy");
+}
+
+/** 401 = Anmeldung abgelaufen/widerrufen bzw. Anmeldung nötig. true = Anmeldemaske gezeigt. */
+function zugriffsFehler(fehler) {
+  if (!(fehler instanceof HttpFehler) || fehler.status !== 401) return false;
+  if (state.anmeldung) {
+    abmelden("Deine Anmeldung ist abgelaufen oder wurde beendet. Bitte melde dich neu an.");
+  } else {
+    state.anmeldungNoetig = true;
+    lokal.schreiben("optionen", { anmeldungNoetig: true });
+    zeigeAnmeldung("Bitte melde dich an, um die Pläne zu sehen.");
+  }
+  return true;
+}
+
+function fehlerText(f) {
+  if (f instanceof HttpFehler && f.status === 403)
+    return "Für diese Ansicht fehlt dir die Berechtigung.";
+  if (f instanceof HttpFehler && f.status === 404) {
+    if (state.modus === "ich")
+      return (f.text || "Zu deinem Konto wurde kein Plan gefunden.") + " Bitte wende dich an das Sekretariat.";
+    if (state.modus === "schueler")
+      return "Diese Schülerin bzw. dieser Schüler wurde nicht gefunden. Bitte neu suchen.";
+    return "Nicht gefunden.";
+  }
+  return "Der Plan konnte nicht geladen werden. Prüfe die Verbindung zum Schulserver und tippe oben rechts auf Aktualisieren.";
 }
 
 // ---------------------------------------------------------------------
@@ -180,53 +340,95 @@ function hashLesen() {
     try { return decodeURIComponent(t); } catch { return ""; }
   });
   if (!MODI[teile[0]]) return null;
+  if (teile[0] === "ich") return { modus: "ich", wert: "ich", datum: teile.slice(1).find(istIso) || null };
   return { modus: teile[0], wert: teile[1] || "", datum: istIso(teile[2]) ? teile[2] : null };
 }
 
 function hashSchreiben() {
-  const teile = [state.modus, state.werte[state.modus] || ""];
+  const teile = state.modus === "ich" ? ["ich"] : [state.modus, state.werte[state.modus] || ""];
   if (state.montag !== startMontag()) teile.push(state.montag);
   const neu = "#" + teile.map(encodeURIComponent).join("/");
   if (location.hash !== neu) history.replaceState(null, "", neu);
 }
 
 function zustandSpeichern() {
-  speicher.schreiben("zustand", { modus: state.modus, werte: state.werte, nurAenderungen: state.nurAenderungen });
+  nutzerAblage().schreiben(praefix() + "zustand",
+    { modus: state.modus, werte: state.werte, nurAenderungen: state.nurAenderungen });
+}
+
+/** Erlaubte Ansicht sicherstellen (Schüler: nur „ich"; Lehrkraft: eigenes Kürzel vorbelegen). */
+function modusPruefen() {
+  const erlaubt = erlaubteModi();
+  if (!erlaubt.includes(state.modus))
+    state.modus = eigenesKuerzel() && erlaubt.includes("lehrer") ? "lehrer"
+      : erlaubt.includes("klasse") ? "klasse" : erlaubt[0];
+  if (state.modus === "lehrer" && !state.werte.lehrer && eigenesKuerzel())
+    state.werte.lehrer = eigenesKuerzel();
 }
 
 function zustandLaden() {
-  const z = speicher.lesen("zustand", null);
+  state.modus = "klasse";
+  state.werte = leereWerte();
+  state.nurAenderungen = false;
+
+  const z = nutzerAblage().lesen(praefix() + "zustand", null);
   if (z) {
     if (MODI[z.modus]) state.modus = z.modus;
     Object.assign(state.werte, z.werte || {});
+    state.werte.ich = "ich";
     state.nurAenderungen = !!z.nurAenderungen;
-  } else {
-    // Übernahme aus der bisherigen Lehrer-App (dort gespeichertes Kürzel).
-    let altKuerzel = null;
-    try { altKuerzel = localStorage.getItem("kuerzel"); } catch { /* egal */ }
-    if (altKuerzel) { state.modus = "lehrer"; state.werte.lehrer = altKuerzel; }
+  } else if (eigenesKuerzel()) {
+    // Erste Anmeldung einer Lehrkraft: mit dem eigenen Plan starten.
+    state.modus = "lehrer";
+    state.werte.lehrer = eigenesKuerzel();
   }
+
   const adr = hashLesen();
   if (adr) {
     state.modus = adr.modus;
     if (adr.wert) state.werte[adr.modus] = adr.wert;
   }
+  modusPruefen();
+
   state.montag = adr && adr.datum ? montagVon(adr.datum) : startMontag();
-  if (adr && adr.datum) { state.zielDatum = adr.datum; state.springeZuHeute = false; }
+  state.zielDatum = adr && adr.datum ? adr.datum : null;
+  state.springeZuHeute = !(adr && adr.datum);
 }
 
 // ---------------------------------------------------------------------
 //  Laden
 // ---------------------------------------------------------------------
 
-let ladeNr = 0;
-let laedtGerade = false; // eine Woche wird gerade geladen (kein stilles Nachladen dazwischen)
+function planUrl(montag) {
+  if (state.modus === "ich") return `api/woche/ich?datum=${montag}`;
+  const wert = state.werte[state.modus];
+  if (!wert) return null;
+  return `api/woche/${state.modus}/${encodeURIComponent(wert)}?datum=${montag}`;
+}
+
+/** /schueler und /ich liefern { art, schueler, plan }, die übrigen direkt den Plan. */
+function uebernehmeAntwort(daten) {
+  state.antwort = daten;
+  state.plan = daten && daten.plan ? daten.plan : daten;
+  state.person = daten && daten.schueler ? daten.schueler : null;
+}
+
+function verwerfeAntwort() {
+  state.antwort = null;
+  state.plan = null;
+  state.person = null;
+}
 
 async function ladeAuswahl() {
+  if (istSchueler()) return;
+  const sn = sitzungNr;
   try {
     const { daten } = await holen(`api/woche/auswahl?datum=${state.montag}`);
+    if (sn !== sitzungNr) return;
     state.auswahl = daten;
-  } catch {
+  } catch (f) {
+    if (sn !== sitzungNr) return;
+    if (zugriffsFehler(f)) return;
     /* ohne Verbindung und ohne Speicher: Auswahl bleibt leer */
   }
   fuelleAuswahl();
@@ -241,14 +443,14 @@ async function ladeAuswahl() {
 async function ladeWoche({ still = false } = {}) {
   hashSchreiben();
   zustandSpeichern();
-  const wert = state.werte[state.modus];
-  if (!wert) {
-    state.plan = null;
+  const url = planUrl(state.montag);
+  if (!url) {
+    ladenAbbrechen();
+    verwerfeAntwort();
     state.fehler = null;
     render();
     return;
   }
-  const url = `api/woche/${state.modus}/${encodeURIComponent(wert)}?datum=${state.montag}`;
   const nr = ++ladeNr;
   laedtGerade = true;
   if (!still) {
@@ -258,9 +460,9 @@ async function ladeWoche({ still = false } = {}) {
   try {
     const { daten, offlineStand } = await holen(url);
     if (nr !== ladeNr) return; // inzwischen etwas anderes angefordert
-    const unveraendert = still && !state.fehler && state.plan &&
-      JSON.stringify(daten) === JSON.stringify(state.plan);
-    state.plan = daten;
+    const unveraendert = still && !state.fehler && state.antwort &&
+      JSON.stringify(daten) === JSON.stringify(state.antwort);
+    uebernehmeAntwort(daten);
     state.fehler = null;
     state.offlineStand = offlineStand;
     state.geladenUm = Date.now();
@@ -271,12 +473,18 @@ async function ladeWoche({ still = false } = {}) {
       render();
     }
     if (!offlineStand && !still) vorladen(plusTage(state.montag, 7));
-  } catch {
+  } catch (fehler) {
     if (nr !== ladeNr) return;
     state.geladenUm = Date.now(); // nicht im Sekundentakt erneut versuchen
-    if (still && state.plan) return; // angezeigten Plan stehen lassen
-    state.plan = null;
-    state.fehler = "Der Plan konnte nicht geladen werden. Prüfe die Verbindung zum Schulserver und tippe oben rechts auf Aktualisieren.";
+    if (zugriffsFehler(fehler)) return;
+    if (still && state.plan && !(fehler instanceof HttpFehler)) return; // angezeigten Plan stehen lassen
+    verwerfeAntwort();
+    state.fehler = fehlerText(fehler);
+    if (fehler instanceof HttpFehler && fehler.status === 404 && state.modus === "schueler") {
+      state.werte.schueler = "";
+      zustandSpeichern();
+      hashSchreiben();
+    }
     render();
   } finally {
     if (nr === ladeNr) {
@@ -289,9 +497,8 @@ async function ladeWoche({ still = false } = {}) {
 
 /** Nächste Woche still mitladen – schnelleres Blättern und offline verfügbar. */
 function vorladen(montagIso) {
-  const wert = state.werte[state.modus];
-  if (!wert) return;
-  holen(`api/woche/${state.modus}/${encodeURIComponent(wert)}?datum=${montagIso}`).catch(() => {});
+  const url = planUrl(montagIso);
+  if (url) holen(url).catch(() => {});
 }
 
 function waehleTag() {
@@ -307,10 +514,11 @@ function waehleTag() {
 }
 
 // ---------------------------------------------------------------------
-//  Auswahlliste
+//  Auswahlliste (Lehrkraft / Klasse / Kurs)
 // ---------------------------------------------------------------------
 
 function fuelleAuswahl() {
+  if (!AUSWAHL_MODI.includes(state.modus)) return;
   const sel = el("wert");
   const a = state.auswahl;
   const wert = state.werte[state.modus] || "";
@@ -328,7 +536,7 @@ function fuelleAuswahl() {
 
   if (a && a.grundplan) {
     if (state.modus === "lehrer") {
-      sel.append(...sortiert(a.lehrer).map((l) => option(l, l)));
+      sel.append(...sortiert(a.lehrer).map((l) => option(l, gleich(l, eigenesKuerzel()) ? `${l} (ich)` : l)));
     } else if (state.modus === "klasse") {
       sel.append(h("optgroup", { label: "Klassen" }, sortiert(a.klassen).map((k) => option(k, k))));
       if (a.stufen.length)
@@ -361,11 +569,102 @@ function fuelleAuswahl() {
   if (passend && passend.value !== wert) state.werte[state.modus] = passend.value;
 }
 
+// ---------------------------------------------------------------------
+//  Schülersuche (nur Personal)
+// ---------------------------------------------------------------------
+
+let suchTimer = null;
+let suchNr = 0;
+
+const personName = (p) => (p ? `${p.vorname} ${p.nachname}` : "");
+function personKlasse(p) {
+  if (!p) return "";
+  const klasse = (p.lerngruppen || []).find((g) => /^\d{2}[A-Za-z]{1,2}$/.test(g));
+  return klasse || p.stufe || "";
+}
+
+function sucheStarten(sofort = false) {
+  clearTimeout(suchTimer);
+  suchNr++;
+  const q = el("suchfeld").value.trim();
+  if (q.length < 2) {
+    trefferZeigen(null, q.length ? "Mindestens zwei Buchstaben eingeben." : "");
+    return;
+  }
+  suchTimer = setTimeout(() => suchen(q), sofort ? 0 : 250);
+}
+
+async function suchen(q) {
+  const nr = ++suchNr;
+  el("suchInfo").textContent = "Suche …";
+  try {
+    const { daten } = await holen(`api/schueler?q=${encodeURIComponent(q)}&limit=${SUCH_MAX + 1}`, { merken: false });
+    if (nr !== suchNr) return;
+    trefferZeigen(Array.isArray(daten) ? daten : []);
+  } catch (f) {
+    if (nr !== suchNr) return;
+    if (zugriffsFehler(f)) return;
+    trefferZeigen(null, f instanceof HttpFehler && f.status === 403
+      ? "Die Schülersuche ist nur für Lehrkräfte und Verwaltung."
+      : "Suche nicht möglich – keine Verbindung zum Schulserver?");
+  }
+}
+
+/** Trefferliste anzeigen (liste = null: Liste leeren, info als Hinweis). */
+function trefferZeigen(liste, info = "") {
+  const ul = el("treffer");
+  if (!liste) {
+    ul.replaceChildren();
+    ul.hidden = true;
+    el("suchInfo").textContent = info;
+    return;
+  }
+  const zeigen = liste.slice(0, SUCH_MAX);
+  el("suchInfo").textContent = zeigen.length === 0 ? "Niemand gefunden."
+    : liste.length > SUCH_MAX ? `Mehr als ${SUCH_MAX} Treffer – bitte genauer suchen.`
+    : zeigen.length === 1 ? "1 Treffer" : `${zeigen.length} Treffer`;
+  ul.replaceChildren(...zeigen.map((s) => h("li", null,
+    h("button", { type: "button", class: "treffer-knopf", onclick: () => schuelerWaehlen(s) },
+      h("span", { class: "t-name" }, `${s.nachname}, ${s.vorname}`),
+      h("span", { class: "t-klasse" }, s.klasse || s.stufe || "")))));
+  ul.hidden = zeigen.length === 0;
+}
+
+function schuelerWaehlen(s) {
+  state.werte.schueler = String(s.id);
+  el("suchfeld").value = `${s.vorname} ${s.nachname}`;
+  trefferZeigen(null, "");
+  verwerfeAntwort();
+  ladeWoche();
+}
+
+/** Suchfeld zeigt den Namen der angezeigten Person (solange niemand darin tippt). */
+function suchfeldAbgleichen() {
+  const feld = el("suchfeld");
+  if (document.activeElement === feld || !el("treffer").hidden) return;
+  if (!state.werte.schueler) feld.value = "";
+  else if (state.person) feld.value = personName(state.person);
+}
+
+// ---------------------------------------------------------------------
+//  Darstellung einer Stunde
+// ---------------------------------------------------------------------
+
 /** Lesbarer Name des Ziels für die Kopfzeile. */
 function zielName() {
+  if (state.modus === "ich") {
+    const k = personKlasse(state.person);
+    return k ? `Mein Plan · ${k}` : "Mein Plan";
+  }
   const wert = state.werte[state.modus];
   if (!wert) return "Stundenplan";
-  if (state.modus === "lehrer") return `Lehrkraft ${wert}`;
+  if (state.modus === "schueler") {
+    if (!state.person) return "Schülerplan";
+    const k = personKlasse(state.person);
+    return k ? `${personName(state.person)} (${k})` : personName(state.person);
+  }
+  if (state.modus === "lehrer")
+    return gleich(wert, eigenesKuerzel()) ? `Mein Plan · ${wert}` : `Lehrkraft ${wert}`;
   if (state.modus === "klasse")
     return /^(EF|Q1|Q2)$/i.test(wert) ? `Stufe ${wert.toUpperCase()}` : `Klasse ${wert}`;
   const a = state.auswahl;
@@ -374,10 +673,6 @@ function zielName() {
   if (kurs) return gleich(kurs.fach, kurs.schluessel) ? kurs.schluessel : `${kurs.schluessel} (${kurs.fach})`;
   return wert;
 }
-
-// ---------------------------------------------------------------------
-//  Darstellung einer Stunde
-// ---------------------------------------------------------------------
 
 /** Korrektur im Stil des Rotstifts: alter Wert gestrichen, neuer daneben. */
 function korrektur(alt, neu) {
@@ -475,8 +770,17 @@ function renderKopf() {
   const name = zielName();
   el("titel").textContent = name;
   document.title = name === "Stundenplan" ? "Stundenplan" : `${name} – Stundenplan`;
-  for (const b of document.querySelectorAll(".modi button"))
+
+  const erlaubt = erlaubteModi();
+  el("auswahl").hidden = state.modus === "ich";
+  for (const b of document.querySelectorAll(".modi button")) {
+    b.hidden = !erlaubt.includes(b.dataset.modus);
     b.setAttribute("aria-pressed", String(b.dataset.modus === state.modus));
+  }
+  const suche = state.modus === "schueler";
+  el("wahl").hidden = suche;
+  el("suche").hidden = !suche;
+  if (suche) suchfeldAbgleichen();
   el("nurAenderungen").checked = state.nurAenderungen;
 }
 
@@ -600,12 +904,15 @@ function renderRaster() {
 function renderMeldung() {
   const m = el("meldung");
   let text = "";
-  if (!state.werte[state.modus]) {
-    text = state.auswahl && !state.auswahl.grundplan
-      ? "Es ist noch kein Stundenplan veröffentlicht."
-      : `Wähle oben ${state.modus === "lehrer" ? "eine Lehrkraft" : state.modus === "klasse" ? "eine Klasse" : "einen Kurs"}, um den Plan zu sehen.`;
-  } else if (state.fehler) {
+  if (state.fehler) {
     text = state.fehler;
+  } else if (!state.werte[state.modus]) {
+    if (state.modus === "schueler")
+      text = "Suche oben nach dem Namen einer Schülerin oder eines Schülers, um den persönlichen Plan zu sehen.";
+    else if (state.auswahl && !state.auswahl.grundplan)
+      text = "Es ist noch kein Stundenplan veröffentlicht.";
+    else
+      text = `Wähle oben ${state.modus === "lehrer" ? "eine Lehrkraft" : state.modus === "klasse" ? "eine Klasse" : "einen Kurs"}, um den Plan zu sehen.`;
   } else if (wocheOhneAenderungen()) {
     text = "Keine Änderungen in dieser Woche.";
   }
@@ -626,6 +933,200 @@ function renderFuss() {
   const mitPlan = tage.find((t) => t.grundplan);
   const gp = mitPlan ? mitPlan.grundplan : (state.auswahl && state.auswahl.grundplan);
   el("grundplan").textContent = gp ? `Plan ${gp}` : "";
+}
+
+// ---------------------------------------------------------------------
+//  Anmeldemaske, App-Start, Abmelden
+// ---------------------------------------------------------------------
+
+function anmeldeHinweis(text) {
+  const p = el("anmeldeHinweis");
+  p.textContent = text || "";
+  p.hidden = !text;
+}
+
+function anmeldeFehler(text) {
+  const p = el("anmeldeFehler");
+  p.textContent = text || "";
+  p.hidden = !text;
+}
+
+function zeigeAnmeldung(hinweis) {
+  sitzungNr++;
+  ladenAbbrechen();
+  kontoSchliessen();
+  el("inhalt").hidden = true;
+  el("anmeldung").hidden = false;
+  el("aktualisieren").hidden = true;
+  el("kontoKnopf").hidden = true;
+  el("titel").textContent = "Stundenplan";
+  document.title = "Anmelden – Stundenplan";
+  el("stand").textContent = "";
+  el("grundplan").textContent = "";
+  anmeldeHinweis(hinweis);
+  anmeldeFehler("");
+  el("ohneAnmeldung").hidden = state.anmeldungNoetig;
+  const feld = el("benutzer").value ? el("passwort") : el("benutzer");
+  setTimeout(() => { try { feld.focus({ preventScroll: true }); } catch { /* egal */ } }, 0);
+}
+
+function appStarten() {
+  sitzungNr++;
+  ladenAbbrechen();
+  el("anmeldung").hidden = true;
+  el("inhalt").hidden = false;
+  el("aktualisieren").hidden = false;
+  const k = el("kontoKnopf");
+  k.hidden = false;
+  k.setAttribute("aria-label", state.anmeldung
+    ? `Konto: ${state.anmeldung.anzeige || state.anmeldung.benutzername}`
+    : "Anmelden");
+  k.setAttribute("title", state.anmeldung ? "Konto" : "Anmelden");
+  k.classList.toggle("abgemeldet", !state.anmeldung);
+
+  state.auswahl = null;
+  verwerfeAntwort();
+  state.fehler = null;
+  state.offlineStand = null;
+  state.geladenUm = 0;
+  el("suchfeld").value = "";
+  trefferZeigen(null, "");
+
+  zustandLaden();
+  fuelleAuswahl();
+  render();
+  ladeAuswahl();
+  ladeWoche();
+}
+
+async function anmelden(e) {
+  e.preventDefault();
+  const benutzername = el("benutzer").value.trim();
+  const passwort = el("passwort").value;
+  if (!benutzername || !passwort) {
+    anmeldeFehler("Bitte Benutzername und Passwort eingeben.");
+    (benutzername ? el("passwort") : el("benutzer")).focus();
+    return;
+  }
+  const dauerhaft = el("bleiben").checked;
+  const knopf = el("anmeldeKnopf");
+  knopf.disabled = true;
+  knopf.textContent = "Anmelden …";
+  anmeldeFehler("");
+  try {
+    const resp = await fetch("api/auth/login", {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ benutzername, passwort, angemeldetBleiben: dauerhaft }),
+    });
+    let d = null;
+    try { d = await resp.json(); } catch { /* kein JSON */ }
+    if (!resp.ok) {
+      anmeldeFehler(resp.status === 401 || resp.status === 429
+        ? (d && d.fehler) || "Benutzername oder Passwort falsch."
+        : `Anmeldung zurzeit nicht möglich (Fehler ${resp.status}).`);
+      el("passwort").select();
+      return;
+    }
+    state.anmeldung = {
+      token: d.token,
+      benutzername: d.benutzername,
+      rolle: d.rolle,
+      anzeige: d.anzeige || d.benutzername,
+      lehrerKuerzel: d.lehrerKuerzel || null,
+      dauerhaft,
+      gueltigBis: d.gueltigBis || null,
+    };
+    anmeldungSpeichern();
+    el("passwort").value = "";
+    passwortVerbergen();
+    history.replaceState(null, "", location.pathname + location.search);
+    appStarten();
+  } catch {
+    anmeldeFehler("Keine Verbindung zum Schulserver. Prüfe die Internetverbindung und versuche es erneut.");
+  } finally {
+    knopf.disabled = false;
+    knopf.textContent = "Anmelden";
+  }
+}
+
+/** Abmelden auf diesem Gerät: Token und alle gespeicherten Daten dieser Person löschen. */
+function abmelden(hinweis) {
+  const name = state.anmeldung ? state.anmeldung.benutzername : "";
+  nutzerdatenLoeschen();
+  lokal.entfernen("anmeldung");
+  sitzung.entfernen("anmeldung");
+  state.anmeldung = null;
+  state.auswahl = null;
+  verwerfeAntwort();
+  state.fehler = null;
+  el("suchfeld").value = "";
+  trefferZeigen(null, "");
+  history.replaceState(null, "", location.pathname + location.search);
+  el("benutzer").value = hinweis ? name : ""; // nach Ablauf: Name schon eintragen
+  el("passwort").value = "";
+  zeigeAnmeldung(hinweis);
+}
+
+async function ladeOptionen() {
+  try {
+    const resp = await fetch("api/auth/optionen", { cache: "no-store" });
+    if (!resp.ok) return;
+    const d = await resp.json();
+    state.anmeldungNoetig = d.anmeldungNoetig !== false;
+    lokal.schreiben("optionen", { anmeldungNoetig: state.anmeldungNoetig });
+    if (!el("anmeldung").hidden) el("ohneAnmeldung").hidden = state.anmeldungNoetig;
+  } catch { /* offline: der zuletzt bekannte Wert gilt */ }
+}
+
+function passwortVerbergen() {
+  el("passwort").type = "password";
+  el("zeigen").textContent = "Anzeigen";
+  el("zeigen").setAttribute("aria-pressed", "false");
+}
+
+// ---------------------------------------------------------------------
+//  Kontomenü
+// ---------------------------------------------------------------------
+
+const konto = el("konto");
+let ueberallBestaetigt = false;
+
+function kontoFehler(text) {
+  el("kontoFehler").textContent = text || "";
+  el("kontoFehler").hidden = !text;
+}
+
+function ueberallZuruecksetzen() {
+  ueberallBestaetigt = false;
+  const b = el("ueberallAbmelden");
+  b.textContent = "Auf allen Geräten abmelden";
+  b.classList.remove("warnung");
+  b.disabled = false;
+}
+
+function kontoOeffnen() {
+  if (!state.anmeldung) { zeigeAnmeldung(); return; }
+  const a = state.anmeldung;
+  el("kontoName").textContent = a.anzeige || a.benutzername;
+  const info = [ROLLEN_TEXT[a.rolle] || a.rolle];
+  if (!gleich(a.anzeige, a.benutzername)) info.push(`Benutzer ${a.benutzername}`);
+  info.push(a.dauerhaft && a.gueltigBis
+    ? `angemeldet bis ${datumKurz(a.gueltigBis)}`
+    : "angemeldet bis zum Schließen");
+  el("kontoInfo").textContent = info.join(" · ");
+  el("meinPlan").hidden = !(istPersonal() && eigenesKuerzel());
+  ueberallZuruecksetzen();
+  kontoFehler("");
+  if (typeof konto.showModal === "function") { if (!konto.open) konto.showModal(); }
+  else konto.setAttribute("open", "");
+}
+
+function kontoSchliessen() {
+  if (!konto.open) return;
+  if (typeof konto.close === "function") konto.close();
+  else konto.removeAttribute("open");
 }
 
 // ---------------------------------------------------------------------
@@ -654,16 +1155,45 @@ function wechsleTag(schritt) {
 
 for (const b of document.querySelectorAll(".modi button")) {
   b.addEventListener("click", () => {
-    if (state.modus === b.dataset.modus) return;
-    state.modus = b.dataset.modus;
+    const modus = b.dataset.modus;
+    if (state.modus === modus || !erlaubteModi().includes(modus)) return;
+    state.modus = modus;
+    modusPruefen();
+    state.fehler = null;
+    verwerfeAntwort();
     fuelleAuswahl();
     ladeWoche();
+    if (modus === "schueler" && !state.werte.schueler) el("suchfeld").focus();
   });
 }
 
 el("wert").addEventListener("change", (e) => {
   state.werte[state.modus] = e.target.value;
   ladeWoche();
+});
+
+// Schülersuche
+el("suchfeld").addEventListener("input", () => sucheStarten());
+el("suchfeld").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); sucheStarten(true); }
+  else if (e.key === "ArrowDown") {
+    const erster = el("treffer").querySelector("button");
+    if (erster) { e.preventDefault(); erster.focus(); }
+  } else if (e.key === "Escape") {
+    trefferZeigen(null, "");
+  }
+});
+el("suchfeld").addEventListener("focus", () => {
+  // Beim Antippen den Namen markieren, damit man gleich neu tippen kann.
+  if (state.person && el("suchfeld").value === personName(state.person)) el("suchfeld").select();
+});
+el("treffer").addEventListener("keydown", (e) => {
+  const knoepfe = [...el("treffer").querySelectorAll("button")];
+  const i = knoepfe.indexOf(document.activeElement);
+  if (i < 0) return;
+  if (e.key === "ArrowDown" && i < knoepfe.length - 1) { e.preventDefault(); knoepfe[i + 1].focus(); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); (i > 0 ? knoepfe[i - 1] : el("suchfeld")).focus(); }
+  else if (e.key === "Escape") { e.preventDefault(); el("suchfeld").focus(); }
 });
 
 el("zurueck").addEventListener("click", () => wechsleWoche(-7));
@@ -717,6 +1247,66 @@ el("liste").addEventListener("touchend", (e) => {
   if (Math.abs(dx) > 60 && Math.abs(dy) < 45) wechsleTag(dx < 0 ? 1 : -1);
 }, { passive: true });
 
+// Anmeldung
+el("anmeldeForm").addEventListener("submit", anmelden);
+el("zeigen").addEventListener("click", () => {
+  const feld = el("passwort");
+  const zeigen = feld.type === "password";
+  feld.type = zeigen ? "text" : "password";
+  el("zeigen").textContent = zeigen ? "Verbergen" : "Anzeigen";
+  el("zeigen").setAttribute("aria-pressed", String(zeigen));
+  feld.focus();
+});
+el("ohneAnmeldung").addEventListener("click", () => appStarten());
+
+// Kontomenü
+el("kontoKnopf").addEventListener("click", kontoOeffnen);
+el("kontoZu").addEventListener("click", kontoSchliessen);
+konto.addEventListener("click", (e) => {
+  // Klick auf den abgedunkelten Hintergrund schließt das Menü.
+  if (e.target !== konto) return;
+  const r = konto.getBoundingClientRect();
+  if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) kontoSchliessen();
+});
+el("meinPlan").addEventListener("click", () => {
+  kontoSchliessen();
+  state.modus = "lehrer";
+  state.werte.lehrer = eigenesKuerzel();
+  state.montag = startMontag();
+  state.springeZuHeute = true;
+  state.fehler = null;
+  fuelleAuswahl();
+  ladeWoche();
+});
+el("abmelden").addEventListener("click", () => {
+  kontoSchliessen();
+  abmelden();
+});
+el("ueberallAbmelden").addEventListener("click", async () => {
+  const b = el("ueberallAbmelden");
+  if (!ueberallBestaetigt) {
+    ueberallBestaetigt = true;
+    b.textContent = "Wirklich überall abmelden? Nochmal tippen";
+    b.classList.add("warnung");
+    return;
+  }
+  b.disabled = true;
+  kontoFehler("");
+  try {
+    const resp = await fetch("api/auth/ueberall-abmelden", { method: "POST", cache: "no-store", headers: authKopf() });
+    if (resp.ok || resp.status === 401) {
+      kontoSchliessen();
+      abmelden("Du wurdest auf allen Geräten abgemeldet.");
+    } else {
+      kontoFehler(`Das hat nicht geklappt (Fehler ${resp.status}).`);
+      ueberallZuruecksetzen();
+    }
+  } catch {
+    kontoFehler("Keine Verbindung zum Schulserver – bitte später erneut versuchen.");
+    ueberallZuruecksetzen();
+  }
+});
+
 // Automatisch nachladen – damit veröffentlichte Änderungen ohne ↻ erscheinen:
 //  - beim Zurückwechseln ins Browserfenster bzw. in die App,
 //  - alle 2 Minuten, solange die Seite sichtbar ist.
@@ -726,8 +1316,8 @@ const NACHLADEN_MS = 2 * 60 * 1000;
 const MIN_ABSTAND_MS = 10 * 1000;
 
 function stillNachladen() {
-  if (laedtGerade || document.visibilityState !== "visible") return;
-  if (!state.werte[state.modus]) return;
+  if (el("inhalt").hidden || laedtGerade || document.visibilityState !== "visible") return;
+  if (!planUrl(state.montag)) return;
   if (Date.now() - state.geladenUm < MIN_ABSTAND_MS) return;
   ladeWoche({ still: true });
 }
@@ -739,27 +1329,46 @@ setInterval(() => {
 }, 15 * 1000);
 
 window.addEventListener("hashchange", () => {
+  if (el("inhalt").hidden) return;
   const adr = hashLesen();
-  if (!adr) return;
+  if (!adr || !erlaubteModi().includes(adr.modus)) return;
   const datum = adr.datum ? montagVon(adr.datum) : state.montag;
   if (adr.modus === state.modus && gleich(adr.wert, state.werte[state.modus]) && datum === state.montag) return;
   state.modus = adr.modus;
   if (adr.wert) state.werte[adr.modus] = adr.wert;
   state.montag = datum;
   if (adr.datum) state.zielDatum = adr.datum;
+  state.fehler = null;
+  verwerfeAntwort();
   fuelleAuswahl();
   ladeWoche();
+});
+
+// An- oder Abmeldung in einem anderen Fenster (dauerhafte Anmeldung): neu laden.
+window.addEventListener("storage", (e) => {
+  if (e.key !== "anmeldung") return;
+  try { if (e.storageArea !== window.localStorage) return; } catch { return; }
+  location.reload();
 });
 
 // ---------------------------------------------------------------------
 //  Start
 // ---------------------------------------------------------------------
 
-zustandLaden();
-fuelleAuswahl();
-render();
-ladeAuswahl();
-ladeWoche();
+async function start() {
+  altlastenEntfernen();
+  state.anmeldung = anmeldungLesen();
+  state.anmeldungNoetig = lokal.lesen("optionen", { anmeldungNoetig: true }).anmeldungNoetig !== false;
+  el("bleiben").checked = alsApp(); // installierte App: meist das eigene Handy
+
+  const optionen = ladeOptionen();
+  if (!state.anmeldung) await Promise.race([optionen, new Promise((r) => setTimeout(r, 4000))]);
+
+  if (state.anmeldung || !state.anmeldungNoetig) appStarten();
+  else zeigeAnmeldung();
+}
+
+start();
 
 // Service Worker: App offline startbar; nach einem Update einmal neu laden.
 if ("serviceWorker" in navigator) {

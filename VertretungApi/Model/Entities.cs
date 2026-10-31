@@ -55,12 +55,22 @@ public class VertretungsEintragDb
     public int? GrundUNr { get; set; }               // UNr der Grundplan-Stunde, an deren Stelle der Eintrag tritt
 }
 
-/// <summary>Backend-Konto (Admin/Lehrer/Schüler). Auth folgt in einem späteren Schritt.</summary>
+/// <summary>Backend-Konto (Admin/Lehrkraft/Schüler). Login per JWT (Phase 1C, Phase 2 Schritt 4).</summary>
 public class Benutzer
 {
     public int Id { get; set; }
     public string Benutzername { get; set; } = "";
     public string PasswortHash { get; set; } = "";
     public BenutzerRolle Rolle { get; set; }
-    public string? LehrerKuerzel { get; set; }       // nur für Rolle Lehrer
+    public string? LehrerKuerzel { get; set; }       // Lehrkräfte (auch Klassenlehrer/Stufenkoordination)
+
+    // Phase 2, Schritt 4:
+    // Schülerkonto -> Schülerdatensatz. Bewusst ohne Fremdschlüssel: Die Pseudodaten werden
+    // beim Neu-Seeden ersetzt; seed-konten verknüpft die Testkonten dann neu.
+    public int? SchuelerId { get; set; }
+
+    // Steht in jedem ausgegebenen Token und wird bei jeder Anfrage verglichen. Ein neuer Wert
+    // („auf allen Geräten abmelden", Passwortänderung, verlorenes Handy) macht alle bisherigen
+    // Tokens dieses Kontos sofort ungültig.
+    public string SicherheitsStempel { get; set; } = Guid.NewGuid().ToString("N");
 }

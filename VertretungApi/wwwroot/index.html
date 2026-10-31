@@ -15,25 +15,69 @@
 <body>
   <header class="kopf">
     <h1 id="titel">Stundenplan</h1>
-    <button id="aktualisieren" class="symbol" type="button" aria-label="Aktualisieren">
+    <button id="aktualisieren" class="symbol" type="button" aria-label="Aktualisieren" hidden>
       <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
         <path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
         <path d="M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
     </button>
+    <button id="kontoKnopf" class="symbol" type="button" aria-label="Konto" aria-haspopup="dialog" hidden>
+      <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+        <circle cx="12" cy="8.2" r="3.8" fill="none" stroke="currentColor" stroke-width="2.1"/>
+        <path d="M4.6 20.2c.9-3.7 3.9-5.9 7.4-5.9s6.5 2.2 7.4 5.9" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
+      </svg>
+    </button>
   </header>
 
-  <main id="inhalt">
-    <section class="auswahl" aria-label="Was möchtest du sehen?">
+  <!-- Anmeldung (Phase 2, Schritt 4) -->
+  <main id="anmeldung" class="anmeldung" hidden>
+    <form id="anmeldeForm" class="karte" novalidate>
+      <h2 class="karte-titel">Anmelden</h2>
+      <p id="anmeldeHinweis" class="hinweis" role="status" hidden></p>
+
+      <label class="feld" for="benutzer">Benutzername</label>
+      <input id="benutzer" name="username" type="text" autocomplete="username"
+             autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="next" required />
+
+      <label class="feld" for="passwort">Passwort</label>
+      <div class="passwort">
+        <input id="passwort" name="password" type="password" autocomplete="current-password"
+               enterkeyhint="go" required />
+        <button id="zeigen" class="textknopf klein" type="button" aria-controls="passwort" aria-pressed="false">Anzeigen</button>
+      </div>
+
+      <label class="schalter bleiben">
+        <input id="bleiben" type="checkbox" />
+        <span>Angemeldet bleiben</span>
+      </label>
+      <p class="kleingedruckt">Nur auf dem eigenen Gerät. Sonst endet die Anmeldung, wenn du den Browser schließt.</p>
+
+      <p id="anmeldeFehler" class="fehler" role="alert" hidden></p>
+
+      <button id="anmeldeKnopf" class="hauptknopf" type="submit">Anmelden</button>
+      <button id="ohneAnmeldung" class="textknopf" type="button" hidden>Ohne Anmeldung weiter</button>
+    </form>
+  </main>
+
+  <main id="inhalt" hidden>
+    <section id="auswahl" class="auswahl" aria-label="Was möchtest du sehen?">
       <div class="modi" role="group" aria-label="Ansicht">
         <button type="button" data-modus="lehrer" aria-pressed="false">Lehrkraft</button>
         <button type="button" data-modus="klasse" aria-pressed="true">Klasse</button>
         <button type="button" data-modus="gruppe" aria-pressed="false">Kurs</button>
+        <button type="button" data-modus="schueler" aria-pressed="false" hidden>Schüler</button>
       </div>
-      <label class="wahl">
+      <label id="wahl" class="wahl">
         <span id="wahlText" class="vh">Klasse wählen</span>
         <select id="wert" aria-labelledby="wahlText"></select>
       </label>
+      <div id="suche" class="suche" hidden>
+        <label for="suchfeld" class="vh">Schülerin oder Schüler suchen</label>
+        <input id="suchfeld" type="search" placeholder="Schüler suchen: Name …" autocomplete="off"
+               autocapitalize="none" spellcheck="false" enterkeyhint="search" aria-describedby="suchInfo" />
+        <p id="suchInfo" class="such-info" role="status"></p>
+        <ul id="treffer" class="treffer" aria-label="Suchergebnisse" hidden></ul>
+      </div>
     </section>
 
     <nav class="woche" aria-label="Woche">
@@ -70,6 +114,19 @@
     <span id="stand" class="stand" aria-live="polite"></span>
     <span id="grundplan" class="grundplan"></span>
   </footer>
+
+  <!-- Kontomenü -->
+  <dialog id="konto" class="konto" aria-labelledby="kontoName">
+    <div class="konto-kopf">
+      <p id="kontoName" class="konto-name"></p>
+      <p id="kontoInfo" class="konto-info"></p>
+    </div>
+    <button id="meinPlan" class="menuepunkt" type="button">Mein Plan</button>
+    <button id="abmelden" class="menuepunkt" type="button">Abmelden</button>
+    <button id="ueberallAbmelden" class="menuepunkt leise" type="button">Auf allen Geräten abmelden</button>
+    <p id="kontoFehler" class="fehler klein" role="alert" hidden></p>
+    <button id="kontoZu" class="menuepunkt schliessen" type="button">Schließen</button>
+  </dialog>
 
   <script src="app.js"></script>
 </body>

@@ -1,7 +1,9 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using VertretungApi.Data;
 using VertretungApi.Dtos;
+using VertretungApi.Helpers;
 using VertretungApi.Model;
 
 namespace VertretungApi.Controllers;
@@ -9,12 +11,14 @@ namespace VertretungApi.Controllers;
 /// <summary>
 /// Vertretungsplan-Endpunkte:
 ///   POST api/plan/push            – Desktop lädt einen Tag hoch (X-Api-Key).
-///   GET  api/plan/tag             – voller Tag (Admin/Aushang).
-///   GET  api/plan/lehrer/{kuerzel}– Stunden einer Lehrkraft (voll).
-///   GET  api/plan/klasse/{klasse} – Stunden einer Klasse (Schülersicht, ohne Grund).
+///   GET  api/plan/tage            – veröffentlichte Tage (nur Admin).
+///   GET  api/plan/tag             – voller Tag mit Gründen (nur Admin).
+///   GET  api/plan/lehrer/{kuerzel}– Stunden einer Lehrkraft (Admin oder die Lehrkraft selbst;
+///                                   Gründe nur bei den eigenen ausgefallenen Stunden).
+///   GET  api/plan/klasse/{klasse} – Stunden einer Klasse (ohne Grund; Richtlinie PlanLesen).
 ///
-/// Auth ist bewusst minimal (nur Push per API-Key). Rollen-Login (JWT) folgt
-/// in einem späteren M4-Schritt; die GETs sind vorerst offen.
+/// Abwesenheitsgründe sind Personaldaten der Lehrkräfte (VO-DV II) und gehen daher nur an
+/// Admins bzw. an die betroffene Lehrkraft selbst (Phase 2, Schritt 4).
 /// </summary>
 [ApiController]
 [Route("api/plan")]
@@ -85,6 +89,7 @@ public class PlanController : ControllerBase
     }
 
     /// <summary>Alle gespeicherten Tage (zum Nachschauen, was veröffentlicht wurde).</summary>
+    [Authorize(Roles = Rollen.Admin)]
     [HttpGet("tage")]
     public async Task<IActionResult> Tage()
     {
@@ -95,6 +100,7 @@ public class PlanController : ControllerBase
         return Ok(liste);
     }
 
+    [Authorize(Roles = Rollen.Admin)]
     [HttpGet("tag")]
     public async Task<IActionResult> Tag([FromQuery] string? schuljahr, [FromQuery] DateOnly datum)
     {
@@ -103,19 +109,32 @@ public class PlanController : ControllerBase
         return Ok(tag.Eintraege.OrderBy(e => e.Stunde).ThenBy(e => e.Klassen).Select(ToVoll));
     }
 
+    [Authorize]
     [HttpGet("lehrer/{kuerzel}")]
     public async Task<IActionResult> Lehrer(string kuerzel,
         [FromQuery] string? schuljahr, [FromQuery] DateOnly datum)
     {
+        bool admin = User.IsInRole(Rollen.Admin);
+        if (!admin && !string.Equals(Rollen.Kuerzel(User), kuerzel, StringComparison.OrdinalIgnoreCase))
+            return Forbid();
+
         var tag = await LadeTag(schuljahr, datum);
         if (tag == null) return Ok(Array.Empty<PlanEintragDto>());
 
         var rel = tag.Eintraege.Where(e =>
             string.Equals(e.Lehrer, kuerzel, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(e.OriginalLehrer, kuerzel, StringComparison.OrdinalIgnoreCase));
-        return Ok(rel.OrderBy(e => e.Stunde).Select(ToVoll));
+
+        // Vertritt die Lehrkraft eine Kollegin/einen Kollegen, bleibt deren Grund verborgen.
+        return Ok(rel.OrderBy(e => e.Stunde).Select(e =>
+        {
+            var dto = ToVoll(e);
+            bool eigeneStunde = string.Equals(e.OriginalLehrer, kuerzel, StringComparison.OrdinalIgnoreCase);
+            return admin || eigeneStunde ? dto : dto with { Grund = null };
+        }));
     }
 
+    [Authorize(Policy = Rollen.PlanLesen)]
     [HttpGet("klasse/{klasse}")]
     public async Task<IActionResult> Klasse(string klasse,
         [FromQuery] string? schuljahr, [FromQuery] DateOnly datum)

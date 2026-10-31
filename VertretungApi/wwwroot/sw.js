@@ -2,10 +2,11 @@
 //  - App-Dateien: zuerst vom Server (damit Updates sofort ankommen), ohne
 //    Verbindung aus dem Cache – die App startet also auch offline.
 //  - API-Aufrufe gehen immer ans Netz; offline lesbare Wochen speichert
-//    app.js selbst (im Browser-Speicher, mit Hinweis „Offline").
+//    app.js selbst (im Browser-Speicher je Benutzer, mit Hinweis „Offline");
+//    Anfragen mit Anmeldung (Authorization) landen nie im Cache.
 //  Neue Version = neuer Cache-Name; alte Caches werden beim Aktivieren gelöscht.
 
-const CACHE = "stundenplan-shell-v2";
+const CACHE = "stundenplan-shell-v3";
 const SHELL = [
   "./",
   "index.html",

@@ -773,7 +773,9 @@ main.verwaltung { max-width: 920px; }
 .fenster::backdrop { background: rgba(10, 16, 32, 0.4); }
 .fenster form { display: grid; }
 .fenster .hauptknopf { margin-top: 0; }
-.fenster .menuepunkt.schliessen { margin-top: 10px; border-radius: 9px; text-align: center; }
+/* Im Dialog: eigener, flächiger Knopf ohne Trennlinie (die Linie bog sich sonst mit den runden Ecken). */
+.fenster .menuepunkt.schliessen { margin-top: 10px; border-top: none; border-radius: 9px; background: var(--seite); text-align: center; }
+.fenster .menuepunkt.schliessen:hover { background: var(--akzent-hell); }
 #pwDialog .pw-form .hauptknopf { margin-top: 18px; }
 
 .kd-kopf { border-bottom: 1px solid var(--linie); padding-bottom: 10px; margin-bottom: 6px; }

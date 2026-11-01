@@ -11,7 +11,7 @@
 //             sperren, überall abmelden, löschen; Sammelanlage für Lehrkräfte
 //             (aus dem Grundplan) und Schüler (je Klasse/Stufe); Protokoll.
 //      Klassenleitung / Stufenkoordination („Schülerpasswörter"): Schülerkonten
-//             der eigenen Klasse/Stufe sehen und deren Passwort zurücksetzen.
+//             der eigenen Klasse/Stufe sehen, Passwort zurücksetzen, sperren/entsperren.
 //  - Startpasswörter erscheinen nur einmal: als Zugangszettel zum Drucken bzw.
 //    als CSV-Datei. Sie werden nirgends gespeichert und beim Verlassen gelöscht.
 //
@@ -520,31 +520,36 @@ function kontoDetail(k) {
           kontenLaden();
         }))));
   }
-  if (admin) {
-    aktionen.push(knopf("Bearbeiten", null, () => formular("bearbeiten", k)));
-    if (!k.ich) {
-      aktionen.push(knopf("Auf allen Geräten abmelden", null, (e) =>
-        bestaetigen(e.currentTarget, "Wirklich überall abmelden? Nochmal tippen", () =>
-          kontoAktion(e.currentTarget, "POST", `api/konten/${k.id}/abmelden`, (d) => {
-            toast(`${d.benutzername} ist auf allen Geräten abgemeldet.`);
-            kontoDetail(d);
-          }))));
-      if (k.gesperrt) {
-        aktionen.push(knopf("Entsperren", null, (e) =>
-          kontoAktion(e.currentTarget, "POST", `api/konten/${k.id}/entsperren`, (d) => {
-            toast(`${d.benutzername} ist entsperrt.`);
+  if (admin) aktionen.push(knopf("Bearbeiten", null, () => formular("bearbeiten", k)));
+  if (admin && !k.ich) {
+    aktionen.push(knopf("Auf allen Geräten abmelden", null, (e) =>
+      bestaetigen(e.currentTarget, "Wirklich überall abmelden? Nochmal tippen", () =>
+        kontoAktion(e.currentTarget, "POST", `api/konten/${k.id}/abmelden`, (d) => {
+          toast(`${d.benutzername} ist auf allen Geräten abgemeldet.`);
+          kontoDetail(d);
+        }))));
+  }
+  // Sperren/Entsperren: Admin; Klassenleitung/Stufenkoordination für ihre Schülerkonten.
+  if (!k.ich) {
+    if (k.gesperrt) {
+      aktionen.push(knopf("Entsperren", null, (e) =>
+        kontoAktion(e.currentTarget, "POST", `api/konten/${k.id}/entsperren`, (d) => {
+          toast(`${d.benutzername} ist entsperrt.`);
+          kontoDetail(d);
+          kontenLaden();
+        })));
+    } else {
+      aktionen.push(knopf("Sperren", null, (e) =>
+        bestaetigen(e.currentTarget, "Wirklich sperren? Nochmal tippen", () =>
+          kontoAktion(e.currentTarget, "POST", `api/konten/${k.id}/sperren`, (d) => {
+            toast(`${d.benutzername} ist gesperrt.`);
             kontoDetail(d);
             kontenLaden();
-          })));
-      } else {
-        aktionen.push(knopf("Sperren", null, (e) =>
-          bestaetigen(e.currentTarget, "Wirklich sperren? Nochmal tippen", () =>
-            kontoAktion(e.currentTarget, "POST", `api/konten/${k.id}/sperren`, (d) => {
-              toast(`${d.benutzername} ist gesperrt.`);
-              kontoDetail(d);
-              kontenLaden();
-            }))));
-      }
+          }))));
+    }
+  }
+  if (admin) {
+    if (!k.ich) {
       aktionen.push(knopf("Konto löschen", "leise", (e) =>
         bestaetigen(e.currentTarget, "Endgültig löschen? Nochmal tippen", () =>
           kontoAktion(e.currentTarget, "DELETE", `api/konten/${k.id}`, () => {

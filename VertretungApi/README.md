@@ -170,9 +170,10 @@ Grundplan (Schlüssel passen dann zu den Wochenplänen). Ohne Grundplan bzw. mit
 | GET | `/api/konten?q=&rolle=&filter=&limit=` | Kontenliste (`rolle`: Admin, Lehrer, Klassenlehrer, Stufenkoordination, Schueler, Personal; `filter`: pflicht, nie, gesperrt, verwaist) | KontenSehen |
 | GET | `/api/konten/{id}` | ein Konto | KontenSehen |
 | POST | `/api/konten/{id}/passwort` | Passwort zurücksetzen → `{ konto, startPasswort }` | KontenSehen |
+| POST | `/api/konten/{id}/sperren` · `/entsperren` | Konto sperren / entsperren | KontenSehen |
 | POST | `/api/konten` | Konto anlegen `{ rolle, benutzername?, lehrerKuerzel?, schuelerId?, zustaendig? }` → `{ konto, startPasswort }` | Admin |
 | PUT | `/api/konten/{id}` | Benutzername, Rolle, Kürzel, Zuständigkeit, Schüler ändern | Admin |
-| POST | `/api/konten/{id}/sperren` · `/entsperren` · `/abmelden` | sperren / entsperren / alle Anmeldungen beenden | Admin |
+| POST | `/api/konten/{id}/abmelden` | alle Anmeldungen des Kontos beenden | Admin |
 | DELETE | `/api/konten/{id}` | Konto löschen | Admin |
 | GET | `/api/konten/protokoll?konto=&limit=` | Kontenprotokoll (neueste zuerst) | Admin |
 | GET | `/api/konten/sammel/uebersicht` | Lehrkräfte und Klassen/Stufen mit Anzahl vorhandener Konten | Admin |
@@ -180,7 +181,7 @@ Grundplan (Schlüssel passen dann zu den Wochenplänen). Ohne Grundplan bzw. mit
 
 - **KontenSehen** = Admin (alle Konten) sowie Klassenleitung/Stufenkoordination: nur die
   Schülerkonten ihrer Klasse(n) bzw. Stufe(n) (Feld `Zustaendig`, z. B. „05A“ oder „Q1“) –
-  sehen und Passwort zurücksetzen, sonst nichts.
+  sehen, Passwort zurücksetzen, sperren/entsperren, sonst nichts.
 - **Startpasswort:** Anlegen und Zurücksetzen erzeugen ein lesbares Einmalpasswort
   (z. B. `kamo-tefi-37`). Es steht nur in dieser einen Antwort und wird nie im Klartext
   gespeichert. Das Konto ist dann auf „muss Passwort ändern“ gesetzt: Nach der Anmeldung
@@ -198,6 +199,8 @@ Grundplan (Schlüssel passen dann zu den Wochenplänen). Ohne Grundplan bzw. mit
 - **Schutzregeln:** letztes aktives Admin-Konto nicht sperr-/lösch-/herabstufbar; das eigene
   Konto wird hier nicht gesperrt, gelöscht oder zurückgesetzt. Jede Änderung beendet die
   Anmeldungen des Kontos (neuer Sicherheitsstempel). Gesperrte Konten: Login 403.
+- **Zeiten** stehen in der DB als UTC und werden beim Lesen als UTC gekennzeichnet (JSON mit „Z“),
+  die App zeigt sie in Ortszeit.
 - **Protokoll** (`KontoProtokoll`): angelegt, geändert, Passwort geändert/zurückgesetzt,
   gesperrt, entsperrt, abgemeldet, gelöscht – mit Akteur und Zeit, nie mit Passwort.
 - **Pseudodaten neu erzeugen** löscht Schülerkonten, die auf Pseudo-Schüler zeigen (die

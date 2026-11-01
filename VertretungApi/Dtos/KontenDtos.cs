@@ -29,6 +29,7 @@ public record KontenListeDto(IReadOnlyList<KontoDto> Konten, int Gesamt, bool Me
 public record KontenRechteDto(
     bool Verwalten,               // Admin: alles
     bool Zuruecksetzen,           // Passwörter zurücksetzen (Admin; Klassenleitung/Stufenkoordination für ihre Schüler)
+    bool Sperren,                 // sperren/entsperren (ebenso)
     IReadOnlyList<string> Zustaendig);
 
 public record NeuesKontoDto(

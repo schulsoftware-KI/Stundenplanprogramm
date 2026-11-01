@@ -19,10 +19,11 @@ namespace VertretungApi.Controllers;
 //                                             der eigenen Klasse/Stufe)
 //    GET    api/konten/{id}                 – ein Konto
 //    POST   api/konten/{id}/passwort        – Passwort zurücksetzen -> Startpasswort (einmalig)
+//    POST   api/konten/{id}/sperren | entsperren
 //  nur Admin:
 //    POST   api/konten                      – Konto anlegen -> Startpasswort (einmalig)
 //    PUT    api/konten/{id}                 – Benutzername/Rolle/Kürzel/Zuständigkeit/Schüler ändern
-//    POST   api/konten/{id}/sperren | entsperren | abmelden
+//    POST   api/konten/{id}/abmelden
 //    DELETE api/konten/{id}
 //    GET    api/konten/protokoll?konto=&limit=
 //    GET    api/konten/sammel/uebersicht    – Lehrkräfte, Klassen/Stufen mit Konto-Zahlen
@@ -63,7 +64,7 @@ public class KontenController : ControllerBase
 
     [HttpGet("rechte")]
     public async Task<IActionResult> Rechte()
-        => Ok(new KontenRechteDto(IstAdmin, true, await MeineZustaendigkeit()));
+        => Ok(new KontenRechteDto(IstAdmin, true, true, await MeineZustaendigkeit()));
 
     /// <summary>
     /// Kontenliste. rolle: Admin|Lehrer|Klassenlehrer|Stufenkoordination|Schueler|Personal;
@@ -258,16 +259,17 @@ public class KontenController : ControllerBase
     }
 
     // -----------------------------------------------------------------
-    //  Sperren, Abmelden, Löschen (Admin)
+    //  Sperren/Entsperren (Admin; Klassenleitung/Stufenkoordination für ihre Schüler),
+    //  Abmelden, Löschen (Admin)
     // -----------------------------------------------------------------
 
-    [Authorize(Roles = Rollen.Admin)]
     [HttpPost("{id:int}/sperren")]
     public async Task<IActionResult> Sperren(int id)
     {
         var u = await _db.Benutzer.FindAsync(id);
         if (u == null) return NichtGefunden();
         if (u.Id == IchId) return BadRequest(new { fehler = "Das eigene Konto kannst du nicht sperren." });
+        if (!await DarfSehen(u)) return KeinRecht();
         if (u.Gesperrt) return Ok(await AlsDto(u));
         if (u.Rolle == BenutzerRolle.Admin && await KontenService.AktiveAdminsAsync(_db) <= 1)
             return BadRequest(new { fehler = "Das letzte aktive Admin-Konto kann nicht gesperrt werden." });
@@ -279,12 +281,12 @@ public class KontenController : ControllerBase
         return Ok(await AlsDto(u));
     }
 
-    [Authorize(Roles = Rollen.Admin)]
     [HttpPost("{id:int}/entsperren")]
     public async Task<IActionResult> Entsperren(int id)
     {
         var u = await _db.Benutzer.FindAsync(id);
         if (u == null) return NichtGefunden();
+        if (!await DarfSehen(u)) return KeinRecht();
         if (!u.Gesperrt) return Ok(await AlsDto(u));
 
         u.Gesperrt = false;

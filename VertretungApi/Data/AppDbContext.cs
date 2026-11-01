@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using VertretungApi.Model;
 
 namespace VertretungApi.Data;
@@ -83,5 +84,18 @@ public class AppDbContext : DbContext
             .WithOne(f => f.Kalender!)
             .HasForeignKey(f => f.KalenderId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        // Alle DateTime-Werte werden als UTC gespeichert (DateTime.UtcNow). SQLite liefert sie
+        // aber ohne Zeitzone zurück (Kind = Unspecified) – im JSON fehlte dann das „Z", und die
+        // App zeigte die UTC-Zeit als Ortszeit (eine bzw. zwei Stunden zu früh). Beim Lesen
+        // deshalb als UTC kennzeichnen. Betrifft Konten und Kontenprotokoll (Phase 2, Schritt 5);
+        // DateTimeOffset/DateOnly sind nicht betroffen. Keine Schemaänderung.
+        var alsUtc = new ValueConverter<DateTime, DateTime>(
+            v => v,
+            v => DateTime.SpecifyKind(v, DateTimeKind.Utc));
+        foreach (var entity in b.Model.GetEntityTypes())
+            foreach (var prop in entity.GetProperties())
+                if (prop.ClrType == typeof(DateTime) || prop.ClrType == typeof(DateTime?))
+                    prop.SetValueConverter(alsUtc);
     }
 }

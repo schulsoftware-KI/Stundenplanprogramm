@@ -73,4 +73,37 @@ public class Benutzer
     // („auf allen Geräten abmelden", Passwortänderung, verlorenes Handy) macht alle bisherigen
     // Tokens dieses Kontos sofort ungültig.
     public string SicherheitsStempel { get; set; } = Guid.NewGuid().ToString("N");
+
+    // Phase 2, Schritt 5 (Konten verwalten):
+    // Klassenleitung: Klasse(n), z. B. "05A"; Stufenkoordination: Stufe(n), z. B. "Q1".
+    // Mehrere durch Komma getrennt. Bestimmt, für welche Schülerkonten Passwörter
+    // zurückgesetzt werden dürfen.
+    public string? Zustaendig { get; set; }
+
+    // Startpasswort bzw. vom Admin zurückgesetzt: Nach der Anmeldung ist nur das Ändern
+    // des Passworts erlaubt (Program.cs sperrt alle übrigen API-Aufrufe).
+    public bool MussPasswortAendern { get; set; }
+
+    // Gesperrt: keine Anmeldung möglich, bestehende Anmeldungen enden sofort.
+    public bool Gesperrt { get; set; }
+
+    public DateTime? AngelegtAm { get; set; }          // UTC; ältere Konten: unbekannt
+    public DateTime? LetzteAnmeldung { get; set; }     // UTC
+    public DateTime? PasswortGeaendertAm { get; set; } // UTC (auch Zurücksetzen)
+}
+
+/// <summary>
+/// Protokoll der Kontenverwaltung (Phase 2, Schritt 5): wer hat wann was mit welchem Konto
+/// gemacht (angelegt, Passwort zurückgesetzt, gesperrt, …). Passwörter stehen hier nie.
+/// Einträge älter als "Konten:ProtokollTage" (Standard 365) werden beim Start gelöscht.
+/// </summary>
+public class KontoProtokoll
+{
+    public int Id { get; set; }
+    public DateTime Zeit { get; set; } = DateTime.UtcNow;   // UTC
+    public string Akteur { get; set; } = "";                // Benutzername (oder "System")
+    public string Aktion { get; set; } = "";                // z. B. "Angelegt", "PasswortZurueckgesetzt"
+    public int? KontoId { get; set; }
+    public string Konto { get; set; } = "";                 // Benutzername des betroffenen Kontos
+    public string? Details { get; set; }                    // z. B. "Rolle Lehrer → Admin"
 }

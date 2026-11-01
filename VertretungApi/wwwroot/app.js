@@ -25,6 +25,10 @@
 //  - Lädt von selbst nach: beim Zurückwechseln ins Fenster bzw. in die App
 //    und alle 2 Minuten, solange die Seite sichtbar ist.
 //  - Auswahl und Woche stehen in der Adresse (#klasse/05A/2026-11-02).
+//
+//  Konten (Schritt 5, Code in konten.js): Passwort ändern, Pflicht-Änderung
+//  nach Startpasswort, Kontenverwaltung für Admin bzw. Schülerpasswörter für
+//  Klassenleitung/Stufenkoordination.
 // =====================================================================
 
 const MODI = {
@@ -72,7 +76,8 @@ const el = (id) => document.getElementById(id);
 const leereWerte = () => ({ lehrer: "", klasse: "", gruppe: "", schueler: "", ich: "ich" });
 
 const state = {
-  anmeldung: null,       // { token, benutzername, rolle, anzeige, lehrerKuerzel, dauerhaft, gueltigBis }
+  anmeldung: null,       // { token, benutzername, rolle, anzeige, lehrerKuerzel, zustaendig,
+                         //   mussPasswortAendern, passwortRegel, dauerhaft, gueltigBis }
   anmeldungNoetig: true, // laut Server (/api/auth/optionen)
   modus: "klasse",
   werte: leereWerte(),   // zuletzt gewählter Wert je Ansicht (schueler: Id)
@@ -258,10 +263,12 @@ function erlaubteModi() {
 const authKopf = () => (state.anmeldung ? { Authorization: "Bearer " + state.anmeldung.token } : {});
 
 class HttpFehler extends Error {
-  constructor(status, text) {
+  constructor(status, text, passwortAendern = false) {
     super("HTTP " + status);
     this.status = status;
     this.text = text || "";
+    this.passwortAendern = passwortAendern; // 403: erst eigenes Passwort festlegen
+    this.daten = null;
   }
 }
 
@@ -276,8 +283,9 @@ async function holen(url, { merken = true } = {}) {
     const resp = await fetch(url, { cache: "no-store", signal: abbruch.signal, headers: authKopf() });
     if (resp.status === 401 || resp.status === 403 || resp.status === 404) {
       let text = "";
-      try { const j = await resp.json(); text = (j && j.fehler) || ""; } catch { /* kein JSON */ }
-      throw new HttpFehler(resp.status, text);
+      let pflicht = false;
+      try { const j = await resp.json(); text = (j && j.fehler) || ""; pflicht = !!(j && j.passwortAendern); } catch { /* kein JSON */ }
+      throw new HttpFehler(resp.status, text, pflicht);
     }
     if (!resp.ok) throw new Error("Server antwortet mit " + resp.status);
     const daten = await resp.json();
@@ -305,8 +313,15 @@ function ladenAbbrechen() {
   el("inhalt").removeAttribute("aria-busy");
 }
 
-/** 401 = Anmeldung abgelaufen/widerrufen bzw. Anmeldung nötig. true = Anmeldemaske gezeigt. */
+/**
+ * 401 = Anmeldung abgelaufen/widerrufen bzw. Anmeldung nötig; 403 mit passwortAendern =
+ * erst ein eigenes Passwort festlegen. true = Anmelde- bzw. Passwortmaske gezeigt.
+ */
 function zugriffsFehler(fehler) {
+  if (fehler instanceof HttpFehler && fehler.status === 403 && fehler.passwortAendern && state.anmeldung) {
+    zeigePflicht();
+    return true;
+  }
   if (!(fehler instanceof HttpFehler) || fehler.status !== 401) return false;
   if (state.anmeldung) {
     abmelden("Deine Anmeldung ist abgelaufen oder wurde beendet. Bitte melde dich neu an.");
@@ -773,7 +788,7 @@ function renderKopf() {
 
   const erlaubt = erlaubteModi();
   el("auswahl").hidden = state.modus === "ich";
-  for (const b of document.querySelectorAll(".modi button")) {
+  for (const b of document.querySelectorAll(".modi button[data-modus]")) {
     b.hidden = !erlaubt.includes(b.dataset.modus);
     b.setAttribute("aria-pressed", String(b.dataset.modus === state.modus));
   }
@@ -954,8 +969,11 @@ function anmeldeFehler(text) {
 function zeigeAnmeldung(hinweis) {
   sitzungNr++;
   ladenAbbrechen();
-  kontoSchliessen();
+  alleDialogeZu();
+  verwaltungLeeren();
   el("inhalt").hidden = true;
+  el("verwaltung").hidden = true;
+  el("pflicht").hidden = true;
   el("anmeldung").hidden = false;
   el("aktualisieren").hidden = true;
   el("kontoKnopf").hidden = true;
@@ -973,7 +991,11 @@ function zeigeAnmeldung(hinweis) {
 function appStarten() {
   sitzungNr++;
   ladenAbbrechen();
+  alleDialogeZu();
+  verwaltungLeeren();
   el("anmeldung").hidden = true;
+  el("pflicht").hidden = true;
+  el("verwaltung").hidden = true;
   el("inhalt").hidden = false;
   el("aktualisieren").hidden = false;
   const k = el("kontoKnopf");
@@ -1023,26 +1045,22 @@ async function anmelden(e) {
     let d = null;
     try { d = await resp.json(); } catch { /* kein JSON */ }
     if (!resp.ok) {
-      anmeldeFehler(resp.status === 401 || resp.status === 429
+      anmeldeFehler(resp.status === 401 || resp.status === 403 || resp.status === 429
         ? (d && d.fehler) || "Benutzername oder Passwort falsch."
         : `Anmeldung zurzeit nicht möglich (Fehler ${resp.status}).`);
       el("passwort").select();
       return;
     }
-    state.anmeldung = {
-      token: d.token,
-      benutzername: d.benutzername,
-      rolle: d.rolle,
-      anzeige: d.anzeige || d.benutzername,
-      lehrerKuerzel: d.lehrerKuerzel || null,
-      dauerhaft,
-      gueltigBis: d.gueltigBis || null,
-    };
-    anmeldungSpeichern();
+    anmeldungUebernehmen(d, dauerhaft);
     el("passwort").value = "";
     passwortVerbergen();
     history.replaceState(null, "", location.pathname + location.search);
-    appStarten();
+    if (d.mussPasswortAendern) {
+      pwMerk = passwort; // nur im Arbeitsspeicher, damit es nicht noch einmal eingetippt werden muss
+      zeigePflicht();
+    } else {
+      appStarten();
+    }
   } catch {
     anmeldeFehler("Keine Verbindung zum Schulserver. Prüfe die Internetverbindung und versuche es erneut.");
   } finally {
@@ -1051,9 +1069,27 @@ async function anmelden(e) {
   }
 }
 
+/** Antwort von Login bzw. Passwortänderung übernehmen und speichern. */
+function anmeldungUebernehmen(d, dauerhaft) {
+  state.anmeldung = {
+    token: d.token,
+    benutzername: d.benutzername,
+    rolle: d.rolle,
+    anzeige: d.anzeige || d.benutzername,
+    lehrerKuerzel: d.lehrerKuerzel || null,
+    zustaendig: d.zustaendig || null,
+    mussPasswortAendern: !!d.mussPasswortAendern,
+    passwortRegel: d.passwortRegel || null,
+    dauerhaft,
+    gueltigBis: d.gueltigBis || null,
+  };
+  anmeldungSpeichern();
+}
+
 /** Abmelden auf diesem Gerät: Token und alle gespeicherten Daten dieser Person löschen. */
 function abmelden(hinweis) {
   const name = state.anmeldung ? state.anmeldung.benutzername : "";
+  pwMerk = "";
   nutzerdatenLoeschen();
   lokal.entfernen("anmeldung");
   sitzung.entfernen("anmeldung");
@@ -1117,6 +1153,7 @@ function kontoOeffnen() {
     : "angemeldet bis zum Schließen");
   el("kontoInfo").textContent = info.join(" · ");
   el("meinPlan").hidden = !(istPersonal() && eigenesKuerzel());
+  kontoMenueAnpassen();
   ueberallZuruecksetzen();
   kontoFehler("");
   if (typeof konto.showModal === "function") { if (!konto.open) konto.showModal(); }
@@ -1153,7 +1190,7 @@ function wechsleTag(schritt) {
   wechsleWoche(schritt > 0 ? 7 : -7);
 }
 
-for (const b of document.querySelectorAll(".modi button")) {
+for (const b of document.querySelectorAll(".modi button[data-modus]")) {
   b.addEventListener("click", () => {
     const modus = b.dataset.modus;
     if (state.modus === modus || !erlaubteModi().includes(modus)) return;
@@ -1222,6 +1259,7 @@ el("nurAenderungen").addEventListener("change", (e) => {
 });
 
 el("aktualisieren").addEventListener("click", () => {
+  if (verwaltungOffen()) { verwaltungAktualisieren(); return; }
   ladeAuswahl();
   ladeWoche();
 });
@@ -1270,6 +1308,12 @@ konto.addEventListener("click", (e) => {
 });
 el("meinPlan").addEventListener("click", () => {
   kontoSchliessen();
+  if (verwaltungOffen()) {
+    if (!startpasswoerterVerwerfen()) return;
+    verwaltungLeeren();
+    el("verwaltung").hidden = true;
+    el("inhalt").hidden = false;
+  }
   state.modus = "lehrer";
   state.werte.lehrer = eigenesKuerzel();
   state.montag = startMontag();
@@ -1356,6 +1400,7 @@ window.addEventListener("storage", (e) => {
 // ---------------------------------------------------------------------
 
 async function start() {
+  kontenInit();
   altlastenEntfernen();
   state.anmeldung = anmeldungLesen();
   state.anmeldungNoetig = lokal.lesen("optionen", { anmeldungNoetig: true }).anmeldungNoetig !== false;
@@ -1364,7 +1409,8 @@ async function start() {
   const optionen = ladeOptionen();
   if (!state.anmeldung) await Promise.race([optionen, new Promise((r) => setTimeout(r, 4000))]);
 
-  if (state.anmeldung || !state.anmeldungNoetig) appStarten();
+  if (state.anmeldung && state.anmeldung.mussPasswortAendern) zeigePflicht();
+  else if (state.anmeldung || !state.anmeldungNoetig) appStarten();
   else zeigeAnmeldung();
 }
 

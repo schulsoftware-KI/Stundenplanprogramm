@@ -59,6 +59,153 @@
     </form>
   </main>
 
+  <!-- Eigenes Passwort festlegen bzw. ändern (Phase 2, Schritt 5). Das Formular wandert
+       bei „Passwort ändern" in den Dialog #pwDialog und danach wieder hierher. -->
+  <main id="pflicht" class="anmeldung" hidden>
+    <div id="pwHeimat" class="karte">
+      <h2 class="karte-titel">Eigenes Passwort festlegen</h2>
+      <p class="hinweis">Du hast dich mit einem Startpasswort angemeldet. Lege jetzt ein eigenes
+        Passwort fest – erst danach geht es weiter.</p>
+      <form id="pwForm" class="pw-form" novalidate>
+        <input id="pwName" type="text" name="username" autocomplete="username" hidden />
+        <div id="pwAltFeld">
+          <label class="feld" for="pwAlt" id="pwAltLabel">Bisheriges Passwort</label>
+          <input id="pwAlt" type="password" autocomplete="current-password" enterkeyhint="next" />
+        </div>
+        <label class="feld" for="pwNeu">Neues Passwort</label>
+        <div class="passwort">
+          <input id="pwNeu" type="password" autocomplete="new-password" enterkeyhint="next"
+                 aria-describedby="pwRegel" />
+          <button id="pwZeigen" class="textknopf klein" type="button" aria-pressed="false">Anzeigen</button>
+        </div>
+        <p id="pwRegel" class="regel"></p>
+        <label class="feld" for="pwWdh">Neues Passwort wiederholen</label>
+        <input id="pwWdh" type="password" autocomplete="new-password" enterkeyhint="go" />
+        <p id="pwFehler" class="fehler" role="alert" hidden></p>
+        <button id="pwSpeichern" class="hauptknopf" type="submit">Passwort speichern</button>
+        <button id="pwAbbrechen" class="textknopf" type="button">Abmelden</button>
+      </form>
+    </div>
+  </main>
+
+  <!-- Kontenverwaltung (Phase 2, Schritt 5): Admin alles, Klassenleitung/Stufenkoordination
+       nur Passwörter der Schülerkonten ihrer Klasse/Stufe -->
+  <main id="verwaltung" class="verwaltung" hidden>
+    <div class="verw-kopf">
+      <button id="verwZurueck" class="textknopf" type="button">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Zum Plan
+      </button>
+    </div>
+
+    <div id="verwReiter" class="modi verw-reiter" role="tablist" aria-label="Bereich">
+      <button type="button" role="tab" data-reiter="konten" aria-selected="true">Konten</button>
+      <button type="button" role="tab" data-reiter="sammel" aria-selected="false">Sammelanlage</button>
+      <button type="button" role="tab" data-reiter="protokoll" aria-selected="false">Protokoll</button>
+    </div>
+
+    <!-- Konten -->
+    <section id="vKonten" class="verw-bereich" aria-label="Konten">
+      <div class="k-werkzeuge">
+        <label for="kSuche" class="vh">Konten durchsuchen</label>
+        <input id="kSuche" class="eingabe" type="search" placeholder="Suchen: Name, Kürzel, Klasse …"
+               autocomplete="off" autocapitalize="none" spellcheck="false" enterkeyhint="search" />
+        <div class="k-filter">
+          <label for="kRolle" class="vh">Rolle</label>
+          <select id="kRolle" class="eingabe">
+            <option value="">Alle Rollen</option>
+            <option value="Personal">Personal</option>
+            <option value="Schueler">Schülerkonten</option>
+            <option value="Admin">Verwaltung</option>
+            <option value="Lehrer">Lehrkräfte</option>
+            <option value="Klassenlehrer">Klassenleitung</option>
+            <option value="Stufenkoordination">Stufenkoordination</option>
+          </select>
+          <label for="kFilter" class="vh">Status</label>
+          <select id="kFilter" class="eingabe">
+            <option value="">Jeder Status</option>
+            <option value="pflicht">Startpasswort offen</option>
+            <option value="nie">Nie angemeldet</option>
+            <option value="gesperrt">Gesperrt</option>
+            <option value="verwaist">Schüler fehlt</option>
+          </select>
+        </div>
+        <button id="kNeu" class="hauptknopf klein" type="button">Neues Konto</button>
+      </div>
+      <p id="kInfo" class="such-info" role="status"></p>
+      <ul id="kListe" class="k-liste" aria-label="Konten"></ul>
+    </section>
+
+    <!-- Sammelanlage -->
+    <section id="vSammel" class="verw-bereich" aria-label="Sammelanlage" hidden>
+      <div id="sSchritt1" class="karte sammel-karte">
+        <h2 class="karte-titel">Konten auf einmal anlegen</h2>
+        <p class="kleingedruckt ohne-einzug">Vorhandene Konten werden übersprungen. Neue Konten bekommen ein
+          Startpasswort und müssen beim ersten Anmelden ein eigenes festlegen.</p>
+        <fieldset class="art-wahl">
+          <legend class="feld">Für wen?</legend>
+          <label class="schalter gross"><input type="radio" name="sArt" value="Lehrer" checked /> <span id="sLehrerText">Lehrkräfte (aus dem Grundplan)</span></label>
+          <label class="schalter gross"><input type="radio" name="sArt" value="Schueler" /> <span>Schülerinnen und Schüler</span></label>
+        </fieldset>
+        <div id="sGruppenBox" hidden>
+          <p class="feld">Klassen bzw. Stufen</p>
+          <div id="sGruppen" class="gruppen"></div>
+        </div>
+        <p id="sFehler" class="fehler" role="alert" hidden></p>
+        <button id="sVorschau" class="hauptknopf" type="button">Vorschau</button>
+      </div>
+
+      <div id="sSchritt2" class="karte sammel-karte" hidden>
+        <h2 id="sTitel" class="karte-titel" tabindex="-1">Vorschau</h2>
+        <p id="sZusammenfassung" class="sammel-info"></p>
+        <div class="tabelle-huelle">
+          <table class="tabelle">
+            <thead><tr>
+              <th scope="col" class="spalte-wahl"><span class="vh">Anlegen</span></th>
+              <th scope="col">Name</th>
+              <th scope="col">Benutzername</th>
+              <th scope="col">Status</th>
+            </tr></thead>
+            <tbody id="sZeilen"></tbody>
+          </table>
+        </div>
+        <p id="sFehler2" class="fehler" role="alert" hidden></p>
+        <div class="knopfreihe">
+          <button id="sAnlegen" class="hauptknopf" type="button">Konten anlegen</button>
+          <button id="sZurueck" class="textknopf" type="button">Zurück</button>
+        </div>
+      </div>
+
+      <div id="sSchritt3" class="karte sammel-karte" hidden>
+        <h2 class="karte-titel">Konten angelegt</h2>
+        <p id="sErgebnis" class="hinweis"></p>
+        <p class="kleingedruckt ohne-einzug"><strong>Die Startpasswörter werden nur jetzt angezeigt.</strong>
+          Drucke die Zugangszettel aus oder speichere die Liste, bevor du diese Seite verlässt.</p>
+        <div class="knopfreihe">
+          <button id="sDrucken" class="hauptknopf" type="button">Zugangszettel drucken</button>
+          <button id="sCsv" class="textknopf" type="button">Als Tabelle (CSV) speichern</button>
+        </div>
+        <div class="tabelle-huelle">
+          <table class="tabelle">
+            <thead><tr>
+              <th scope="col">Name</th><th scope="col">Benutzername</th><th scope="col">Startpasswort</th>
+            </tr></thead>
+            <tbody id="sErgebnisZeilen"></tbody>
+          </table>
+        </div>
+        <button id="sFertig" class="textknopf" type="button">Fertig – Liste schließen</button>
+      </div>
+    </section>
+
+    <!-- Protokoll -->
+    <section id="vProtokoll" class="verw-bereich" aria-label="Protokoll" hidden>
+      <p class="kleingedruckt ohne-einzug">Wer hat wann was an welchem Konto geändert. Passwörter werden nie
+        protokolliert. Einträge werden nach einem Jahr gelöscht.</p>
+      <p id="pInfo" class="such-info" role="status"></p>
+      <ul id="pListe" class="p-liste" aria-label="Protokoll"></ul>
+    </section>
+  </main>
+
   <main id="inhalt" hidden>
     <section id="auswahl" class="auswahl" aria-label="Was möchtest du sehen?">
       <div class="modi" role="group" aria-label="Ansicht">
@@ -122,12 +269,104 @@
       <p id="kontoInfo" class="konto-info"></p>
     </div>
     <button id="meinPlan" class="menuepunkt" type="button">Mein Plan</button>
+    <button id="kontenKnopf" class="menuepunkt" type="button" hidden>Konten verwalten</button>
+    <button id="pwAendernKnopf" class="menuepunkt" type="button">Passwort ändern</button>
     <button id="abmelden" class="menuepunkt" type="button">Abmelden</button>
     <button id="ueberallAbmelden" class="menuepunkt leise" type="button">Auf allen Geräten abmelden</button>
     <p id="kontoFehler" class="fehler klein" role="alert" hidden></p>
     <button id="kontoZu" class="menuepunkt schliessen" type="button">Schließen</button>
   </dialog>
 
+  <!-- Passwort ändern -->
+  <dialog id="pwDialog" class="fenster" aria-labelledby="pwDialogTitel">
+    <h2 id="pwDialogTitel" class="karte-titel">Passwort ändern</h2>
+    <p class="kleingedruckt ohne-einzug">Danach bist du auf allen anderen Geräten abgemeldet.</p>
+    <div id="pwDialogPlatz"></div>
+  </dialog>
+
+  <!-- Konto: Details und Aktionen -->
+  <dialog id="kDialog" class="fenster" aria-labelledby="kdName">
+    <div class="kd-kopf">
+      <h2 id="kdName" class="karte-titel"></h2>
+      <dl id="kdDaten" class="kd-daten"></dl>
+    </div>
+    <div id="kdAktionen" class="kd-aktionen"></div>
+    <p id="kdFehler" class="fehler klein" role="alert" hidden></p>
+    <button id="kdZu" class="menuepunkt schliessen" type="button">Schließen</button>
+  </dialog>
+
+  <!-- Konto anlegen / bearbeiten -->
+  <dialog id="kfDialog" class="fenster" aria-labelledby="kfTitel">
+    <form id="kfForm" novalidate>
+      <h2 id="kfTitel" class="karte-titel">Neues Konto</h2>
+      <label class="feld" for="kfRolle">Rolle</label>
+      <select id="kfRolle" class="eingabe">
+        <option value="Lehrer">Lehrkraft</option>
+        <option value="Klassenlehrer">Klassenleitung</option>
+        <option value="Stufenkoordination">Stufenkoordination</option>
+        <option value="Admin">Verwaltung (Admin)</option>
+        <option value="Schueler">Schülerin / Schüler</option>
+      </select>
+
+      <div id="kfSchuelerFeld">
+        <label class="feld" for="kfSchuelerSuche">Schülerin / Schüler</label>
+        <p id="kfSchuelerGewaehlt" class="gewaehlt" hidden></p>
+        <input id="kfSchuelerSuche" class="eingabe" type="search" placeholder="Name suchen …" autocomplete="off"
+               autocapitalize="none" spellcheck="false" aria-describedby="kfSchuelerInfo" />
+        <p id="kfSchuelerInfo" class="such-info" role="status"></p>
+        <ul id="kfTreffer" class="treffer" aria-label="Suchergebnisse" hidden></ul>
+      </div>
+
+      <div id="kfKuerzelFeld">
+        <label class="feld" for="kfKuerzel">Lehrerkürzel</label>
+        <input id="kfKuerzel" class="eingabe" type="text" list="kfLehrerListe" autocomplete="off"
+               autocapitalize="characters" spellcheck="false" />
+        <datalist id="kfLehrerListe"></datalist>
+      </div>
+
+      <div id="kfZustaendigFeld">
+        <label class="feld" for="kfZustaendig" id="kfZustaendigLabel">Zuständig für Klasse</label>
+        <input id="kfZustaendig" class="eingabe" type="text" list="kfGruppenListe" autocomplete="off"
+               autocapitalize="characters" spellcheck="false" placeholder="z. B. 05A (mehrere mit Komma)" />
+        <datalist id="kfGruppenListe"></datalist>
+      </div>
+
+      <label class="feld" for="kfName">Benutzername</label>
+      <input id="kfName" class="eingabe" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" />
+      <p id="kfNameHinweis" class="regel">Leer lassen: Kürzel bzw. vorname.nachname.</p>
+
+      <p id="kfFehler" class="fehler" role="alert" hidden></p>
+      <div class="knopfreihe">
+        <button id="kfSpeichern" class="hauptknopf" type="submit">Anlegen</button>
+        <button id="kfAbbrechen" class="textknopf" type="button">Abbrechen</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Startpasswort (nur einmal sichtbar) -->
+  <dialog id="spDialog" class="fenster" aria-labelledby="spTitel">
+    <h2 id="spTitel" class="karte-titel">Startpasswort</h2>
+    <p id="spFuer" class="sp-fuer"></p>
+    <div class="sp-daten">
+      <span class="sp-etikett">Benutzername</span><span id="spName" class="sp-wert"></span>
+      <span class="sp-etikett">Startpasswort</span><span id="spPasswort" class="sp-wert passwort-text"></span>
+    </div>
+    <p class="kleingedruckt ohne-einzug">Wird nur jetzt angezeigt. Beim ersten Anmelden muss ein eigenes
+      Passwort festgelegt werden. Alle bisherigen Anmeldungen dieses Kontos sind beendet.</p>
+    <div class="knopfreihe">
+      <button id="spDrucken" class="hauptknopf" type="button">Zugangszettel drucken</button>
+      <button id="spKopieren" class="textknopf" type="button">Kopieren</button>
+    </div>
+    <button id="spFertig" class="menuepunkt schliessen" type="button">Fertig</button>
+  </dialog>
+
+  <!-- kurze Rückmeldungen -->
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <!-- Druckansicht: Zugangszettel (nur beim Drucken sichtbar, danach geleert) -->
+  <section id="druck" class="druck" aria-hidden="true"></section>
+
+  <script src="konten.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

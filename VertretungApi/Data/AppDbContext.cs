@@ -10,6 +10,7 @@ public class AppDbContext : DbContext
     public DbSet<VertretungsTag> Tage => Set<VertretungsTag>();
     public DbSet<VertretungsEintragDb> Eintraege => Set<VertretungsEintragDb>();
     public DbSet<Benutzer> Benutzer => Set<Benutzer>();
+    public DbSet<KontoProtokoll> KontoProtokolle => Set<KontoProtokoll>();   // Phase 2, Schritt 5
 
     // Klassenbuch (Phase 1A)
     public DbSet<Lerngruppe> Lerngruppen => Set<Lerngruppe>();
@@ -36,6 +37,9 @@ public class AppDbContext : DbContext
 
         b.Entity<Benutzer>()
             .HasIndex(u => u.Benutzername).IsUnique();
+
+        b.Entity<KontoProtokoll>().HasIndex(p => p.Zeit);
+        b.Entity<KontoProtokoll>().HasIndex(p => p.KontoId);
 
         // --- Klassenbuch ---
         b.Entity<Lerngruppe>().HasIndex(l => new { l.Schuljahr, l.Bezeichnung });

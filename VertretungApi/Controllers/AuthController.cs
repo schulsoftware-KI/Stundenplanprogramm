@@ -19,7 +19,12 @@ namespace VertretungApi.Controllers;
 //    GET  api/auth/me                      – wer bin ich (JWT)
 //    POST api/auth/ueberall-abmelden       – eigene Tokens auf allen Geräten ungültig machen
 //    POST api/auth/abmelden/{benutzername} – dasselbe für ein anderes Konto (Admin)
+//    POST api/auth/passwort                – eigenes Passwort ändern (Schritt 5) -> neues JWT
 //    POST api/auth/seed-konten             – Testkonten anlegen (X-Api-Key)
+//
+//  Schritt 5: Gesperrte Konten können sich nicht anmelden. Konten mit Startpasswort bzw.
+//  zurückgesetztem Passwort (MussPasswortAendern) dürfen nach der Anmeldung nur das
+//  Passwort ändern (Sperre in Program.cs). Kontenverwaltung: KontenController.
 //
 //  Jedes Token trägt den Sicherheitsstempel des Kontos; Program.cs vergleicht ihn bei
 //  jeder Anfrage mit der Datenbank. Neuer Stempel = alle alten Tokens ungültig.
@@ -84,20 +89,70 @@ public class AuthController : ControllerBase
         }
         _bremse.Erfolg(name);
 
-        var gueltigBis = dto.AngemeldetBleiben
-            ? DateTime.UtcNow.AddDays(Zahl("Jwt:TageAngemeldetBleiben", 30))
-            : DateTime.UtcNow.AddHours(Zahl("Jwt:StundenGueltig", 12));
+        // Erst nach richtigem Passwort verraten, dass das Konto gesperrt ist.
+        if (u.Gesperrt)
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                fehler = "Dieses Konto ist gesperrt. Bitte wende dich an das Sekretariat.",
+                gesperrt = true
+            });
 
-        return Ok(new
+        u.LetzteAnmeldung = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        return Ok(await LoginAntwort(u, dto.AngemeldetBleiben));
+    }
+
+    // string? statt string: Leere Eingaben bekommen so unsere verständliche Meldung statt der Standard-Validierung.
+    public record PasswortDto(string? AltesPasswort, string? NeuesPasswort, bool AngemeldetBleiben = false);
+
+    /// <summary>
+    /// Eigenes Passwort ändern (Phase 2, Schritt 5). Danach sind alle bisherigen Anmeldungen
+    /// (andere Geräte) beendet; die Antwort enthält ein neues Token für dieses Gerät.
+    /// Falsches bisheriges Passwort -> 400 (nicht 401, damit die App angemeldet bleibt),
+    /// zählt aber für die Login-Bremse.
+    /// </summary>
+    [Authorize]
+    [HttpPost("passwort")]
+    public async Task<IActionResult> PasswortAendern([FromBody] PasswortDto dto)
+    {
+        var id = Rollen.BenutzerId(User);
+        var u = id == null ? null : await _db.Benutzer.FindAsync(id.Value);
+        if (u == null) return Unauthorized();
+        var adresse = HttpContext.Connection.RemoteIpAddress;
+
+        var warten = _bremse.Gesperrt(u.Benutzername, adresse);
+        if (warten is TimeSpan w)
         {
-            token = ErzeugeToken(u, gueltigBis),
-            gueltigBis,
-            benutzername = u.Benutzername,
-            rolle = u.Rolle.ToString(),
-            lehrerKuerzel = u.LehrerKuerzel,
-            schuelerId = u.SchuelerId,
-            anzeige = await AnzeigeName(u)
-        });
+            int sek = Math.Max(1, (int)Math.Ceiling(w.TotalSeconds));
+            Response.Headers.RetryAfter = sek.ToString();
+            return StatusCode(StatusCodes.Status429TooManyRequests, new
+            {
+                fehler = $"Zu viele Fehlversuche. Bitte in {WarteText(sek)} erneut versuchen.",
+                sekunden = sek
+            });
+        }
+
+        var alt = dto.AltesPasswort ?? "";
+        if (!PasswortHasher.Verify(alt, u.PasswortHash))
+        {
+            _bremse.Fehlschlag(u.Benutzername, adresse);
+            return BadRequest(new { fehler = "Das bisherige Passwort stimmt nicht.", feld = "alt" });
+        }
+        _bremse.Erfolg(u.Benutzername);
+
+        var fehler = PasswortRegeln.Pruefen(dto.NeuesPasswort, u.Rolle,
+            await KontenService.VerboteneNamenAsync(_db, u), alt);
+        if (fehler != null) return BadRequest(new { fehler, feld = "neu" });
+
+        u.PasswortHash = PasswortHasher.Hash(dto.NeuesPasswort!);   // von Pruefen als nicht leer bestätigt
+        u.MussPasswortAendern = false;
+        u.PasswortGeaendertAm = DateTime.UtcNow;
+        u.SicherheitsStempel = NeuerStempel();       // andere Geräte abmelden
+        KontenService.Protokoll(_db, u.Benutzername, KontenService.Aktion.PasswortGeaendert, u);
+        await _db.SaveChangesAsync();
+
+        return Ok(await LoginAntwort(u, dto.AngemeldetBleiben));
     }
 
     [Authorize]
@@ -106,7 +161,8 @@ public class AuthController : ControllerBase
     {
         benutzername = User.Identity?.Name,
         rolle = User.FindFirst(ClaimTypes.Role)?.Value,
-        lehrerKuerzel = Rollen.Kuerzel(User)
+        lehrerKuerzel = Rollen.Kuerzel(User),
+        mussPasswortAendern = User.HasClaim(Rollen.PasswortPflichtClaim, "1")
     });
 
     /// <summary>Meldet das eigene Konto auf allen Geräten ab (auch auf diesem).</summary>
@@ -131,6 +187,7 @@ public class AuthController : ControllerBase
         var u = await _db.Benutzer.FirstOrDefaultAsync(b => b.Benutzername.ToLower() == klein);
         if (u == null) return NotFound(new { fehler = "Konto nicht gefunden." });
         u.SicherheitsStempel = NeuerStempel();
+        KontenService.Protokoll(_db, User.Identity?.Name ?? "", KontenService.Aktion.Abgemeldet, u);
         await _db.SaveChangesAsync();
         return Ok(new { u.Benutzername, abgemeldet = true });
     }
@@ -152,29 +209,37 @@ public class AuthController : ControllerBase
                 return Unauthorized("Ungültiger oder fehlender X-Api-Key.");
         }
 
-        var standard = new (string Name, string Pw, BenutzerRolle Rolle, string? Kuerzel)[]
+        // Testkonten mit bewusst einfachen Passwörtern (nur Entwicklung, ohne Pflicht zum Ändern).
+        var standard = new (string Name, string Pw, BenutzerRolle Rolle, string? Kuerzel, string? Zustaendig)[]
         {
-            ("admin", "admin123", BenutzerRolle.Admin, null),
-            ("L1",    "lehrer123", BenutzerRolle.Lehrer, "L1"),
-            ("L2",    "lehrer123", BenutzerRolle.Lehrer, "L2"),
-            ("kl05A", "kl123",     BenutzerRolle.Klassenlehrer, "L1"),
+            ("admin", "admin123",  BenutzerRolle.Admin, null, null),
+            ("L1",    "lehrer123", BenutzerRolle.Lehrer, "L1", null),
+            ("L2",    "lehrer123", BenutzerRolle.Lehrer, "L2", null),
+            ("kl05A", "kl123",     BenutzerRolle.Klassenlehrer, "L1", "05A"),
+            ("koQ1",  "ko123",     BenutzerRolle.Stufenkoordination, "L2", "Q1"),   // Schritt 5
         };
 
         var ergebnis = new List<object>();
         foreach (var k in standard)
         {
-            var vorhanden = await _db.Benutzer.AnyAsync(b => b.Benutzername == k.Name);
-            if (!vorhanden)
+            var konto = await _db.Benutzer.FirstOrDefaultAsync(b => b.Benutzername == k.Name);
+            if (konto == null)
             {
                 _db.Benutzer.Add(new Benutzer
                 {
                     Benutzername = k.Name,
                     PasswortHash = PasswortHasher.Hash(k.Pw),
                     Rolle = k.Rolle,
-                    LehrerKuerzel = k.Kuerzel
+                    LehrerKuerzel = k.Kuerzel,
+                    Zustaendig = k.Zustaendig,
+                    AngelegtAm = DateTime.UtcNow
                 });
             }
-            ergebnis.Add(new { k.Name, rolle = k.Rolle.ToString(), angelegt = !vorhanden });
+            else if (k.Zustaendig != null && string.IsNullOrWhiteSpace(konto.Zustaendig))
+            {
+                konto.Zustaendig = k.Zustaendig;   // ältere Testkonten (vor Schritt 5) nachtragen
+            }
+            ergebnis.Add(new { k.Name, rolle = k.Rolle.ToString(), angelegt = konto == null, zustaendig = k.Zustaendig });
         }
 
         // Pseudo-Schülerkonten: ein Schüler der Klasse 05A (Sek I) und einer der Q1 (Sek II).
@@ -206,7 +271,8 @@ public class AuthController : ControllerBase
                     Benutzername = k.Name,
                     PasswortHash = PasswortHasher.Hash(k.Pw),
                     Rolle = BenutzerRolle.Schueler,
-                    SchuelerId = s.Id
+                    SchuelerId = s.Id,
+                    AngelegtAm = DateTime.UtcNow
                 });
             }
             else if (konto.SchuelerId != s.Id)
@@ -243,6 +309,28 @@ public class AuthController : ControllerBase
             .Where(s => s.IstPseudo && s.Stufe == gruppe && s.Zugehoerigkeiten.Any())
             .OrderBy(s => s.Id)
             .FirstOrDefaultAsync();
+    }
+
+    /// <summary>Antwort von Login und Passwortänderung: Token + Kontodaten für die App.</summary>
+    private async Task<object> LoginAntwort(Benutzer u, bool angemeldetBleiben)
+    {
+        var gueltigBis = angemeldetBleiben
+            ? DateTime.UtcNow.AddDays(Zahl("Jwt:TageAngemeldetBleiben", 30))
+            : DateTime.UtcNow.AddHours(Zahl("Jwt:StundenGueltig", 12));
+
+        return new
+        {
+            token = ErzeugeToken(u, gueltigBis),
+            gueltigBis,
+            benutzername = u.Benutzername,
+            rolle = u.Rolle.ToString(),
+            lehrerKuerzel = u.LehrerKuerzel,
+            schuelerId = u.SchuelerId,
+            anzeige = await AnzeigeName(u),
+            zustaendig = KontenService.ZustaendigText(u.Zustaendig),
+            mussPasswortAendern = u.MussPasswortAendern,
+            passwortRegel = KontenService.Regeln(u.Rolle)
+        };
     }
 
     private async Task<string> AnzeigeName(Benutzer u)
@@ -285,7 +373,7 @@ public class AuthController : ControllerBase
         => double.TryParse(_cfg[schluessel], System.Globalization.NumberStyles.Float,
                System.Globalization.CultureInfo.InvariantCulture, out var z) && z > 0 ? z : ersatz;
 
-    private static string NeuerStempel() => Guid.NewGuid().ToString("N");
+    private static string NeuerStempel() => KontenService.NeuerStempel();
 
     private static string WarteText(int sekunden)
         => sekunden < 60 ? $"{sekunden} Sekunden"

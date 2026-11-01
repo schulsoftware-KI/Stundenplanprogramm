@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -52,6 +53,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
         // Phase 2, Schritt 4: Token nur gültig, solange das Konto existiert und sein
         // Sicherheitsstempel noch derselbe ist („auf allen Geräten abmelden" ändert ihn).
+        // Schritt 5: außerdem nicht gesperrt; „muss Passwort ändern" wird als Claim
+        // mitgegeben (Sperre siehe Middleware unten).
         o.Events = new JwtBearerEvents
         {
             OnTokenValidated = async ctx =>
@@ -67,10 +70,15 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 var db = ctx.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
                 var aktuell = await db.Benutzer.AsNoTracking()
                     .Where(b => b.Id == id.Value)
-                    .Select(b => b.SicherheitsStempel)
+                    .Select(b => new { b.SicherheitsStempel, b.Gesperrt, b.MussPasswortAendern })
                     .FirstOrDefaultAsync();
-                if (aktuell == null || aktuell != stempel)
+                if (aktuell == null || aktuell.SicherheitsStempel != stempel || aktuell.Gesperrt)
+                {
                     ctx.Fail("Anmeldung wurde beendet.");
+                    return;
+                }
+                if (aktuell.MussPasswortAendern && principal!.Identity is ClaimsIdentity ident)
+                    ident.AddClaim(new Claim(Rollen.PasswortPflichtClaim, "1"));
             }
         };
     });
@@ -94,7 +102,34 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var log = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Datenbank");
     db.Database.EnsureCreated();
+
+    // Phase 2, Schritt 5: fehlende Tabellen/Spalten in einer bestehenden Entwicklungs-DB
+    // ergänzen, damit sie nicht bei jeder Schemaänderung gelöscht werden muss.
+    if (app.Configuration.GetValue("Database:SchemaNachruesten", true))
+    {
+        try
+        {
+            foreach (var m in SchemaNachruestung.Ausfuehren(db))
+                log.LogInformation("Schema nachgerüstet: {Meldung}", m);
+        }
+        catch (Exception ex)
+        {
+            log.LogError(ex, "Schema-Nachrüstung fehlgeschlagen. Abhilfe: vertretung.db löschen, API neu starten, Seeds erneut ausführen.");
+        }
+    }
+
+    // Protokoll der Kontenverwaltung nur begrenzt aufbewahren (Datensparsamkeit).
+    try
+    {
+        int geloescht = KontenService.ProtokollAufraeumen(db, app.Configuration.GetValue("Konten:ProtokollTage", 365));
+        if (geloescht > 0) log.LogInformation("{Anzahl} alte Protokolleinträge gelöscht.", geloescht);
+    }
+    catch (Exception ex)
+    {
+        log.LogWarning(ex, "Kontenprotokoll konnte nicht aufgeräumt werden.");
+    }
 }
 
 if (app.Environment.IsDevelopment())
@@ -125,6 +160,26 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 
 app.UseAuthentication();
+
+// Phase 2, Schritt 5: Mit Startpasswort bzw. zurückgesetztem Passwort ist nur das
+// Ändern des Passworts erlaubt (plus Anmelden/Abmelden). Alles andere: 403 mit Hinweis.
+app.Use(async (ctx, next) =>
+{
+    if (ctx.User.HasClaim(Rollen.PasswortPflichtClaim, "1")
+        && ctx.Request.Path.StartsWithSegments("/api")
+        && !Rollen.ErlaubtBeiPasswortPflicht(ctx.Request.Path))
+    {
+        ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await ctx.Response.WriteAsJsonAsync(new
+        {
+            fehler = "Bitte zuerst ein eigenes Passwort festlegen.",
+            passwortAendern = true
+        });
+        return;
+    }
+    await next();
+});
+
 app.UseAuthorization();
 
 app.MapControllers();

@@ -46,6 +46,10 @@ public class StammdatenController : ControllerBase
             ? (_cfg["DefaultSchuljahr"] ?? "2026/27")
             : schuljahr;
 
+        // Schritt 5: Schülerkonten der alten Pseudo-Schüler lösen bzw. entfernen, bevor die
+        // Pseudodaten ersetzt werden (sonst zeigte ein Konto später einen anderen Schüler).
+        var konten = SchuelerKontenLoesen();
+
         bool synthetischErzwungen = string.Equals(quelle, "synthetisch", StringComparison.OrdinalIgnoreCase);
         var version = synthetischErzwungen ? null : _db.GrundplanVersionen
             .Where(v => v.Schuljahr == sj)
@@ -62,12 +66,50 @@ public class StammdatenController : ControllerBase
                 quelle = "grundplan",
                 grundplan = version.Bezeichnung,
                 gueltigAb = version.GueltigAb,
-                eg.Schueler, eg.Klassen, eg.Kurse, eg.Zuordnungen
+                eg.Schueler, eg.Klassen, eg.Kurse, eg.Zuordnungen,
+                schuelerKonten = konten
             });
         }
 
         var e = PseudoDatenGenerator.Generieren(_db, sj, seed ?? 12345);
-        return Ok(new { schuljahr = sj, quelle = "synthetisch", e.Schueler, e.Klassen, e.Kurse, e.Zuordnungen });
+        return Ok(new { schuljahr = sj, quelle = "synthetisch", e.Schueler, e.Klassen, e.Kurse, e.Zuordnungen,
+            schuelerKonten = konten });
+    }
+
+    /// <summary>
+    /// Vor dem Neu-Seeden: Schülerkonten, die auf Pseudo-Schüler (oder auf gar keinen Schüler)
+    /// zeigen, werden gelöscht – außer den Testkonten s05A/sQ1, die nur gelöst und von
+    /// /api/auth/seed-konten neu verknüpft werden. Konten echter Schüler bleiben unberührt.
+    /// </summary>
+    private object SchuelerKontenLoesen()
+    {
+        var testkonten = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "s05A", "sQ1" };
+        var echteIds = _db.Schueler.Where(x => !x.IstPseudo).Select(x => x.Id).ToHashSet();
+        int entfernt = 0, geloest = 0;
+        foreach (var k in _db.Benutzer.Where(b => b.Rolle == BenutzerRolle.Schueler).ToList())
+        {
+            if (k.SchuelerId is int sid && echteIds.Contains(sid)) continue;
+            if (testkonten.Contains(k.Benutzername))
+            {
+                if (k.SchuelerId == null) continue;
+                k.SchuelerId = null;
+                k.SicherheitsStempel = KontenService.NeuerStempel();
+                geloest++;
+            }
+            else
+            {
+                KontenService.Protokoll(_db, "System", KontenService.Aktion.Geloescht, k, "Pseudodaten neu erzeugt");
+                _db.Benutzer.Remove(k);
+                entfernt++;
+            }
+        }
+        _db.SaveChanges();
+        return new
+        {
+            entfernt,
+            geloest,
+            hinweis = geloest > 0 ? "Testkonten s05A/sQ1 neu verknüpfen: POST /api/auth/seed-konten" : null
+        };
     }
 
     /// <summary>Lerngruppen (Klassen + Kurse), optional gefiltert. Nur Personal.</summary>

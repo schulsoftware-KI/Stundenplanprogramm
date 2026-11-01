@@ -621,6 +621,240 @@ main.anmeldung {
 .menuepunkt.warnung { color: var(--rot); font-weight: 700; background: var(--entfall-t); }
 .menuepunkt.schliessen { color: var(--akzent); border-top: 1px solid var(--linie); border-radius: 0 0 9px 9px; margin-top: 4px; }
 
+/* =====================================================================
+   Konten (Phase 2, Schritt 5): Passwort, Verwaltung, Dialoge, Zugangszettel
+   ===================================================================== */
+
+/* Eingabefelder außerhalb der Anmeldekarte im selben Stil */
+.pw-form { display: grid; }
+.pw-form input[type="text"],
+.pw-form input[type="password"],
+.eingabe {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--linie);
+  border-radius: 10px;
+  background: var(--seite);
+  font-size: 1.05rem; /* mindestens 16 px: iOS zoomt sonst */
+}
+.pw-form input { padding: 12px; }
+select.eingabe { background: var(--papier); font-weight: 600; }
+.eingabe::placeholder { color: var(--leise); }
+.regel { margin: 6px 2px 0 2px; font-size: 0.85rem; color: var(--leise); }
+.kleingedruckt.ohne-einzug { margin-left: 0; }
+.hauptknopf.klein { margin-top: 0; padding: 10px 14px; font-size: 0.98rem; }
+.knopfreihe { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 16px; }
+.knopfreihe .hauptknopf { margin-top: 0; }
+.knopfreihe.klein { margin: 0 0 6px 0; gap: 4px 10px; }
+.mono { font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace; overflow-wrap: anywhere; }
+.passwort-text {
+  font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+/* ---- Verwaltung ---- */
+main.verwaltung { max-width: 920px; }
+.verw-kopf { display: flex; align-items: center; margin: -6px 0 6px -6px; }
+.verw-kopf .textknopf { display: inline-flex; align-items: center; gap: 4px; }
+.verw-reiter { margin-bottom: 12px; }
+.verw-reiter button[aria-selected="true"] { background: var(--akzent); color: var(--auf-akzent); }
+
+.k-werkzeuge { display: grid; gap: 8px; margin-bottom: 6px; }
+.k-filter { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.k-filter select[hidden] ~ select { grid-column: 1 / -1; }
+#kNeu { justify-self: start; }
+@media (min-width: 760px) {
+  .k-werkzeuge { grid-template-columns: 1fr auto auto; align-items: center; }
+  .k-filter { grid-template-columns: auto auto; }
+}
+#kInfo, #pInfo { margin: 6px 2px 8px 2px; }
+
+.k-liste, .p-liste {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: var(--papier);
+  border: 1px solid var(--linie);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.k-liste:empty, .p-liste:empty { display: none; }
+.k-liste li + li, .p-liste li + li { border-top: 1px solid var(--linie); }
+.k-zeile {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 12px 11px 12px;
+  border: none;
+  border-left: 4px solid transparent;
+  background: transparent;
+  text-align: left;
+}
+.k-zeile:hover, .k-zeile:focus-visible { background: var(--akzent-hell); }
+.k-zeile.gesperrt { border-left-color: var(--rot); }
+.k-zeile.gesperrt .k-name { color: var(--leise); text-decoration: line-through 2px var(--rot); }
+.k-oben { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; }
+.k-name { font-weight: 700; overflow-wrap: anywhere; }
+.k-rechts { flex: none; color: var(--leise); font-weight: 600; font-variant-numeric: tabular-nums; }
+.k-unten { color: var(--leise); font-size: 0.88rem; overflow-wrap: anywhere; }
+.k-marken { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.marke {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: var(--auf-farbe);
+  background: var(--frei);
+}
+.marke.ich { background: var(--akzent); color: var(--auf-akzent); }
+.marke.gesperrt { background: var(--entfall); }
+.marke.start { background: var(--verlegung); }
+
+/* Protokoll */
+.p-eintrag { display: grid; gap: 1px; padding: 9px 12px 10px 12px; }
+.p-zeit { font-size: 0.8rem; color: var(--leise); font-variant-numeric: tabular-nums; }
+.p-text { overflow-wrap: anywhere; }
+.p-wer { color: var(--leise); }
+.p-details { font-size: 0.86rem; color: var(--leise); overflow-wrap: anywhere; }
+
+/* Sammelanlage */
+.sammel-karte { margin-bottom: 12px; }
+.art-wahl { border: none; margin: 4px 0 0 0; padding: 0; display: grid; gap: 4px; }
+.art-wahl legend { padding: 0; margin-bottom: 4px; }
+.schalter.gross { color: var(--tinte); font-size: 1rem; white-space: normal; padding: 6px 0; }
+.gruppen { display: grid; gap: 10px; }
+.gruppen-titel { margin: 4px 0 4px 2px; font-size: 0.85rem; font-weight: 700; color: var(--leise); }
+.gruppen-raster { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; }
+.gruppe-wahl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas: "box name" "box zahl";
+  column-gap: 8px;
+  align-items: center;
+  padding: 7px 9px;
+  border: 1px solid var(--linie);
+  border-radius: 9px;
+  background: var(--seite);
+  cursor: pointer;
+}
+.gruppe-wahl input { grid-area: box; width: 20px; height: 20px; margin: 0; accent-color: var(--akzent); }
+.gruppe-wahl .g-name { grid-area: name; font-weight: 700; }
+.gruppe-wahl .g-zahl { grid-area: zahl; font-size: 0.75rem; color: var(--leise); }
+.gruppe-wahl:has(input:checked) { border-color: var(--akzent); background: var(--akzent-hell); }
+.gruppe-wahl.fertig .g-name { color: var(--leise); }
+.sammel-info { margin: 0 0 10px 0; color: var(--leise); }
+.tabelle-huelle { overflow-x: auto; margin-top: 12px; border: 1px solid var(--linie); border-radius: 10px; }
+.tabelle { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
+.tabelle th, .tabelle td { padding: 7px 10px; text-align: left; vertical-align: top; border-top: 1px solid var(--linie); }
+.tabelle thead th { border-top: none; font-size: 0.82rem; color: var(--leise); background: var(--papier); }
+.tabelle .spalte-wahl { width: 36px; padding-right: 0; }
+.tabelle .spalte-wahl input { width: 20px; height: 20px; margin: 0; accent-color: var(--akzent); }
+.tabelle tr.z-vorhanden td { color: var(--leise); }
+.tabelle tr.z-konflikt td { background: var(--entfall-t); }
+.tabelle .t-klasse { color: var(--leise); }
+.tabelle .mono { white-space: nowrap; overflow-wrap: normal; }
+.z-hinweis { display: block; font-size: 0.8rem; color: var(--leise); }
+#sFertig { margin-top: 12px; justify-self: start; }
+#sVorschau { justify-self: start; min-width: 220px; }
+
+/* ---- Dialoge ---- */
+.fenster {
+  width: min(500px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  padding: 20px 18px 14px 18px;
+  border: 1px solid var(--linie);
+  border-radius: 14px;
+  background: var(--papier);
+  color: var(--tinte);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
+}
+.fenster::backdrop { background: rgba(10, 16, 32, 0.4); }
+.fenster form { display: grid; }
+.fenster .hauptknopf { margin-top: 0; }
+.fenster .menuepunkt.schliessen { margin-top: 10px; border-radius: 9px; text-align: center; }
+#pwDialog .pw-form .hauptknopf { margin-top: 18px; }
+
+.kd-kopf { border-bottom: 1px solid var(--linie); padding-bottom: 10px; margin-bottom: 6px; }
+.kd-daten { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; margin: 8px 0 0 0; font-size: 0.92rem; }
+.kd-daten dt { color: var(--leise); }
+.kd-daten dd { margin: 0; overflow-wrap: anywhere; }
+.kd-aktionen { display: grid; }
+.kd-hinweis { margin: 8px 12px; color: var(--leise); font-size: 0.92rem; }
+
+.gewaehlt {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 8px 0;
+  padding: 10px 12px;
+  border-left: 4px solid var(--akzent);
+  background: var(--akzent-hell);
+  border-radius: 0 8px 8px 0;
+  font-weight: 650;
+}
+.gewaehlt .g-klasse { color: var(--leise); }
+#kfTreffer { margin-top: 6px; max-height: 240px; }
+
+.sp-fuer { margin: 0 0 12px 0; font-weight: 650; }
+.sp-daten {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  align-items: baseline;
+  padding: 14px;
+  border: 2px dashed var(--linie);
+  border-radius: 10px;
+  background: var(--seite);
+}
+.sp-etikett { color: var(--leise); font-size: 0.88rem; }
+.sp-wert { font-size: 1.15rem; font-weight: 700; overflow-wrap: anywhere; }
+#spPasswort { font-size: 1.35rem; color: var(--akzent); }
+
+/* ---- Rückmeldung ---- */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 10;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 11px 16px;
+  border-radius: 10px;
+  background: var(--tinte);
+  color: var(--papier);
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+/* ---- Zugangszettel (nur Druck) ---- */
+.druck { display: none; }
+@media print {
+  body.druckt { background: #fff; color: #000; }
+  body.druckt > :not(#druck) { display: none !important; }
+  body.druckt .druck { display: block; }
+  .zettel {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    margin: 0 0 8mm 0;
+    padding: 6mm 7mm;
+    border: 1.5px dashed #555;
+    border-radius: 3mm;
+    color: #000;
+    font-size: 11pt;
+  }
+  .z-titel { margin: 0 0 1mm 0; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.08em; color: #333; }
+  .z-name { margin: 0 0 3mm 0; font-size: 14pt; font-weight: 700; }
+  .z-gruppe { font-weight: 400; }
+  .zettel dl { display: grid; grid-template-columns: 34mm 1fr; gap: 1.5mm 4mm; margin: 0; }
+  .zettel dt { color: #333; }
+  .zettel dd { margin: 0; overflow-wrap: anywhere; }
+  .z-wert { font-family: ui-monospace, Consolas, "Liberation Mono", monospace; font-size: 13pt; font-weight: 700; }
+  .z-hinweis { margin: 3mm 0 0 0; font-size: 9pt; color: #333; }
+}
+
 /* Handy quer: kurze Tagesnamen im Raster, flacherer Kopf für mehr Plan auf dem Schirm. */
 @media (orientation: landscape) and (max-width: 759px) {
   .raster .wt-lang { display: none; }

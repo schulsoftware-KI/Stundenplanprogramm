@@ -24,7 +24,11 @@ cd VertretungApi
 dotnet run
 ```
 
-Beim Start wird die SQLite-Datei `vertretung.db` angelegt (via `EnsureCreated`).
+Beim Start wird die SQLite-Datei `vertretung.db` angelegt (via `EnsureCreated`). Seit Phase 2,
+Schritt 5 ergänzt die API beim Start außerdem **fehlende Tabellen und Spalten** in einer schon
+vorhandenen Dev-DB (Schema-Nachrüstung, siehe Log „Schema nachgerüstet: …“). Die DB muss bei
+neuen Feldern also nicht mehr gelöscht werden. Nur bei Typänderungen, Umbenennungen oder neuen
+Indizes auf alten Tabellen hilft weiterhin: `vertretung.db` löschen und neu seeden.
 API dann unter `http://localhost:5080`, OpenAPI-Doc unter `http://localhost:5080/openapi/v1.json`.
 
 ## Konfiguration
@@ -40,6 +44,10 @@ API dann unter `http://localhost:5080`, OpenAPI-Doc unter `http://localhost:5080
 - `Jwt:TageAngemeldetBleiben` (30) – Gültigkeit mit „angemeldet bleiben".
 - `Woche:OhneLogin` (`false`) – `true` macht Lehrer-/Klassen-/Kurspläne auch ohne Anmeldung
   abrufbar (z. B. für einen Aushang-Bildschirm im Schulnetz). Wirkt nach Neustart der API.
+- `Database:SchemaNachruesten` (`true`) – fehlende Tabellen/Spalten beim Start ergänzen (nur
+  Entwicklung; produktiv mit EF-Migrations auf `false`).
+- `Konten:ProtokollTage` (365) – so lange bleiben Einträge im Kontenprotokoll; ältere werden
+  beim Start gelöscht.
 
 Auf **PostgreSQL** umstellen: `Database:Provider` auf `Postgres` setzen und
 `ConnectionStrings:Postgres` anpassen.
@@ -118,6 +126,7 @@ Benutzer getrennt; beim Abmelden gelöscht).
 | GET | `/api/auth/me` | wer bin ich | JWT |
 | POST | `/api/auth/ueberall-abmelden` | alle Anmeldungen des eigenen Kontos beenden | JWT |
 | POST | `/api/auth/abmelden/{benutzername}` | alle Anmeldungen eines Kontos beenden (z. B. Handy verloren) | JWT Admin |
+| POST | `/api/auth/passwort` | eigenes Passwort ändern `{ altesPasswort, neuesPasswort, angemeldetBleiben }` → neues Token | JWT |
 | POST | `/api/auth/seed-konten` | Testkonten anlegen bzw. Schülerkonten neu verknüpfen | `X-Api-Key` |
 
 - **Personal** = Admin, Lehrer, Klassenlehrer, Stufenkoordination.
@@ -132,7 +141,8 @@ Benutzer getrennt; beim Abmelden gelöscht).
   `no-referrer`, keine Einbettung in fremde Seiten; API-Antworten `Cache-Control: no-store`.
 
 **Testkonten** (`seed-konten`, nur Pseudodaten): `admin/admin123`, `L1/lehrer123`,
-`L2/lehrer123`, `kl05A/kl123` (Klassenleitung, Kürzel L1), `s05A/schueler123` (Pseudo-Schüler
+`L2/lehrer123`, `kl05A/kl123` (Klassenleitung 05A, Kürzel L1), `koQ1/ko123`
+(Stufenkoordination Q1, Kürzel L2, ab Schritt 5), `s05A/schueler123` (Pseudo-Schüler
 aus 05A), `sQ1/schueler123` (Pseudo-Schüler der Q1). Schülerkonten brauchen vorher
 `/api/seed/pseudodaten`; nach erneutem Seeden der Pseudodaten `seed-konten` noch einmal
 aufrufen (verknüpft neu).
@@ -152,6 +162,52 @@ Grundplan + Vertretungstag aus dem Desktop neu veröffentlichen, dann beide Seed
 Grundplan (Schlüssel passen dann zu den Wochenplänen). Ohne Grundplan bzw. mit
 `?quelle=synthetisch` entstehen frei erfundene Daten wie in Phase 1B.
 
+## Konten verwalten (Phase 2, Schritt 5)
+
+| Methode | Pfad | Zweck | Auth |
+|---|---|---|---|
+| GET | `/api/konten/rechte` | was darf ich in der Kontenverwaltung? | KontenSehen |
+| GET | `/api/konten?q=&rolle=&filter=&limit=` | Kontenliste (`rolle`: Admin, Lehrer, Klassenlehrer, Stufenkoordination, Schueler, Personal; `filter`: pflicht, nie, gesperrt, verwaist) | KontenSehen |
+| GET | `/api/konten/{id}` | ein Konto | KontenSehen |
+| POST | `/api/konten/{id}/passwort` | Passwort zurücksetzen → `{ konto, startPasswort }` | KontenSehen |
+| POST | `/api/konten` | Konto anlegen `{ rolle, benutzername?, lehrerKuerzel?, schuelerId?, zustaendig? }` → `{ konto, startPasswort }` | Admin |
+| PUT | `/api/konten/{id}` | Benutzername, Rolle, Kürzel, Zuständigkeit, Schüler ändern | Admin |
+| POST | `/api/konten/{id}/sperren` · `/entsperren` · `/abmelden` | sperren / entsperren / alle Anmeldungen beenden | Admin |
+| DELETE | `/api/konten/{id}` | Konto löschen | Admin |
+| GET | `/api/konten/protokoll?konto=&limit=` | Kontenprotokoll (neueste zuerst) | Admin |
+| GET | `/api/konten/sammel/uebersicht` | Lehrkräfte und Klassen/Stufen mit Anzahl vorhandener Konten | Admin |
+| POST | `/api/konten/sammel` | Sammelanlage `{ art: "Lehrer"\|"Schueler", gruppen: ["05A","Q1"], nur?: [...], anlegen }` | Admin |
+
+- **KontenSehen** = Admin (alle Konten) sowie Klassenleitung/Stufenkoordination: nur die
+  Schülerkonten ihrer Klasse(n) bzw. Stufe(n) (Feld `Zustaendig`, z. B. „05A“ oder „Q1“) –
+  sehen und Passwort zurücksetzen, sonst nichts.
+- **Startpasswort:** Anlegen und Zurücksetzen erzeugen ein lesbares Einmalpasswort
+  (z. B. `kamo-tefi-37`). Es steht nur in dieser einen Antwort und wird nie im Klartext
+  gespeichert. Das Konto ist dann auf „muss Passwort ändern“ gesetzt: Nach der Anmeldung
+  antwortet die API auf alles außer `/api/auth/passwort|me|optionen|login|ueberall-abmelden`
+  mit **403** `{ passwortAendern: true }`.
+- **Passwortregeln** (`Helpers/PasswortRegeln.cs`): Personal mindestens 10, Schüler mindestens
+  8 Zeichen; nicht Benutzername/Name, nicht das bisherige, keine bekannten Passwörter, keine
+  Wiederholungen oder Tastenfolgen. Keine Pflicht-Sonderzeichen (BSI/NIST).
+- **Benutzernamen:** Lehrkräfte = Kürzel, Schüler = `vorname.nachname` (Umlaute ausgeschrieben,
+  bei Doppelung mit Zahl, z. B. `mia.mueller2`). Ohne Groß-/Kleinschreibung eindeutig.
+- **Sammelanlage:** Lehrkräfte aus dem gültigen Grundplan, Schüler je Klasse/Stufe. Erst
+  Vorschau (`anlegen: false`), dann Anlegen (optional nur die Schlüssel in `nur`). Vorhandene
+  Konten werden übersprungen, Kürzel mit Sonderzeichen als „konflikt“ gemeldet. Höchstens
+  2000 Konten je Aufruf; die Passwort-Hashes werden parallel berechnet.
+- **Schutzregeln:** letztes aktives Admin-Konto nicht sperr-/lösch-/herabstufbar; das eigene
+  Konto wird hier nicht gesperrt, gelöscht oder zurückgesetzt. Jede Änderung beendet die
+  Anmeldungen des Kontos (neuer Sicherheitsstempel). Gesperrte Konten: Login 403.
+- **Protokoll** (`KontoProtokoll`): angelegt, geändert, Passwort geändert/zurückgesetzt,
+  gesperrt, entsperrt, abgemeldet, gelöscht – mit Akteur und Zeit, nie mit Passwort.
+- **Pseudodaten neu erzeugen** löscht Schülerkonten, die auf Pseudo-Schüler zeigen (die
+  Testkonten `s05A`/`sQ1` werden nur gelöst und von `seed-konten` neu verknüpft). Konten
+  echter Schüler bleiben unberührt.
+
+In der PWA: Kontomenü → „Passwort ändern“ (alle) bzw. „Konten verwalten“ (Admin) /
+„Schülerpasswörter“ (Klassenleitung, Stufenkoordination). Startpasswörter erscheinen als
+Zugangszettel zum Drucken oder als CSV-Datei (Excel, Semikolon) und nur dieses eine Mal.
+
 ## Produktiv: Migrations statt EnsureCreated
 
 `EnsureCreated` ist nur für die Entwicklung gedacht und verträgt sich **nicht** mit Migrations.
@@ -164,12 +220,11 @@ dotnet ef database update
 ```
 
 Dann in `Program.cs` den `EnsureCreated`-Block entfernen bzw. durch `db.Database.Migrate()`
-ersetzen.
+ersetzen und `Database:SchemaNachruesten` auf `false` setzen.
 
 ## Nächste Schritte
 
-1. **Konten verwalten:** Passwort ändern/zurücksetzen, Admin legt Konten an (später Import
-   der Schülerkonten aus SchILD).
+1. **Schülerkonten aus SchILD** (Phase 5): Import statt Pseudodaten, Zuordnung über `ExtId`.
 2. **Klassenbuch (Phase 3):** Anwesenheit, Entschuldigungen, Einträge, Inhalte/Hausaufgaben.
 3. **Web-Push:** Benachrichtigung der Apps bei Änderung.
 4. **Produktiv:** Schlüssel aus Umgebungsvariablen, EF-Migrations, PostgreSQL, CORS auf die

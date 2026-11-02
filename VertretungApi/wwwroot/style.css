@@ -1055,6 +1055,22 @@ main.fehlzeiten { max-width: 760px; }
   .fz-tabelle { font-size: 0.88rem; }
   .fz-tabelle .zahl { width: 2.8rem; padding-right: 8px; }
 }
+/* Kleine Handys (≤ 360 px): alle Spalten ohne seitliches Wischen */
+@media (max-width: 360px) {
+  .fz-tabelle { font-size: 0.82rem; }
+  .fz-tabelle th, .fz-tabelle td { padding-left: 6px; padding-right: 6px; }
+  .fz-tabelle .zahl { width: 2.55rem; padding-left: 2px; padding-right: 5px; }
+  .fz-tabelle thead th { font-size: 0.7rem; }
+}
+/* Handy quer (wenig Höhe): Speichern-Leiste und Kopf des Stundenblatts flacher */
+@media (orientation: landscape) and (max-height: 500px) {
+  .kb-leiste { padding-top: 6px; padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px)); gap: 4px 12px; }
+  .kb-leiste .hauptknopf { padding: 8px 14px; font-size: 0.98rem; }
+  .kb-folge { min-height: 26px; }
+  .kb-folge-info { margin-top: -2px; }
+  .kb-kopf { padding: 10px 14px; }
+  .kb-fach { font-size: 1.15rem; }
+}
 .fz-tabelle td.offen { color: var(--verlegung); font-weight: 750; }
 .fz-tabelle td.unent { color: var(--entfall); font-weight: 750; }
 .fz-tabelle abbr { text-decoration: none; }

@@ -6018,6 +6018,12 @@ namespace Stundenplan_V2
             // übrigen UNr nach Wochenstunden. Ergebnis wird fixiert; Phase B
             // (der reguläre Qualitäts-Solve unten) ordnet nur die platzierten
             // UNr an.
+            //
+            // Mit Ausgangsplan (Button 11 "Minimale Änderungen" mit Teilplan):
+            // Phase A startet vom Ausgangsplan (statt Greedy) und behält bei
+            // gleicher Stundenzahl lieber die UNr, die im Ausgangsplan verplant
+            // sind. Phase B startet mit der Phase-A-Lösung und optimiert
+            // Qualität + Stabilität. Ohne Ausgangsplan (Knopf 10) unverändert.
             // =====================================================
             if (teilplanModus)
             {
@@ -6025,21 +6031,108 @@ namespace Stundenplan_V2
                     .GroupBy(bl => bl.UNr)
                     .ToDictionary(g => g.Key, g => g.Max(bl => bl.Wst));
 
-                int summeNormalWst = platziert.Keys
+                // Startplan-Infos (nur im Stabilitätsmodus): Stunden je Block im
+                // Ausgangsplan und die UNr, die dort mindestens teilweise liegen.
+                bool teilplanMitStartplan = ausgangsplan != null && ausgangsplan.Count > 0;
+                var teilplanStartStunden = new int[B];
+                var teilplanUNrImStart = new HashSet<int>();
+                if (teilplanMitStartplan)
+                {
+                    foreach (var startKey in ausgangsplan.Keys)
+                    {
+                        int tb = startKey / S;
+                        int ts = startKey % S;
+                        if (tb < 0 || tb >= B || ts < 0 || ts >= S) continue;
+                        teilplanStartStunden[tb]++;
+                        teilplanUNrImStart.Add(blocks[tb].UNr);
+                    }
+                }
+
+                // Zielfunktion lexikografisch:
+                //   1. Fix-UNr halten (Fix-Gewicht > alle übrigen zusammen),
+                //   2. platzierte Wochenstunden,
+                //   3. nur mit Ausgangsplan: UNr behalten, die dort verplant sind
+                //      (Gleichstandsregel: bei gleicher Stundenzahl fallen lieber
+                //      Unterrichte weg, die schon im Ausgangsplan offen waren).
+                // Ohne Ausgangsplan ist tieMult = 1 und Stufe 3 entfällt – die
+                // Koeffizienten sind dann exakt dieselben wie bisher.
+                long tieMult = teilplanMitStartplan ? platziert.Count + 1 : 1;
+                long TeilplanKoeffizient(int unr) =>
+                    (long)wstProUNr[unr] * tieMult + (teilplanUNrImStart.Contains(unr) ? 1 : 0);
+
+                long summeNormal = platziert.Keys
                     .Where(u => !teilplanFixUNr.Contains(u))
-                    .Sum(u => wstProUNr[u]);
-                // Fix-Gewicht > Summe aller normalen Wst => Halten EINER Fix-UNr
-                // wiegt schwerer als alle normalen UNr zusammen.
-                int fixGewicht = summeNormalWst + 1;
+                    .Sum(u => TeilplanKoeffizient(u));
+                // Fix-Gewicht > Summe aller normalen Koeffizienten => Halten EINER
+                // Fix-UNr wiegt schwerer als alle normalen UNr zusammen.
+                long fixGewicht = summeNormal + 1;
 
                 var platzTerme = new List<LinearExpr>();
                 foreach (var kv in platziert)
                 {
-                    int coef = wstProUNr[kv.Key];
+                    long coef = TeilplanKoeffizient(kv.Key);
                     if (teilplanFixUNr.Contains(kv.Key)) coef *= fixGewicht;
                     platzTerme.Add(kv.Value * coef);
                 }
                 model.Maximize(LinearExpr.Sum(platzTerme));
+
+                // -------------------------------------------------
+                // WARMSTART-HINT MIT AUSGANGSPLAN: der Ausgangsplan selbst.
+                // UNr, die dort vollständig liegen: Slots + platziert = 1;
+                // UNr ganz ohne Stunden: platziert = 0; teilweise verplante
+                // UNr bekommen keinen Hint (der Solver entscheidet frei).
+                // Jede Variable wird höchstens EINMAL gehintet (CP-SAT lehnt
+                // doppelte Hint-Variablen als ungültiges Modell ab).
+                // -------------------------------------------------
+                if (teilplanMitStartplan)
+                {
+                    try
+                    {
+                        var teilplanBlöcke = new Dictionary<int, List<int>>();
+                        for (int tb = 0; tb < B; tb++)
+                        {
+                            if (!teilplanBlöcke.TryGetValue(blocks[tb].UNr, out var tbListe))
+                                teilplanBlöcke[blocks[tb].UNr] = tbListe = new List<int>();
+                            tbListe.Add(tb);
+                        }
+                        int TeilplanZielWst(int tb) =>
+                            (fixRelax && fixSlotAnzahl[tb] > blocks[tb].Wst) ? fixSlotAnzahl[tb] : blocks[tb].Wst;
+
+                        var vollUNr = new HashSet<int>();
+                        int anzLeer = 0;
+                        foreach (var kv in platziert)
+                        {
+                            var tbListe = teilplanBlöcke[kv.Key];
+                            if (tbListe.All(tb => teilplanStartStunden[tb] == TeilplanZielWst(tb)))
+                            {
+                                model.AddHint(kv.Value, 1);
+                                vollUNr.Add(kv.Key);
+                            }
+                            else if (tbListe.All(tb => teilplanStartStunden[tb] == 0))
+                            {
+                                model.AddHint(kv.Value, 0);
+                                anzLeer++;
+                            }
+                        }
+                        foreach (var startKey in ausgangsplan.Keys)
+                        {
+                            int tb = startKey / S;
+                            int ts = startKey % S;
+                            if (tb < 0 || tb >= B || ts < 0 || ts >= S) continue;
+                            if (vollUNr.Contains(blocks[tb].UNr))
+                                model.AddHint(x[tb, ts], 1);
+                        }
+                        int anzTeilweise = platziert.Count - vollUNr.Count - anzLeer;
+                        log?.Invoke($"  Teilplan: Warmstart aus dem Ausgangsplan ({vollUNr.Count} UNr vollständig, " +
+                                    $"{anzLeer} ohne Stunden" +
+                                    (anzTeilweise > 0 ? $", {anzTeilweise} teilweise – frei" : "") + ").");
+                    }
+                    catch (Exception ex)
+                    {
+                        model.ClearHints();
+                        log?.Invoke($"  Teilplan: Warmstart aus dem Ausgangsplan übersprungen ({ex.Message}).");
+                    }
+                }
 
                 // -------------------------------------------------
                 // WARMSTART-HINT: Greedy-Vollplatzierung als Startlösung.
@@ -6047,36 +6140,40 @@ namespace Stundenplan_V2
                 // achtet auf Lehrer-/Klassenkollision) und für jede UNr eine
                 // platziert-Vermutung. Hints sind unverbindlich – Fehler hier
                 // dürfen den Lauf nie kippen (analog zum Greedy-Hint unten).
+                // Nur ohne Ausgangsplan (sonst Warmstart oben).
                 // -------------------------------------------------
-                try
+                if (!teilplanMitStartplan)
                 {
-                    var greedyA = BaueGreedyHint(blocks, slots, B, S);
-                    var greedyProBlock = new int[B];
-                    foreach (var (bIdx, sIdx) in greedyA)
+                    try
                     {
-                        model.AddHint(x[bIdx, sIdx], 1);
-                        greedyProBlock[bIdx]++;
-                    }
+                        var greedyA = BaueGreedyHint(blocks, slots, B, S);
+                        var greedyProBlock = new int[B];
+                        foreach (var (bIdx, sIdx) in greedyA)
+                        {
+                            model.AddHint(x[bIdx, sIdx], 1);
+                            greedyProBlock[bIdx]++;
+                        }
 
-                    // UNr -> Blockindizes, um "Greedy hat die UNr komplett
-                    // untergebracht" zu prüfen.
-                    var bloeckeProUNr = new Dictionary<int, List<int>>();
-                    for (int b = 0; b < B; b++)
-                    {
-                        if (!bloeckeProUNr.TryGetValue(blocks[b].UNr, out var lst))
-                            bloeckeProUNr[blocks[b].UNr] = lst = new List<int>();
-                        lst.Add(b);
+                        // UNr -> Blockindizes, um "Greedy hat die UNr komplett
+                        // untergebracht" zu prüfen.
+                        var bloeckeProUNr = new Dictionary<int, List<int>>();
+                        for (int b = 0; b < B; b++)
+                        {
+                            if (!bloeckeProUNr.TryGetValue(blocks[b].UNr, out var lst))
+                                bloeckeProUNr[blocks[b].UNr] = lst = new List<int>();
+                            lst.Add(b);
+                        }
+                        foreach (var kv in platziert)
+                        {
+                            bool voll = bloeckeProUNr[kv.Key].All(b => greedyProBlock[b] >= blocks[b].Wst);
+                            model.AddHint(kv.Value, voll ? 1 : 0);
+                        }
+                        log?.Invoke($"  Teilplan: Warmstart-Hint gesetzt ({greedyA.Count} Stunden greedy vorplatziert).");
                     }
-                    foreach (var kv in platziert)
+                    catch (Exception ex)
                     {
-                        bool voll = bloeckeProUNr[kv.Key].All(b => greedyProBlock[b] >= blocks[b].Wst);
-                        model.AddHint(kv.Value, voll ? 1 : 0);
+                        log?.Invoke($"  Teilplan: Warmstart-Hint übersprungen ({ex.Message}).");
                     }
-                    log?.Invoke($"  Teilplan: Warmstart-Hint gesetzt ({greedyA.Count} Stunden greedy vorplatziert).");
-                }
-                catch (Exception ex)
-                {
-                    log?.Invoke($"  Teilplan: Warmstart-Hint übersprungen ({ex.Message}).");
                 }
 
                 var solverA = new CpSolver();
@@ -6089,8 +6186,10 @@ namespace Stundenplan_V2
                     // Platzierungs-Zielfunktion: der Solver hört auf, sobald die
                     // aktuelle Platzierung höchstens teilplanGapWst Wochenstunden
                     // unter dem Optimum liegt. Fix-UNr sind mit fixGewicht
-                    // skaliert (>> Gap) und damit nie betroffen.
-                    paramsA += $" absolute_gap_limit:{teilplanGapWst}";
+                    // skaliert (>> Gap) und damit nie betroffen. Mit Ausgangsplan
+                    // sind die Wochenstunden mit tieMult skaliert (Gleichstands-
+                    // regel), daher den Gap ebenso skalieren.
+                    paramsA += $" absolute_gap_limit:{teilplanGapWst * tieMult}";
                     log?.Invoke($"  Teilplan: Phase-A-Gap = {teilplanGapWst} Wochenstunden " +
                                 $"(schneller; es können bis zu {teilplanGapWst} Std zusätzlich fallen).");
                 }
@@ -6130,13 +6229,53 @@ namespace Stundenplan_V2
                     else
                     {
                         log?.Invoke($"  Teilplan: {gedroppt.Count} UNr NICHT verplant (im Editor als offen ladbar):");
+                        if (teilplanMitStartplan)
+                        {
+                            int warImStart = gedroppt.Count(u => teilplanUNrImStart.Contains(u));
+                            if (warImStart > 0)
+                                log?.Invoke($"  Teilplan: davon {warImStart} im Ausgangsplan verplant (fallen jetzt neu weg).");
+                        }
                         foreach (var unr in gedroppt.OrderBy(u => u))
                         {
                             var bl2 = blocks.First(bb => bb.UNr == unr);
                             string fix = teilplanFixUNr.Contains(unr) ? " [FIX – nur wegen Unlösbarkeit gedroppt]" : "";
+                            string warVerplant = teilplanMitStartplan && teilplanUNrImStart.Contains(unr)
+                                ? " [war im Ausgangsplan verplant]" : "";
                             string fach = string.Join("/", bl2.Teile.Select(t => t.Fach).Distinct());
                             string kl = string.Join("/", bl2.Teile.SelectMany(t => t.Klassen).Distinct());
-                            log?.Invoke($"    • UNr {unr}: {fach} {kl} ({wstProUNr[unr]} Std){fix}");
+                            log?.Invoke($"    • UNr {unr}: {fach} {kl} ({wstProUNr[unr]} Std){fix}{warVerplant}");
+                        }
+                    }
+
+                    // Mit Ausgangsplan: Phase B (Qualität + Stabilität) startet mit
+                    // der Phase-A-Lösung als vollständigem, zulässigem Warmstart –
+                    // so liefert sie auch bei knappem Zeitlimit sicher eine Lösung.
+                    // Vorher ALLE Hints löschen (CP-SAT lehnt doppelte Hint-
+                    // Variablen als ungültiges Modell ab). Ohne Ausgangsplan
+                    // (Knopf 10) bleibt es beim Greedy-Hint wie bisher.
+                    if (teilplanMitStartplan)
+                    {
+                        try
+                        {
+                            var lösungA = solverA.Response?.Solution;
+                            model.ClearHints();
+                            if (lösungA != null && lösungA.Count > 0)
+                            {
+                                int anzVars = Math.Min(lösungA.Count, model.Model.Variables.Count);
+                                var hintB = new PartialVariableAssignment();
+                                for (int vIdx = 0; vIdx < anzVars; vIdx++)
+                                {
+                                    hintB.Vars.Add(vIdx);
+                                    hintB.Values.Add(lösungA[vIdx]);
+                                }
+                                model.Model.SolutionHint = hintB;
+                                log?.Invoke("  Teilplan: Phase B startet mit der Phase-A-Lösung (vollständiger Warmstart).");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            model.ClearHints();
+                            log?.Invoke($"  Teilplan: Warmstart für Phase B übersprungen ({ex.Message}).");
                         }
                     }
                 }
@@ -6366,7 +6505,10 @@ namespace Stundenplan_V2
             // bei Blöcken mit Wst>1, bei denen mehrere Slots gleichzeitig =1 sein
             // müssen — früheres Setzen aller anderen auf 0 überschrieb die 1-Hints
             // der weiteren belegten Slots und erzeugte inkonsistente Startwerte.
-            if (ausgangsplan != null)
+            // Im Teilplan-Modus setzt bereits Phase A die Hints (mit Ausgangsplan:
+            // Phase-A-Lösung als Warmstart) – hier nicht noch einmal, sonst
+            // enthielte das Modell doppelte Hint-Variablen (ungültig für CP-SAT).
+            if (ausgangsplan != null && !teilplanModus)
             {
                 foreach (var kvp in ausgangsplan)
                 {
@@ -8340,7 +8482,18 @@ namespace Stundenplan_V2
             // tolerant gelöst. Fixierungen bleiben hart, nur die von IHNEN
             // verursachten harten Verstöße werden geduldet (wie in Planen()).
             // false = unverändertes Verhalten.
-            bool fixRelaxBeiFixInfeasible = false)
+            bool fixRelaxBeiFixInfeasible = false,
+            // Teilplan: nicht fehlerfrei verplanbare Unterrichte werden
+            // fallengelassen (wie Teilplan bei Knopf 10), statt dass der Lauf
+            // ohne Lösung endet. Phase A startet vom Ausgangsplan und behält
+            // bei Gleichstand dessen verplante UNr. false = unverändert.
+            bool teilplanModus = false,
+            // Absoluter Wochenstunden-Gap für Phase A (0 = exakt).
+            int teilplanGapWst = 0,
+            // Rückfrage vor der (u. U. langen) Ursachensuche bei Unlösbarkeit.
+            // Wird höchstens EINMAL gestellt. null = Ursachensuche ohne Rückfrage
+            // (bisheriges Verhalten).
+            Func<bool> darfDiagnose = null)
         {
             debug = "";
             _infeasibleDetails.Clear();
@@ -8469,6 +8622,41 @@ namespace Stundenplan_V2
             log?.Invoke($"Stabilitätsmodus: {ausgangsCompound.Count} belegte Ausgangsslots als Referenz, " +
                         $"Gewicht {stabilitaetsGewicht}.");
 
+            // Unterrichte mit unverplanten Stunden im (angepassten) Startplan,
+            // z. B. aus einem Teilplan oder neu in der UV. Ohne Teilplan müssen
+            // sie alle verplant werden; für Hinweise, falls der Lauf scheitert.
+            var unverplantUNr = new HashSet<int>();
+            {
+                var stundenJeBlock = new int[B];
+                foreach (var startKey in ausgangsCompound.Keys)
+                    stundenJeBlock[startKey / S]++;
+                for (int b = 0; b < B; b++)
+                    if (stundenJeBlock[b] < blocks[b].Wst) unverplantUNr.Add(blocks[b].UNr);
+            }
+
+            if (teilplanModus)
+                log?.Invoke("Stabilitätsmodus mit TEILPLAN: nicht fehlerfrei verplanbare Unterrichte werden " +
+                            "fallengelassen (Lösungen NKT_…, offene Stunden im Plan-Editor). " +
+                            (teilplanGapWst > 0
+                                ? $"Phase-A-Gap K = {teilplanGapWst} Std."
+                                : "Phase-A-Gap K = 0 (exakt).") +
+                            (unverplantUNr.Count > 0
+                                ? $" Im Ausgangsplan sind {unverplantUNr.Count} Unterricht(e) nicht vollständig verplant."
+                                : ""));
+            else if (unverplantUNr.Count > 0)
+                log?.Invoke($"Stabilitätsmodus: Im Ausgangsplan sind {unverplantUNr.Count} Unterricht(e) nicht " +
+                            "vollständig verplant – ohne Teilplan müssen alle verplant werden.");
+
+            // Rückfrage vor der Ursachensuche höchstens EINMAL stellen (jeder
+            // Nah-Klon nutzt dasselbe Modell und käme zum selben Ergebnis).
+            bool? diagnoseErlaubt = null;
+            Func<bool> diagnoseGate = darfDiagnose == null ? null : () =>
+            {
+                if (diagnoseErlaubt == null)
+                    diagnoseErlaubt = darfDiagnose();
+                return diagnoseErlaubt.Value;
+            };
+
             // =====================================================
             // VORABPRÜFUNG: Ist der Startplan im Solver-Modell zulässig?
             // Gleiches Modell wie die Nah-Klone unten (inkl. Fix-Relax). Ist er
@@ -8549,13 +8737,17 @@ namespace Stundenplan_V2
 
             var ergebnisse = new List<(int quality, int badUnits, int[,] belegung, string label, List<UnterrichtsBlock> blocks)>();
 
+            // NK = Nah-Klon, NKT = Nah-Klon mit Teilplan (eigene Labels, damit
+            // ein Teilplan-Lauf keine vollständigen NK-Lösungen überschreibt).
+            string labelPrefix = teilplanModus ? "NKT" : "NK";
+            bool nachweislichUnlösbar = false;
+
             for (int i = 0; i < anzahlLoesungen; i++)
             {
-                string labelPrefix = "NK"; // NK = Nah-Klon
                 var intern = PlanenIntern(
                     excelPfad, blocks, slots, fachraumLimit, extraFreieTage,
                     log, maxLösungen: 1, tauschKey: null,
-                    bewiesenInfeasible: out _,
+                    bewiesenInfeasible: out bool unlösbarDieserLauf,
                     zeitlimitSekunden: zeitlimitSekunden,
                     nichtFreieTage: nichtFreieTage,
                     randomSeed: i + 1,
@@ -8587,13 +8779,27 @@ namespace Stundenplan_V2
                     lehrerSpätFrühMinus3: lehrerSpätFrühMinus3,
                     ausgangsplan: ausgangsCompound,
                     stabilitaetsGewicht: stabilitaetsGewicht,
-                    fixRelax: fixRelaxAktiv);
+                    fixRelax: fixRelaxAktiv,
+                    darfDiagnose: diagnoseGate,
+                    teilplanModus: teilplanModus,
+                    teilplanGapWst: teilplanGapWst);
 
                 foreach (var sol in intern)
                 {
                     string label = $"{labelPrefix}_{i + 1}";
                     ergebnisse.Add((sol.quality, sol.badUnits, sol.belegung, label, blocks));
                     log?.Invoke($"  [{label}] Qualität: {sol.quality}, BadUnits: {sol.badUnits}");
+                }
+
+                // Nachweislich unlösbar: Die weiteren Nah-Klone rechnen dasselbe
+                // Modell (nur anderer Zufallsstart) – sie wären ebenso unlösbar
+                // und würden die Ursachensuche nur wiederholen.
+                if (intern.Count == 0 && unlösbarDieserLauf)
+                {
+                    nachweislichUnlösbar = true;
+                    if (i + 1 < anzahlLoesungen)
+                        log?.Invoke("Stabilitätsmodus: Modell nachweislich unlösbar – weitere Nah-Klone werden nicht gerechnet.");
+                    break;
                 }
             }
 
@@ -8621,7 +8827,23 @@ namespace Stundenplan_V2
             }
 
             if (ergebnisse.Count == 0)
-                debug = "Kein Ergebnis gefunden. Zeitlimit erhöhen oder Stabilitätsgewicht senken.";
+            {
+                if (teilplanModus)
+                    debug = "Teilplan: Im Zeitlimit wurde keine Teillösung gefunden. " +
+                            "Zeitlimit erhöhen oder einen Phase-A-Gap K > 0 setzen.";
+                else if (nachweislichUnlösbar && unverplantUNr.Count > 0)
+                    debug = "Mit den aktuellen Vorgaben unlösbar – ein höheres Zeitlimit hilft hier nicht.\n\n" +
+                            $"Der Ausgangsplan enthält {unverplantUNr.Count} Unterricht(e) mit unverplanten Stunden " +
+                            "(z. B. aus einem Teilplan), die ohne Teilplan alle verplant werden müssen. " +
+                            "Mit „Teilplan zulassen“ bleiben nicht verplanbare Unterrichte offen, statt dass der Lauf scheitert.\n\n" +
+                            "Details: Log und Sheet 'ChkStart'.";
+                else if (nachweislichUnlösbar)
+                    debug = "Mit den aktuellen Vorgaben unlösbar – ein höheres Zeitlimit hilft hier nicht.\n\n" +
+                            "Mit „Teilplan zulassen“ bleiben nicht verplanbare Unterrichte offen, statt dass der Lauf scheitert.\n\n" +
+                            "Details: Log und Sheet 'ChkStart'.";
+                else
+                    debug = "Kein Ergebnis gefunden. Zeitlimit erhöhen oder Stabilitätsgewicht senken.";
+            }
 
             return ergebnisse;
         }

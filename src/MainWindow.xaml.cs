@@ -3839,7 +3839,25 @@ namespace Stundenplan_V2
             }
 
             var labels = letzteSolutions.Select(s => s.label).ToList();
-            var dialog = new MinimalAenderungDialog(labels) { Owner = this };
+
+            // Je Ausgangsplan: Unterrichte mit unverplanten Stunden (bezogen auf
+            // die aktuelle UV). Steuert im Dialog die Vorauswahl "Teilplan zulassen".
+            var unverplantJeLabel = new Dictionary<string, (int unr, int stunden)>();
+            foreach (var sol in letzteSolutions)
+            {
+                if (sol.belegung == null || sol.blocks == null || unverplantJeLabel.ContainsKey(sol.label)) continue;
+                try
+                {
+                    unverplantJeLabel[sol.label] =
+                        ZähleUnverplant(BildeAusgangsplanAufAktuelleBlocks(sol), input.Blocks);
+                }
+                catch (Exception ex)
+                {
+                    Log($"Hinweis: unverplante Stunden für '{sol.label}' nicht ermittelbar: {ex.Message}");
+                }
+            }
+
+            var dialog = new MinimalAenderungDialog(labels, unverplantJeLabel, _teilplanGapK) { Owner = this };
 
             if (dialog.ShowDialog() != true) return;
 
@@ -3853,7 +3871,9 @@ namespace Stundenplan_V2
             Log($"Button 11: Minimale Änderungen basierend auf '{dialog.GewählterAusgangsLabel}' " +
                 $"(Stabilitätsgewicht {dialog.StabilitaetsGewicht}, " +
                 $"Zeitlimit {dialog.ZeitlimitSekunden}s, " +
-                $"{dialog.AnzahlLoesungen} Lösung(en))");
+                $"{dialog.AnzahlLoesungen} Lösung(en)" +
+                (dialog.TeilplanAktiv ? $", Teilplan zugelassen, Phase-A-Gap K = {dialog.TeilplanGapWst}" : "") +
+                ")");
 
             var statusFenster = new Window
             {
@@ -3864,9 +3884,13 @@ namespace Stundenplan_V2
             };
             statusFenster.Content = new System.Windows.Controls.TextBlock
             {
-                Text = "Solver läuft (Minimale Änderungen)...",
+                Text = dialog.TeilplanAktiv
+                    ? "Solver läuft (Minimale Änderungen, Teilplan)..."
+                    : "Solver läuft (Minimale Änderungen)...",
                 FontSize = 14, HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
+                VerticalAlignment = VerticalAlignment.Center,
+                TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center,
+                Margin = new Thickness(10, 0, 10, 0)
             };
             statusFenster.Show();
             System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
@@ -3876,26 +3900,37 @@ namespace Stundenplan_V2
             {
                 bool meldeMinus2 = input.VerbotMinus2Verletzungen || input.StrafeMinus2Verletzungen > 0;
 
-                // Ausgangsplan auf die AKTUELLEN input.Blocks umrechnen (Zuordnung per UNr).
-                // Damit werden:
-                // (a) inzwischen ignorierte Blöcke aus dem Solver ausgeschlossen (verhindert Infeasibility),
-                // (b) neu hinzugekommene Blöcke korrekt frei platziert (keine Stabilitäts-Bindung),
-                // (c) verschobene Block-Indizes nach Neuladen korrekt behandelt.
-                var unrToAltIdx = new Dictionary<int, int>();
-                for (int i = 0; i < ausgangsLösung.blocks.Count; i++)
-                    unrToAltIdx[ausgangsLösung.blocks[i].UNr] = i;
+                // Ausgangsplan auf die AKTUELLEN input.Blocks umrechnen (Zuordnung per UNr),
+                // siehe BildeAusgangsplanAufAktuelleBlocks.
+                var ausgangsplanMapped = BildeAusgangsplanAufAktuelleBlocks(ausgangsLösung);
 
-                int currentB = input.Blocks.Count;
-                int currentS = input.Slots.Count;
-                int altS = ausgangsLösung.belegung.GetLength(1);
-                var ausgangsplanMapped = new int[currentB, currentS];
-                for (int newB = 0; newB < currentB; newB++)
+                // Rückfrage vor der Ursachensuche, falls der Plan unlösbar ist
+                // (wie bei Knopf 10). Der Lauf läuft hier im UI-Thread, daher
+                // direkt fragen; das Statusfenster ist Besitzer, damit die Frage
+                // nicht hinter dem (obersten) Statusfenster verschwindet.
+                // Die Engine fragt höchstens einmal je Lauf.
+                Func<bool> darfDiagnose = () =>
                 {
-                    int unr = input.Blocks[newB].UNr;
-                    if (!unrToAltIdx.TryGetValue(unr, out int oldB)) continue;
-                    for (int s = 0; s < currentS && s < altS; s++)
-                        ausgangsplanMapped[newB, s] = ausgangsLösung.belegung[oldB, s];
-                }
+                    var antwort = MessageBox.Show(statusFenster,
+                        "Der Plan ist mit den aktuellen Vorgaben unlösbar.\n\n" +
+                        "Soll das Programm jetzt nach der Ursache suchen?\n" +
+                        "Diese Suche kann je nach Modellgröße mehrere Minuten dauern; " +
+                        "das Programm reagiert währenddessen nicht.\n\n" +
+                        "Tipp: Mit „Teilplan zulassen“ bleiben nicht verplanbare Unterrichte offen, " +
+                        "statt dass der Lauf scheitert.\n\n" +
+                        "[Ja] = Ursache suchen (Details erscheinen im Log)\n" +
+                        "[Nein] = keine Suche, Lauf beenden",
+                        "Unlösbar – Ursache suchen?",
+                        MessageBoxButton.YesNo, MessageBoxImage.Question);
+                    bool suchen = antwort == MessageBoxResult.Yes;
+                    if (suchen && statusFenster.Content is System.Windows.Controls.TextBlock statusText)
+                    {
+                        statusText.Text = "Ursachensuche läuft...";
+                        System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
+                            System.Windows.Threading.DispatcherPriority.Render, new Action(() => { }));
+                    }
+                    return suchen;
+                };
 
                 // Tauschlösung als Ausgangsplan? Button 11 rechnet mit den Lehrern
                 // aus der UV (input.Blocks), nicht mit den getauschten Lehrern der
@@ -3952,7 +3987,10 @@ namespace Stundenplan_V2
                     lehrerSpätFrühMinus2: input.LehrerSpätFrühMinus2,
                     lehrerSpätFrühMinus3: input.LehrerSpätFrühMinus3,
                     klassenGruppen: input.KlassenGruppen,
-                    fixRelaxBeiFixInfeasible: input.FixRelaxBeiFixInfeasible);
+                    fixRelaxBeiFixInfeasible: input.FixRelaxBeiFixInfeasible,
+                    teilplanModus: dialog.TeilplanAktiv,
+                    teilplanGapWst: dialog.TeilplanGapWst,
+                    darfDiagnose: darfDiagnose);
 
                 statusFenster.Close();
 
@@ -4043,7 +4081,23 @@ namespace Stundenplan_V2
 
                 Log($"Button 11 abgeschlossen: {ergebnisse.Count} Lösung(en) gefunden → " +
                     string.Join(", ", ergebnisse.Select(s => $"[{s.label}] Q={s.quality}")));
-                TxtStatus.Text = "Minimale Änderungen abgeschlossen.";
+
+                // Teilplan: offene (nicht verplante) Unterrichte je Lösung melden.
+                int offenMax = 0;
+                if (dialog.TeilplanAktiv)
+                {
+                    foreach (var sol in ergebnisse)
+                    {
+                        var (offenUNr, offenStd) = ZähleUnverplant(sol.belegung, sol.blocks);
+                        offenMax = Math.Max(offenMax, offenUNr);
+                        Log(offenUNr == 0
+                            ? $"  [{sol.label}] vollständig verplant."
+                            : $"  [{sol.label}] {offenUNr} Unterricht(e) mit {offenStd} Stunde(n) offen – im Plan-Editor als offen sichtbar.");
+                    }
+                }
+                TxtStatus.Text = offenMax > 0
+                    ? "Minimale Änderungen (Teilplan) abgeschlossen – offene Stunden im Plan-Editor."
+                    : "Minimale Änderungen abgeschlossen.";
                 LadeExcelDatenNeu(zeigeWarnungen: false);
             }
             catch (Exception ex)
@@ -4052,6 +4106,57 @@ namespace Stundenplan_V2
                 MessageBox.Show("Fehler bei Button 11:\n" + ex.Message);
                 Log($"Button 11 Fehler: {ex.Message}");
             }
+        }
+
+        // Rechnet eine Lösung auf die AKTUELLEN input.Blocks um (Zuordnung per UNr).
+        // Damit werden:
+        // (a) inzwischen ignorierte Blöcke aus dem Solver ausgeschlossen (verhindert Infeasibility),
+        // (b) neu hinzugekommene Blöcke korrekt frei platziert (keine Stabilitäts-Bindung),
+        // (c) verschobene Block-Indizes nach Neuladen korrekt behandelt.
+        private int[,] BildeAusgangsplanAufAktuelleBlocks(
+            (int quality, int badUnits, int[,] belegung, string label, List<UnterrichtsBlock> blocks) lösung)
+        {
+            var unrToAltIdx = new Dictionary<int, int>();
+            for (int i = 0; i < lösung.blocks.Count; i++)
+                unrToAltIdx[lösung.blocks[i].UNr] = i;
+
+            int currentB = input.Blocks.Count;
+            int currentS = input.Slots.Count;
+            int altB = lösung.belegung.GetLength(0);
+            int altS = lösung.belegung.GetLength(1);
+            var mapped = new int[currentB, currentS];
+            for (int newB = 0; newB < currentB; newB++)
+            {
+                int unr = input.Blocks[newB].UNr;
+                if (!unrToAltIdx.TryGetValue(unr, out int oldB) || oldB >= altB) continue;
+                for (int s = 0; s < currentS && s < altS; s++)
+                    mapped[newB, s] = lösung.belegung[oldB, s];
+            }
+            return mapped;
+        }
+
+        // Zählt die Unterrichte (UNr) mit weniger verplanten Stunden als laut
+        // UV gefordert und die Summe der fehlenden Stunden (z. B. Teilplan).
+        private static (int unr, int stunden) ZähleUnverplant(int[,] belegung, List<UnterrichtsBlock> blocks)
+        {
+            if (belegung == null || blocks == null) return (0, 0);
+            int bAnz = Math.Min(blocks.Count, belegung.GetLength(0));
+            int sAnz = belegung.GetLength(1);
+            var unrs = new HashSet<int>();
+            int stunden = 0;
+            for (int b = 0; b < bAnz; b++)
+            {
+                int verplant = 0;
+                for (int s = 0; s < sAnz; s++)
+                    if (belegung[b, s] == 1) verplant++;
+                int fehlt = blocks[b].Wst - verplant;
+                if (fehlt > 0)
+                {
+                    unrs.Add(blocks[b].UNr);
+                    stunden += fehlt;
+                }
+            }
+            return (unrs.Count, stunden);
         }
 
         // Liest nur die Spaltennamen (Header) aus dem Sheet "Gesichert", ohne die

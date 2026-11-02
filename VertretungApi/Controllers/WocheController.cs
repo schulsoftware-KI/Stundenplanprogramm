@@ -101,8 +101,11 @@ public class WocheController : ControllerBase
             .Select(z => z.Lerngruppe!.Bezeichnung)
             .ToListAsync();
 
+        // Phase 3.1: zusammengestellte Sek-I-Gruppen – Stunden einer solchen Gruppe sieht der
+        // Schüler nur, wenn er dazugehört (sonst wie bisher die ganze Klasse).
+        var fertig = await WochenplanService.FertigeGruppenAsync(_db);
         var plan = await WochenplanService.BerechneAsync(
-            _db, WochenZielArt.Schueler, $"{s.Vorname} {s.Nachname}", gruppen, datum, wochen);
+            _db, WochenZielArt.Schueler, $"{s.Vorname} {s.Nachname}", gruppen, datum, wochen, fertig);
 
         return new
         {

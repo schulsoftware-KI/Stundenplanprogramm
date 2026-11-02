@@ -17,7 +17,9 @@ public class AppDbContext : DbContext
     public DbSet<Lerngruppe> Lerngruppen => Set<Lerngruppe>();
     public DbSet<Schueler> Schueler => Set<Schueler>();
     public DbSet<Zugehoerigkeit> Zugehoerigkeiten => Set<Zugehoerigkeit>();
-    public DbSet<Lektion> Lektionen => Set<Lektion>();
+    public DbSet<Lektion> Lektionen => Set<Lektion>();                       // Tabelle KlassenbuchLektionen (Phase 3.1)
+    public DbSet<Anwesenheit> Anwesenheiten => Set<Anwesenheit>();           // Phase 3.1
+    public DbSet<KlassenbuchProtokoll> KlassenbuchProtokolle => Set<KlassenbuchProtokoll>(); // Phase 3.1
 
     // Grundplan + Kalender (Phase 2, Schritt 1)
     public DbSet<GrundplanVersion> GrundplanVersionen => Set<GrundplanVersion>();
@@ -60,7 +62,27 @@ public class AppDbContext : DbContext
         b.Entity<Zugehoerigkeit>()
             .HasIndex(z => new { z.SchuelerId, z.LerngruppeId, z.Schuljahr }).IsUnique();
 
-        b.Entity<Lektion>().HasIndex(x => new { x.Datum, x.Stunde, x.LerngruppeId });
+        // Phase 3.1: neue Tabelle. Die alte Phase-1A-Tabelle "Lektionen" (eine Lerngruppe je
+        // Lektion, nie benutzt) bleibt in bestehenden Entwicklungs-DBs ungenutzt liegen.
+        b.Entity<Lektion>().ToTable("KlassenbuchLektionen");
+        b.Entity<Lektion>()
+            .HasIndex(x => new { x.Datum, x.Stunde, x.GrundUNr, x.GrundLehrer }).IsUnique();
+        b.Entity<Lektion>()
+            .HasMany(x => x.Anwesenheiten)
+            .WithOne(a => a.Lektion!)
+            .HasForeignKey(a => a.LektionId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        b.Entity<Anwesenheit>()
+            .HasOne(a => a.Schueler!)
+            .WithMany()
+            .HasForeignKey(a => a.SchuelerId)
+            .OnDelete(DeleteBehavior.Cascade);
+        b.Entity<Anwesenheit>().HasIndex(a => new { a.LektionId, a.SchuelerId }).IsUnique();
+        b.Entity<Anwesenheit>().HasIndex(a => a.SchuelerId);
+
+        b.Entity<KlassenbuchProtokoll>().HasIndex(p => p.LektionId);
+        b.Entity<KlassenbuchProtokoll>().HasIndex(p => p.Gruppe);
 
         // --- Grundplan (versioniert) ---
         b.Entity<GrundplanVersion>()

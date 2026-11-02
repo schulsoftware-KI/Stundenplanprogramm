@@ -814,6 +814,204 @@ main.verwaltung { max-width: 920px; }
 .sp-wert { font-size: 1.15rem; font-weight: 700; overflow-wrap: anywhere; }
 #spPasswort { font-size: 1.35rem; color: var(--akzent); }
 
+/* =====================================================================
+   Klassenbuch (Phase 3.1): Stundenblatt, Gruppe zusammenstellen, Gruppen
+   ===================================================================== */
+
+/* Plan: Stunden mit Klassenbuch sind antippbar */
+.eintrag.kb-ja { cursor: pointer; }
+.eintrag.kb-ja:hover { box-shadow: inset 0 0 0 2px var(--akzent-hell); }
+.eintrag.kb-ja:active { box-shadow: inset 0 0 0 2px var(--akzent); }
+.eintrag.kb-ja:focus-visible { outline: 3px solid var(--akzent); outline-offset: -3px; }
+.e-rechts { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.kb-symbol { display: inline-grid; place-items: center; color: var(--leise); }
+.kb-symbol.ok { color: var(--vertretung); }
+.raster .kb-symbol svg { width: 14px; height: 14px; }
+
+main.klassenbuch { max-width: 720px; padding-bottom: 0; }
+.kb-bereich { display: grid; gap: 10px; }
+.kb-kopf { padding: 14px 16px; gap: 2px; }
+.kb-wann { margin: 0; font-size: 0.88rem; font-weight: 600; color: var(--leise); }
+.kb-fach { margin: 0; font-size: 1.35rem; font-weight: 750; overflow-wrap: anywhere; }
+.kb-wer { margin: 2px 0 0 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.kb-wer:empty { display: none; }
+.kb-raum { color: var(--leise); }
+.kb-erfasst { margin: 6px 0 0 0; font-size: 0.9rem; color: var(--leise); }
+.kb-erfasst:empty { display: none; }
+.kb-ok { color: var(--vertretung); font-weight: 700; }
+.kb-offen { color: var(--verlegung); font-weight: 650; }
+.kb-sperre { display: block; margin-top: 2px; color: var(--verlegung); font-weight: 600; }
+.marke.kb-art.vertretung { background: var(--vertretung); }
+.marke.kb-art.verlegung { background: var(--verlegung); }
+.marke.kb-art.betreuung { background: var(--betreuung); }
+.marke.kb-art.raumwechsel { background: var(--raum); }
+.marke.kb-art.sonst { background: var(--sonst); }
+#kbHinweise:empty, #kbOffen:empty { display: none; }
+#kbHinweise, #kbOffen { display: grid; gap: 8px; }
+#kbHinweise .hinweis { margin: 0; }
+
+.kb-gruppe-offen { gap: 8px; padding: 14px 16px; border-left: 4px solid var(--verlegung); border-radius: 0 14px 14px 0; }
+.kb-go-titel { margin: 0; font-weight: 700; }
+.kb-gruppe-offen .hauptknopf { justify-self: start; }
+
+.kb-listekopf { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 2px 2px -6px 2px; }
+.kb-zahlen { margin: 0; font-size: 0.88rem; color: var(--leise); font-variant-numeric: tabular-nums; }
+.kb-listekopf .textknopf { flex: none; white-space: nowrap; }
+
+/* Teilnehmerliste */
+.kb-liste {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: var(--papier);
+  border: 1px solid var(--linie);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.kb-liste:empty { display: none; }
+.kb-zeile { display: grid; grid-template-columns: 1fr 48px; border-left: 4px solid transparent; }
+.kb-zeile + .kb-zeile { border-top: 1px solid var(--linie); }
+.kb-person {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 7px 8px 7px 12px;
+  border: none;
+  background: transparent;
+  text-align: left;
+}
+.kb-person.nur-lesen { grid-column: 1 / -1; padding-right: 12px; }
+button.kb-person:hover { background: var(--akzent-hell); }
+.kb-person:focus-visible, .kb-mehr:focus-visible { outline-offset: -3px; }
+.kb-namezeile { display: grid; min-width: 0; }
+.kb-name { font-weight: 650; overflow-wrap: anywhere; }
+.kb-unter { display: flex; flex-wrap: wrap; gap: 0 8px; font-size: 0.8rem; color: var(--leise); }
+.kb-ausser { font-style: italic; }
+.kb-status {
+  flex: none;
+  padding: 2px 9px;
+  border: 1px solid var(--linie);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--leise);
+  white-space: nowrap;
+}
+.kb-zeile.s-da .kb-status { border-color: transparent; padding-right: 2px; font-weight: 600; }
+.kb-mehr {
+  border: none;
+  border-left: 1px solid var(--linie);
+  background: transparent;
+  color: var(--leise);
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.kb-mehr:hover { background: var(--akzent-hell); color: var(--tinte); }
+.kb-zeile.s-fehlt   { border-left-color: var(--entfall);   background: var(--entfall-t); }
+.kb-zeile.s-spaet   { border-left-color: var(--verlegung); background: var(--verlegung-t); }
+.kb-zeile.s-urlaub  { border-left-color: var(--betreuung); background: var(--betreuung-t); }
+.kb-zeile.s-veranst { border-left-color: var(--sonst);     background: var(--sonst-t); }
+.kb-zeile.s-fehlt .kb-status   { background: var(--entfall);   color: var(--auf-farbe); border-color: transparent; }
+.kb-zeile.s-spaet .kb-status   { background: var(--verlegung); color: var(--auf-farbe); border-color: transparent; }
+.kb-zeile.s-urlaub .kb-status  { background: var(--betreuung); color: var(--auf-farbe); border-color: transparent; }
+.kb-zeile.s-veranst .kb-status { background: var(--sonst);     color: var(--auf-farbe); border-color: transparent; }
+
+/* Leiste mit Speichern: bleibt beim Blättern unten sichtbar */
+.kb-leiste {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 4px -16px 0 -16px;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px)) 16px;
+  background: var(--seite);
+  border-top: 1px solid var(--linie);
+}
+.kb-leiste .hauptknopf { margin-top: 0; flex: 1 1 220px; }
+.kb-leiste .hauptknopf:disabled { cursor: default; }
+/* „Gespeichert": ruhiger Zustand statt ausgegrautem Hauptknopf */
+.kb-leiste .hauptknopf.gespeichert:disabled {
+  opacity: 1;
+  background: var(--vertretung-t);
+  color: var(--vertretung);
+  box-shadow: inset 0 0 0 1px var(--vertretung);
+}
+.kb-leiste.ungespeichert .hauptknopf:not(:disabled) { box-shadow: 0 0 0 3px var(--akzent-hell); }
+#kbFehler, #kgFehler { margin: 0; }
+/* Doppelstunde: Schalter und Hinweis über dem Speichern-Knopf */
+.kb-folge { flex: 1 1 100%; color: var(--tinte); font-weight: 600; white-space: normal; min-height: 32px; }
+.kb-folge-info { flex: 1 1 100%; margin: -4px 0 0 0; font-size: 0.85rem; color: var(--leise); }
+.kb-folge:not([hidden]) + .kb-folge-info { margin-left: 28px; }
+
+/* Statusdialog */
+.ks-wahl { display: grid; gap: 6px; margin-top: 10px; }
+.ks-knopf {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--linie);
+  border-radius: 10px;
+  background: var(--seite);
+  text-align: left;
+  font-weight: 650;
+}
+.ks-knopf:hover { background: var(--akzent-hell); }
+.ks-knopf[aria-pressed="true"] { border-color: var(--akzent); box-shadow: inset 0 0 0 1px var(--akzent); background: var(--akzent-hell); }
+.ks-punkt { flex: none; width: 14px; height: 14px; border-radius: 50%; background: var(--linie); }
+.ks-knopf.s-da .ks-punkt      { background: var(--vertretung); }
+.ks-knopf.s-fehlt .ks-punkt   { background: var(--entfall); }
+.ks-knopf.s-spaet .ks-punkt   { background: var(--verlegung); }
+.ks-knopf.s-urlaub .ks-punkt  { background: var(--betreuung); }
+.ks-knopf.s-veranst .ks-punkt { background: var(--sonst); }
+.ks-minuten-feld { display: grid; }
+.ks-minuten { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ks-minuten input { width: 7.5rem; }
+.ks-schnell { display: flex; gap: 4px; }
+.ks-schnell .textknopf { min-width: 44px; min-height: 42px; border: 1px solid var(--linie); border-radius: 8px; }
+.ks-minuten-feld .hauptknopf { margin-top: 12px; }
+
+/* Historie */
+.kh-liste { margin-top: 8px; }
+
+/* Gruppe zusammenstellen */
+.kg-werkzeuge { display: grid; gap: 4px; }
+.kg-werkzeuge .knopfreihe { margin: 0; }
+.kg-klassen { display: grid; gap: 10px; }
+.kg-klasse {
+  min-width: 0;
+  margin: 0;
+  padding: 10px 12px 10px 12px;
+  border: 1px solid var(--linie);
+  border-radius: 12px;
+  background: var(--papier);
+}
+.kg-legende { float: left; width: 100%; display: flex; align-items: baseline; gap: 10px; padding: 0; margin: 0 0 2px 0; }
+.kg-legende + * { clear: both; }
+.kg-kname { font-weight: 750; font-size: 1.05rem; }
+.kg-kzahl { font-size: 0.85rem; font-weight: 600; color: var(--leise); font-variant-numeric: tabular-nums; }
+.kg-kknoepfe { margin: 0 0 4px 0; }
+.kg-kknoepfe .textknopf { padding: 6px 6px; }
+.kg-namen { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 0 10px; }
+.kg-name { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 4px 6px; border-radius: 8px; cursor: pointer; }
+.kg-name:hover { background: var(--akzent-hell); }
+.kg-name input { flex: none; width: 20px; height: 20px; margin: 0; accent-color: var(--akzent); }
+.kg-name:has(input:checked) { font-weight: 650; }
+.kg-name:has(input:disabled) { cursor: default; }
+.kg-name:has(input:disabled):hover { background: transparent; }
+.k-zeile.kg-offen { border-left-color: var(--verlegung); }
+.kgs-erklaerung { margin: 0 2px; }
+#kgsInfo { margin: 0 2px; }
+/* Im Klassenbuch erscheint die Rückmeldung oben unter dem Kopf – nicht über der Speichern-Leiste */
+main.klassenbuch:not([hidden]) ~ .toast { bottom: auto; top: calc(74px + env(safe-area-inset-top, 0px)); }
+
 /* ---- Rückmeldung ---- */
 .toast {
   position: fixed;

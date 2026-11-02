@@ -40,7 +40,12 @@ public record WochenStundeDto(
     string Status,                        // Normal | Vertreten | Entfall | VerlegtWeg | VerlegtHin |
                                           // Betreuung | EVA | Zusammenlegung | Raumvertretung | Frei
     string? Info,
-    bool Geaendert);
+    bool Geaendert,
+    // Phase 3.1 (Klassenbuch):
+    int GrundUNr,                         // UNr laut Grundplan    } Schlüssel der Lektion
+    string GrundLehrer,                   // Lehrkraft laut Grundplan } (mit Datum + Stunde)
+    bool Klassenbuch,                     // Stunde hat ein Klassenbuch (findet statt, mit Schülern)
+    bool Erfasst);                        // Anwesenheit ist erfasst
 
 // =====================================================================
 //  Auswahllisten für die PWA (Phase 2, Schritt 3): was man ansehen kann.

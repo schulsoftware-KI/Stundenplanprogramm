@@ -29,6 +29,10 @@
 //  Konten (Schritt 5, Code in konten.js): Passwort ändern, Pflicht-Änderung
 //  nach Startpasswort, Kontenverwaltung für Admin bzw. Schülerpasswörter für
 //  Klassenleitung/Stufenkoordination.
+//
+//  Klassenbuch (Phase 3.1, Code in klassenbuch.js): Stunden mit Klassenbuch
+//  sind für Berechtigte antippbar (Stundenblatt mit Anwesenheit); erfasste
+//  Stunden tragen ein Häkchen. Kontomenü „Meine Gruppen".
 // =====================================================================
 
 const MODI = {
@@ -712,7 +716,7 @@ function gruppenText(s) {
   return klassen.length ? klassen.join(", ") : (s.lerngruppen || []).join(", ");
 }
 
-function eintrag(s) {
+function eintrag(s, datum) {
   const st = statusVon(s);
   const ich = state.werte.lehrer;
   const lehrerSicht = state.modus === "lehrer";
@@ -729,6 +733,21 @@ function eintrag(s) {
   if (dienst) klassen.push("dienst");
   if (fuerMichFrei) klassen.push("fuer-mich-frei");
 
+  // Klassenbuch (Phase 3.1): Stunde antippen öffnet das Stundenblatt.
+  const kbAuf = !!datum && kbDarfOeffnen(s);
+  const props = { class: klassen.join(" ") };
+  if (kbAuf) {
+    klassen.push("kb-ja");
+    if (s.erfasst) klassen.push("kb-erfasst");
+    props.class = klassen.join(" ");
+    props.role = "button";
+    props.tabindex = "0";
+    props.onclick = () => stundenblattOeffnen(s, datum);
+    props.onkeydown = (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); stundenblattOeffnen(s, datum); }
+    };
+  }
+
   // Zweite Zeile: Lehrersicht -> Klassen/Kurs (+ Lehrerwechsel), sonst die Lehrkraft.
   let wer;
   if (lehrerSicht) {
@@ -738,13 +757,17 @@ function eintrag(s) {
     wer = korrektur(s.originalLehrer, s.lehrer);
   }
 
-  return h("div", { class: klassen.join(" ") },
+  return h("div", props,
     h("div", { class: "e-oben" },
       h("span", { class: "fach" }, fachText(s)),
       h("span", { class: "raum" }, korrektur(s.originalRaum, s.raum))),
     h("div", { class: "e-unten" },
       h("span", { class: "wer" }, wer),
-      badge ? h("span", { class: "badge" }, badge) : null));
+      badge || kbAuf
+        ? h("span", { class: "e-rechts" },
+            badge ? h("span", { class: "badge" }, badge) : null,
+            kbAuf ? kbSymbol(s.erfasst) : null)
+        : null));
 }
 
 function sichtbareStunden(tag) {
@@ -867,7 +890,7 @@ function renderListe() {
   liste.replaceChildren(...reihe.map((nr) => nachStunde.has(nr)
     ? h("div", { class: "std-zeile" },
         h("div", { class: "std-nr", "aria-label": `${nr}. Stunde` }, nr),
-        h("div", { class: "std-eintraege" }, nachStunde.get(nr).map(eintrag)))
+        h("div", { class: "std-eintraege" }, nachStunde.get(nr).map((s) => eintrag(s, tag.datum))))
     : h("div", { class: "std-zeile frei-zeile" },
         h("div", { class: "std-nr", "aria-label": `${nr}. Stunde` }, nr),
         h("div", { class: "keine" },
@@ -905,7 +928,7 @@ function renderRaster() {
         return;
       }
       const hier = sichtbareStunden(t).filter((s) => s.stunde === nr);
-      zellen.push(h("td", null, hier.map(eintrag)));
+      zellen.push(h("td", null, hier.map((s) => eintrag(s, t.datum))));
     });
     zeilen.push(h("tr", null, zellen));
   }
@@ -971,8 +994,10 @@ function zeigeAnmeldung(hinweis) {
   ladenAbbrechen();
   alleDialogeZu();
   verwaltungLeeren();
+  klassenbuchLeeren();
   el("inhalt").hidden = true;
   el("verwaltung").hidden = true;
+  el("klassenbuch").hidden = true;
   el("pflicht").hidden = true;
   el("anmeldung").hidden = false;
   el("aktualisieren").hidden = true;
@@ -993,9 +1018,11 @@ function appStarten() {
   ladenAbbrechen();
   alleDialogeZu();
   verwaltungLeeren();
+  klassenbuchLeeren();
   el("anmeldung").hidden = true;
   el("pflicht").hidden = true;
   el("verwaltung").hidden = true;
+  el("klassenbuch").hidden = true;
   el("inhalt").hidden = false;
   el("aktualisieren").hidden = false;
   const k = el("kontoKnopf");
@@ -1154,6 +1181,7 @@ function kontoOeffnen() {
   el("kontoInfo").textContent = info.join(" · ");
   el("meinPlan").hidden = !(istPersonal() && eigenesKuerzel());
   kontoMenueAnpassen();
+  klassenbuchMenueAnpassen();
   ueberallZuruecksetzen();
   kontoFehler("");
   if (typeof konto.showModal === "function") { if (!konto.open) konto.showModal(); }
@@ -1260,6 +1288,7 @@ el("nurAenderungen").addEventListener("change", (e) => {
 
 el("aktualisieren").addEventListener("click", () => {
   if (verwaltungOffen()) { verwaltungAktualisieren(); return; }
+  if (klassenbuchOffen()) { kbAktualisieren(); return; }
   ladeAuswahl();
   ladeWoche();
 });
@@ -1312,6 +1341,10 @@ el("meinPlan").addEventListener("click", () => {
     if (!startpasswoerterVerwerfen()) return;
     verwaltungLeeren();
     el("verwaltung").hidden = true;
+    el("inhalt").hidden = false;
+  }
+  if (klassenbuchOffen()) {
+    if (!klassenbuchSchliessen()) return;
     el("inhalt").hidden = false;
   }
   state.modus = "lehrer";
@@ -1401,6 +1434,7 @@ window.addEventListener("storage", (e) => {
 
 async function start() {
   kontenInit();
+  klassenbuchInit();
   altlastenEntfernen();
   state.anmeldung = anmeldungLesen();
   state.anmeldungNoetig = lokal.lesen("optionen", { anmeldungNoetig: true }).anmeldungNoetig !== false;

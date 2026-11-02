@@ -219,6 +219,8 @@ function zeigePflicht() {
   ladenAbbrechen();
   alleDialogeZu();
   verwaltungLeeren();
+  klassenbuchLeeren();
+  el("klassenbuch").hidden = true;
   if (state.anmeldung && !state.anmeldung.mussPasswortAendern) {
     state.anmeldung.mussPasswortAendern = true;
     anmeldungSpeichern();
@@ -327,6 +329,7 @@ const verwaltungOffen = () => !el("verwaltung").hidden;
 function zeigeVerwaltung() {
   if (!darfKonten()) return;
   kontoSchliessen();
+  if (!klassenbuchSchliessen()) return; // Klassenbuch offen mit Ungespeichertem: abgebrochen
   ladenAbbrechen();
   const admin = darfVerwalten();
   el("inhalt").hidden = true;

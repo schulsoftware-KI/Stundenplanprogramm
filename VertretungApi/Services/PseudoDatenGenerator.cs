@@ -369,11 +369,16 @@ public static class PseudoDatenGenerator
 
     private static void LoescheVorhandene(AppDbContext db)
     {
-        // Reihenfolge wegen FK: erst Zuordnungen/Lektionen, dann Schüler/Lerngruppen.
-        db.Zugehoerigkeiten.RemoveRange(db.Zugehoerigkeiten.Where(z => true));
+        // Reihenfolge wegen FK: erst Klassenbuch (Phase 3.1) und Zuordnungen, dann
+        // Schüler/Lerngruppen. Klassenbuchdaten der Pseudo-Schüler passen nicht zu den neuen
+        // Pseudo-Schülern und werden mit gelöscht – ebenso alle Gruppenlisten (Typ Gruppe):
+        // die Fachlehrkräfte stellen sie mit den neuen Schülern neu zusammen.
+        db.Anwesenheiten.RemoveRange(db.Anwesenheiten.Where(a => a.Schueler!.IstPseudo));
         db.Lektionen.RemoveRange(db.Lektionen.Where(l => l.IstPseudo));
+        db.KlassenbuchProtokolle.RemoveRange(db.KlassenbuchProtokolle.Where(p => p.IstPseudo));
+        db.Zugehoerigkeiten.RemoveRange(db.Zugehoerigkeiten.Where(z => true));
         db.Schueler.RemoveRange(db.Schueler.Where(s => s.IstPseudo));
-        db.Lerngruppen.RemoveRange(db.Lerngruppen.Where(l => l.IstPseudo));
+        db.Lerngruppen.RemoveRange(db.Lerngruppen.Where(l => l.IstPseudo || l.Typ == LerngruppeTyp.Gruppe));
         db.SaveChanges();
     }
 

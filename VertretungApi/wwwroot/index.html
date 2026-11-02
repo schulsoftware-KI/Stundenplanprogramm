@@ -206,6 +206,79 @@
     </section>
   </main>
 
+  <!-- Klassenbuch (Phase 3.1): Stundenblatt, Gruppe zusammenstellen, Meine Gruppen.
+       Namen und Anwesenheiten nur im Arbeitsspeicher; beim Verlassen geleert. -->
+  <main id="klassenbuch" class="verwaltung klassenbuch" hidden>
+    <div class="verw-kopf">
+      <button id="kbZurueck" class="textknopf" type="button">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span id="kbZurueckText">Zum Plan</span>
+      </button>
+    </div>
+
+    <!-- Stundenblatt -->
+    <section id="kbStunde" class="kb-bereich" aria-labelledby="kbFach" hidden>
+      <div class="karte kb-kopf">
+        <p id="kbWann" class="kb-wann"></p>
+        <h2 id="kbFach" class="kb-fach"></h2>
+        <p id="kbWer" class="kb-wer"></p>
+        <p id="kbErfasst" class="kb-erfasst"></p>
+      </div>
+      <div id="kbHinweise"></div>
+      <div id="kbOffen"></div>
+      <div id="kbListeKopf" class="kb-listekopf" hidden>
+        <p id="kbZahlen" class="kb-zahlen" role="status"></p>
+        <button id="kbAlleDa" class="textknopf klein" type="button" hidden>Alle anwesend</button>
+      </div>
+      <ul id="kbListe" class="kb-liste" aria-label="Anwesenheit"></ul>
+      <p id="kbFehler" class="fehler" role="alert" hidden></p>
+      <div id="kbLeiste" class="kb-leiste" hidden>
+        <label id="kbFolgeSchalter" class="schalter kb-folge" hidden>
+          <input id="kbFolge" type="checkbox" checked />
+          <span id="kbFolgeText"></span>
+        </label>
+        <p id="kbFolgeInfo" class="kb-folge-info" hidden></p>
+        <button id="kbSpeichern" class="hauptknopf" type="button">Speichern</button>
+        <button id="kbHistorieKnopf" class="textknopf" type="button" aria-haspopup="dialog">Änderungen</button>
+      </div>
+    </section>
+
+    <!-- Gruppe zusammenstellen -->
+    <section id="kbGruppe" class="kb-bereich" aria-labelledby="kgTitel" hidden>
+      <div class="karte kb-kopf">
+        <p class="kb-wann">Gruppe aus dem Stundenplan</p>
+        <h2 id="kgTitel" class="kb-fach"></h2>
+        <p id="kgInfo" class="kb-wer"></p>
+        <p id="kgStand" class="kb-erfasst"></p>
+      </div>
+      <p id="kgErklaerung" class="hinweis" hidden></p>
+      <div id="kgWerkzeuge" class="kg-werkzeuge" hidden>
+        <label for="kgFilter" class="vh">Namen filtern</label>
+        <input id="kgFilter" class="eingabe" type="search" placeholder="Namen filtern …" autocomplete="off"
+               autocapitalize="none" spellcheck="false" enterkeyhint="search" />
+        <div class="knopfreihe klein">
+          <button id="kgAlle" class="textknopf klein" type="button">Alle übernehmen</button>
+          <button id="kgKeine" class="textknopf klein" type="button">Keine</button>
+        </div>
+      </div>
+      <div id="kgKlassen" class="kg-klassen"></div>
+      <p id="kgFehler" class="fehler" role="alert" hidden></p>
+      <div id="kgLeiste" class="kb-leiste" hidden>
+        <button id="kgSpeichern" class="hauptknopf" type="button">Gruppe speichern</button>
+        <button id="kgAbbrechen" class="textknopf" type="button">Abbrechen</button>
+      </div>
+    </section>
+
+    <!-- Meine Gruppen -->
+    <section id="kbGruppen" class="kb-bereich" aria-label="Gruppen" hidden>
+      <p class="kleingedruckt ohne-einzug kgs-erklaerung">Gruppen aus dem Stundenplan mit eigener Schülergruppe
+        (z. B. Religion, Wahlpflicht, AG über mehrere Klassen). Stelle jede Gruppe einmal zusammen –
+        danach stehen ihre Schülerinnen und Schüler im Stundenblatt.</p>
+      <p id="kgsInfo" class="such-info" role="status"></p>
+      <ul id="kgsListe" class="k-liste" aria-label="Gruppen"></ul>
+    </section>
+  </main>
+
   <main id="inhalt" hidden>
     <section id="auswahl" class="auswahl" aria-label="Was möchtest du sehen?">
       <div class="modi" role="group" aria-label="Ansicht">
@@ -269,6 +342,7 @@
       <p id="kontoInfo" class="konto-info"></p>
     </div>
     <button id="meinPlan" class="menuepunkt" type="button">Mein Plan</button>
+    <button id="kbGruppenKnopf" class="menuepunkt" type="button" hidden>Meine Gruppen</button>
     <button id="kontenKnopf" class="menuepunkt" type="button" hidden>Konten verwalten</button>
     <button id="pwAendernKnopf" class="menuepunkt" type="button">Passwort ändern</button>
     <button id="abmelden" class="menuepunkt" type="button">Abmelden</button>
@@ -360,6 +434,38 @@
     <button id="spFertig" class="menuepunkt schliessen" type="button">Fertig</button>
   </dialog>
 
+  <!-- Klassenbuch: Status einer Schülerin / eines Schülers -->
+  <dialog id="kbStatusDialog" class="fenster ks-dialog" aria-labelledby="ksName">
+    <h2 id="ksName" class="karte-titel"></h2>
+    <p id="ksKlasse" class="kleingedruckt ohne-einzug"></p>
+    <div id="ksWahl" class="ks-wahl" role="group" aria-label="Status"></div>
+    <div id="ksMinutenFeld" class="ks-minuten-feld" hidden>
+      <label class="feld" for="ksMinuten">Wie viele Minuten zu spät?</label>
+      <div class="ks-minuten">
+        <input id="ksMinuten" class="eingabe" type="number" inputmode="numeric" min="1" max="240" step="1"
+               enterkeyhint="done" />
+        <div id="ksSchnell" class="ks-schnell" role="group" aria-label="Schnellwahl Minuten">
+          <button type="button" class="textknopf klein" data-min="5">5</button>
+          <button type="button" class="textknopf klein" data-min="10">10</button>
+          <button type="button" class="textknopf klein" data-min="15">15</button>
+          <button type="button" class="textknopf klein" data-min="20">20</button>
+        </div>
+      </div>
+      <p id="ksFehler" class="fehler klein" role="alert" hidden></p>
+      <button id="ksOk" class="hauptknopf" type="button">Übernehmen</button>
+    </div>
+    <button id="ksZu" class="menuepunkt schliessen" type="button">Abbrechen</button>
+  </dialog>
+
+  <!-- Klassenbuch: Änderungshistorie einer Stunde -->
+  <dialog id="kbHistorieDialog" class="fenster" aria-labelledby="khTitel">
+    <h2 id="khTitel" class="karte-titel">Änderungen</h2>
+    <p class="kleingedruckt ohne-einzug">Wer hat wann was an der Anwesenheit dieser Stunde geändert.</p>
+    <p id="khInfo" class="such-info" role="status"></p>
+    <ul id="khListe" class="p-liste kh-liste"></ul>
+    <button id="khZu" class="menuepunkt schliessen" type="button">Schließen</button>
+  </dialog>
+
   <!-- kurze Rückmeldungen -->
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
@@ -367,6 +473,7 @@
   <section id="druck" class="druck" aria-hidden="true"></section>
 
   <script src="konten.js"></script>
+  <script src="klassenbuch.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

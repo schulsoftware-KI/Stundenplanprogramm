@@ -211,6 +211,62 @@ In der PWA: Kontomenü → „Passwort ändern“ (alle) bzw. „Konten verwalte
 „Schülerpasswörter“ (Klassenleitung, Stufenkoordination). Startpasswörter erscheinen als
 Zugangszettel zum Drucken oder als CSV-Datei (Excel, Semikolon) und nur dieses eine Mal.
 
+## Klassenbuch (Phase 3.1): Anwesenheit und Gruppenlisten
+
+| Methode | Pfad | Zweck | Auth |
+|---|---|---|---|
+| GET | `/api/klassenbuch/stunde?datum=&stunde=&unr=&lehrer=` | Stundenblatt: Kopf, Rechte, Erfassungsstand, Teilnehmer mit Status (`unr`/`lehrer` = `grundUNr`/`grundLehrer` aus dem Wochenplan) | Personal + Recht |
+| PUT | `/api/klassenbuch/stunde` | Anwesenheit speichern `{ datum, stunde, grundUNr, grundLehrer, version, eintraege: [{ schuelerId, status, minuten? }] }` → Stundenblatt | Personal + Recht |
+| GET | `/api/klassenbuch/stunde/historie?…` | Änderungshistorie der Stunde (neueste zuerst) | Personal + Recht |
+| GET | `/api/klassenbuch/gruppen` | „Meine Gruppen“: Sek-I-Gruppen der Lehrkraft (Admin: alle), offene zuerst | Personal |
+| GET | `/api/klassenbuch/gruppe?schluessel=` | Gruppe mit Pool (alle Schüler der genannten Klassen) und Mitgliedern | Gruppenlehrkraft, KL/SK der Klassen, Admin |
+| PUT | `/api/klassenbuch/gruppe?schluessel=` | Gruppe zusammenstellen `{ mitglieder: [ids] }` | Gruppenlehrkraft, Admin |
+
+- **Lektion** = eine Stunde mit Klassenbuch, Schlüssel (Datum, Stunde, UNr laut Grundplan,
+  Lehrkraft laut Grundplan) – derselbe Schlüssel, über den das Vertretungs-Overlay zuordnet.
+  Sie entsteht beim ersten Speichern (Tabelle `KlassenbuchLektionen`). Der Wochenplan liefert
+  je Stunde `grundUNr`, `grundLehrer`, `klassenbuch` (gibt es eins?) und `erfasst`.
+- **Klassenbuch gibt es** nur für Unterricht, der stattfindet (nicht Entfall, verlegt, frei),
+  mit Schülern aus einer Klasse oder einem Kurs. Gruppen ohne Klassenangabe („Sonstige“, z. B.
+  „AG2-6“), Bereitschaften und PSF haben keins.
+- **Teilnehmer:** Klasse → alle Schüler der Klasse; Kurs → Kursmitglieder; Klasse mit
+  Schülergruppe (Religion, WP, AG über Klassen, z. B. `ER_05A05B05C05D_L88`) → Mitglieder der
+  zusammengestellten Gruppe (`Lerngruppe` Typ `Gruppe`). Ist die Gruppe noch nicht
+  zusammengestellt, kann für die Stunde nichts erfasst werden (`offeneGruppen`). Schüler einer
+  Klasse mit klassenbezogen freiem Tag (Klassenfahrt) stehen nicht in der Liste.
+- **Status:** `Fehlt`, `Verspaetet` (Minuten 1–240), `Beurlaubt`, `Schulveranstaltung` (zählt
+  später nicht als Fehlzeit). Gespeichert werden nur Abweichungen; „erfasst von/am“ trennt
+  „alle anwesend“ von „nicht erfasst“.
+- **Rechte:** lesen und schreiben dürfen die haltende Lehrkraft (auch Vertretung, EVA,
+  Verlegung), die ursprüngliche Lehrkraft, Klassenleitung/Stufenkoordination (zuständig für
+  eine Klasse/Stufe der Stunde) und Admin. Keine Erfassung für künftige Tage, **keine
+  Änderungsfrist**.
+- **Historie** (`KlassenbuchProtokolle`): erste Erfassung, jede Statusänderung (alt → neu) und
+  jede Änderung an Gruppenlisten – mit Akteur und Zeit.
+- **Doppelstunde:** Folgt direkt dieselbe Stunde (gleiche UNr und Lehrkraft laut Grundplan,
+  mit Klassenbuch), enthält das Stundenblatt `folge` (`stunde`, `erfasst`). Mit
+  `folgestundeUebernehmen: true` erfasst das Speichern die 2. Stunde mit: „verspätet“ wird dort
+  „anwesend“, die übrigen Status werden übernommen. Eine schon erfasste 2. Stunde wird nie
+  überschrieben. `meldung` in der Antwort sagt, was gespeichert wurde. In der Historie der
+  2. Stunde steht „übernommen aus der 1. Stunde“.
+- **Gleichzeitiges Speichern:** Das Stundenblatt trägt eine `version`. Hat inzwischen jemand
+  anderes gespeichert, antwortet die API mit 409 `{ konflikt: true }`; die App lädt dann neu.
+- **Schülerplan:** Ist eine Sek-I-Gruppe zusammengestellt, sehen nur ihre Mitglieder diese
+  Stunden (nur die eigene Religions-/WP-/AG-Gruppe). Nicht zusammengestellt: wie bisher alle
+  Schüler der Klasse.
+- **Pseudodaten neu erzeugen** löscht die Klassenbuchdaten der Pseudo-Schüler und alle
+  Gruppenlisten (die Lehrkräfte stellen sie mit den neuen Schülern neu zusammen).
+- **Schema:** neue Tabellen `KlassenbuchLektionen`, `Anwesenheiten`, `KlassenbuchProtokolle`
+  und Spalten `Lerngruppen.BearbeitetVon/BearbeitetAm` – ergänzt die Schema-Nachrüstung beim
+  Start (DB muss nicht gelöscht werden). Die alte, nie benutzte Tabelle `Lektionen` (Phase 1A)
+  bleibt in bestehenden Entwicklungs-DBs ungenutzt liegen.
+
+In der PWA: Stunden mit Klassenbuch tragen für Berechtigte ein Buch-Symbol (erfasst: Häkchen)
+und öffnen per Antippen das Stundenblatt. Name antippen = fehlt ⇄ anwesend, „⋯“ = weitere
+Status. Bei Doppelstunden bietet die 1. Stunde den Schalter „Auch für die 2. Stunde übernehmen“. Kontomenü → „Meine Gruppen“ (Admin: „Gruppenlisten“). Namen und Anwesenheiten liegen
+nur im Arbeitsspeicher, nie im Browser-Speicher (ein Offline-Speicher für freigegebene
+Schulverwaltungs-PCs folgt später).
+
 ## Produktiv: Migrations statt EnsureCreated
 
 `EnsureCreated` ist nur für die Entwicklung gedacht und verträgt sich **nicht** mit Migrations.
@@ -228,7 +284,8 @@ ersetzen und `Database:SchemaNachruesten` auf `false` setzen.
 ## Nächste Schritte
 
 1. **Schülerkonten aus SchILD** (Phase 5): Import statt Pseudodaten, Zuordnung über `ExtId`.
-2. **Klassenbuch (Phase 3):** Anwesenheit, Entschuldigungen, Einträge, Inhalte/Hausaufgaben.
+2. **Klassenbuch (Phase 3):** 3.2 Entschuldigungen + Fehlzeiten, 3.3 Inhalte/Hausaufgaben,
+   3.4 Klassenbucheinträge.
 3. **Web-Push:** Benachrichtigung der Apps bei Änderung.
 4. **Produktiv:** Schlüssel aus Umgebungsvariablen, EF-Migrations, PostgreSQL, CORS auf die
    App-Adresse einschränken, Login-Bremse hinter dem Reverse-Proxy je echter Adresse.

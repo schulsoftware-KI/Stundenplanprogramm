@@ -20,7 +20,38 @@ namespace VertretungApi.Services;
 //  Gefiltert wird zum Schluss nach Ziel: Lehrkraft (effektiv ODER ursprünglich),
 //  Klasse (Klassen-Rohwert, z. B. "05A" oder "Q1"), Lerngruppe(n) (Schlüssel aus
 //  dem Grundplan, z. B. "BIG1_EF_L68"; für Schüler alle ihre Lerngruppen).
+//
+//  Phase 3.1 (Klassenbuch):
+//   - Jede Stunde kennt ihre Teilnehmer-„Quellen" (Klasse, Kurs, Gruppe laut
+//     Schülergruppe der UV). Daraus entstehen im Klassenbuch die Teilnehmerlisten.
+//   - Schülerplan: Ist eine Sek-I-Gruppe (Religion, WP, AG …) zusammengestellt,
+//     sieht ein Schüler die Stunde nur noch, wenn er in der Gruppe ist; sonst
+//     wie bisher alle Schüler der genannten Klassen.
+//   - Jede Stunde meldet GrundUNr/GrundLehrer (Schlüssel der Lektion), ob es ein
+//     Klassenbuch gibt und ob die Anwesenheit schon erfasst ist.
+//   - TagAsync liefert die effektiven Stunden eines Tages für das Klassenbuch.
 // =====================================================================
+
+/// <summary>
+/// Herkunft der Teilnehmer einer Stunde (aus einem Grundplan-Slot):
+/// Typ Klasse (Key "05A", ggf. mit Schülergruppe = Sek-I-Teilgruppe), Kurs (Key =
+/// Kurs-Schlüssel) oder Sonstige (ohne Klassenangabe: keine Schüler, kein Klassenbuch).
+/// </summary>
+public sealed record PlanQuelle(string Typ, string Key, string Klasse, string? Schuelergruppe);
+
+/// <summary>Effektive Stunde eines Tages (für das Klassenbuch).</summary>
+public sealed record PlanStunde(
+    int Stunde, int UNr, int GrundUNr, string Fach, string Lehrer, string GrundLehrer,
+    string? OriginalLehrer, string? Raum, string Art, string Status, string? Info,
+    IReadOnlyList<string> Klassen, IReadOnlyList<string> Gruppen, IReadOnlyList<PlanQuelle> Quellen);
+
+/// <summary>Klassenbezogen freie Klasse/Stufe an einem Tag (z. B. Klassenfahrt).</summary>
+public sealed record FreieKlasse(string Klasse, string Text);
+
+/// <summary>Ein Unterrichtstag mit seinen effektiven Stunden (Phase 3.1).</summary>
+public sealed record TagKontext(
+    DateOnly Datum, string Schuljahr, int VersionId,
+    IReadOnlyList<PlanStunde> Stunden, IReadOnlyList<FreieKlasse> FreieKlassen);
 
 public enum WochenZielArt { Lehrer, Klasse, Gruppe, Schueler }
 
@@ -38,9 +69,13 @@ public static class WochenplanService
 
     /// <param name="werte">Lehrer: Kürzel · Klasse: Klassenname · Gruppe/Schüler: Lerngruppen-Schlüssel.</param>
     /// <param name="wochen">Anzahl Wochen ab der Woche von <paramref name="datum"/> (1–6).</param>
+    /// <param name="fertigeGruppen">
+    /// Nur Schülerplan (Phase 3.1): zusammengestellte Sek-I-Gruppen als "Schuljahr|SCHLÜSSEL"
+    /// (siehe <see cref="FertigeGruppenAsync"/>).
+    /// </param>
     public static async Task<WochenplanDto> BerechneAsync(
         AppDbContext db, WochenZielArt art, string anzeige, IEnumerable<string> werte,
-        DateOnly datum, int wochen)
+        DateOnly datum, int wochen, ISet<string>? fertigeGruppen = null)
     {
         wochen = Math.Clamp(wochen, 1, 6);
         var von = Montag(datum);
@@ -80,6 +115,14 @@ public static class WochenplanService
         var vertretungsTage = await db.Tage.Include(t => t.Eintraege)
             .Where(t => t.Datum >= von && t.Datum <= bis)
             .ToListAsync();
+
+        // Phase 3.1: Lektionen mit erfasster Anwesenheit (für die Markierung im Plan).
+        var erfasst = (await db.Lektionen.AsNoTracking()
+                .Where(l => l.Datum >= von && l.Datum <= bis && l.ErfasstAm != null)
+                .Select(l => new { l.Datum, l.Stunde, l.GrundUNr, l.GrundLehrer })
+                .ToListAsync())
+            .Select(l => LektionSchluessel(l.Datum, l.Stunde, l.GrundUNr, l.GrundLehrer))
+            .ToHashSet(StringComparer.Ordinal);
 
         // ---- Tag für Tag zusammensetzen ----
         var ergebnis = new List<WochenTagDto>();
@@ -137,10 +180,14 @@ public static class WochenplanService
                      ?? vertretungsTage.Where(t => t.Datum == d)
                          .OrderByDescending(t => t.Id).FirstOrDefault();
 
+            string sj = kal.Schuljahr;
+            bool GruppeFertig(string sg) =>
+                fertigeGruppen != null && fertigeGruppen.Contains(GruppenSchluessel(sj, sg));
+
             var stunden = EffektiverTag(verSlots, iso, vt?.Eintraege, teilFrei)
-                .Where(st => Passt(st, art, zielWerte))
+                .Where(st => Passt(st, art, zielWerte, GruppeFertig))
                 .OrderBy(st => st.Stunde).ThenBy(st => st.Fach, Cmp).ThenBy(st => st.Lehrer, Cmp)
-                .Select(ZuDto)
+                .Select(st => ZuDto(st, erfasst.Contains(LektionSchluessel(d, st.Stunde, st.GrundUNr, st.GrundLehrer))))
                 .ToList();
 
             // Alle Stunden des Ziels wegen einer freien Zeit entfallen (z. B. Q2 an Abiturtagen):
@@ -159,6 +206,92 @@ public static class WochenplanService
 
         return new WochenplanDto(ZielName(art), anzeige, von, bis, ergebnis);
     }
+
+    // =================================================================
+    //  Klassenbuch (Phase 3.1): ein Tag, Schlüssel, zusammengestellte Gruppen
+    // =================================================================
+
+    /// <summary>
+    /// Effektive Stunden eines Tages (Grundplan × Kalender × Vertretungen) für das Klassenbuch.
+    /// null = kein Unterrichtstag (außerhalb des Schuljahres, kein Rastertag, ganz frei,
+    /// kein Grundplan). Klassenbezogen freie Zeiten stehen in <see cref="TagKontext.FreieKlassen"/>.
+    /// </summary>
+    public static async Task<TagKontext?> TagAsync(AppDbContext db, DateOnly d)
+    {
+        var kal = await db.Kalender.Include(k => k.FreieZeiten)
+            .Where(k => k.Start <= d && k.Ende >= d)
+            .OrderByDescending(k => k.Id)
+            .FirstOrDefaultAsync();
+        if (kal == null) return null;
+
+        int iso = IsoTag(d);
+        if (!RasterTage(kal).Contains(iso)) return null;
+        if (kal.FreieZeiten.Any(f => f.Von <= d && d <= f.Bis && string.IsNullOrWhiteSpace(f.Klassen)))
+            return null;
+
+        var ver = await db.GrundplanVersionen
+            .Where(v => v.Schuljahr == kal.Schuljahr && v.GueltigAb <= d)
+            .OrderByDescending(v => v.GueltigAb).ThenByDescending(v => v.Id)
+            .FirstOrDefaultAsync();
+        if (ver == null) return null;
+
+        var slots = await db.GrundplanSlots.AsNoTracking().Where(s => s.VersionId == ver.Id).ToListAsync();
+
+        // Veröffentlichter Vertretungstag: bevorzugt aus demselben Schuljahr (wie BerechneAsync).
+        var vt = (await db.Tage.AsNoTracking().Include(t => t.Eintraege).Where(t => t.Datum == d).ToListAsync())
+            .OrderByDescending(t => t.Schuljahr == kal.Schuljahr)
+            .ThenByDescending(t => t.Id)
+            .FirstOrDefault();
+
+        var teilFrei = kal.FreieZeiten
+            .Where(f => f.Von <= d && d <= f.Bis && !string.IsNullOrWhiteSpace(f.Klassen))
+            .ToList();
+
+        var stunden = EffektiverTag(slots, iso, vt?.Eintraege, teilFrei)
+            .Select(x => new PlanStunde(
+                x.Stunde, x.UNr, x.GrundUNr, x.Fach, x.Lehrer, x.GrundLehrer,
+                string.IsNullOrWhiteSpace(x.OriginalLehrer) || Gleich(x.OriginalLehrer, x.Lehrer) ? null : x.OriginalLehrer,
+                x.Raum, x.Art, x.Status, x.Info,
+                x.Klassen.OrderBy(k => k, Cmp).ToList(),
+                x.Gruppen.OrderBy(g => g, Cmp).ToList(),
+                x.Quellen.ToList()))
+            .ToList();
+
+        var freieKlassen = teilFrei
+            .SelectMany(f => Liste(f.Klassen).Select(k => new FreieKlasse(k, FreiText(f))))
+            .GroupBy(f => f.Klasse, Cmp)
+            .Select(g => g.First())
+            .ToList();
+
+        return new TagKontext(d, kal.Schuljahr, ver.Id, stunden, freieKlassen);
+    }
+
+    /// <summary>
+    /// Gibt es zu dieser Stunde ein Klassenbuch? Nur Unterricht, der stattfindet (nicht entfallen,
+    /// verlegt oder frei), mit Schülern aus einer Klasse oder einem Kurs. Gruppen ohne
+    /// Klassenangabe („Sonstige", z. B. „AG2-6") haben keine Schüler und kein Klassenbuch.
+    /// </summary>
+    public static bool KlassenbuchMoeglich(string art, string status, IEnumerable<PlanQuelle> quellen)
+        => string.Equals(art, "Unterricht", StringComparison.OrdinalIgnoreCase)
+           && status is not ("Entfall" or "VerlegtWeg" or "Frei")
+           && quellen.Any(q => q.Typ is "Klasse" or "Kurs");
+
+    /// <summary>Schlüssel einer Lektion (auch für die „erfasst"-Markierung im Plan).</summary>
+    public static string LektionSchluessel(DateOnly datum, int stunde, int grundUNr, string grundLehrer)
+        => $"{datum:yyyy-MM-dd}|{stunde}|{grundUNr}|{grundLehrer.Trim().ToUpperInvariant()}";
+
+    /// <summary>Schlüssel einer zusammengestellten Gruppe: "Schuljahr|SCHÜLERGRUPPE".</summary>
+    public static string GruppenSchluessel(string schuljahr, string schuelergruppe)
+        => schuljahr.Trim() + "|" + schuelergruppe.Trim().ToUpperInvariant();
+
+    /// <summary>Alle zusammengestellten Sek-I-Gruppen (Lerngruppe Typ Gruppe) als "Schuljahr|SCHLÜSSEL".</summary>
+    public static async Task<HashSet<string>> FertigeGruppenAsync(AppDbContext db)
+        => (await db.Lerngruppen.AsNoTracking()
+                .Where(l => l.Typ == LerngruppeTyp.Gruppe)
+                .Select(l => new { l.Schuljahr, l.Bezeichnung })
+                .ToListAsync())
+            .Select(l => GruppenSchluessel(l.Schuljahr, l.Bezeichnung))
+            .ToHashSet(StringComparer.Ordinal);
 
     // =================================================================
     //  Auswahllisten (Phase 2, Schritt 3): Lehrkräfte, Klassen, Kurse …
@@ -246,6 +379,7 @@ public static class WochenplanService
         public bool Geaendert;
         public readonly HashSet<string> Gruppen = new(StringComparer.OrdinalIgnoreCase);
         public readonly HashSet<string> Klassen = new(StringComparer.OrdinalIgnoreCase);
+        public readonly List<PlanQuelle> Quellen = new();   // Phase 3.1: Herkunft der Teilnehmer
     }
 
     private static List<Std> EffektiverTag(
@@ -279,6 +413,11 @@ public static class WochenplanService
             .Where(s => !string.IsNullOrWhiteSpace(s.LerngruppeKey))
             .GroupBy(s => UNrSchluessel(s.UNr, s.Lehrer))
             .ToDictionary(g => g.Key, g => g.Select(s => s.LerngruppeKey).Distinct(Cmp).ToList());
+        // Phase 3.1: dieselbe Zuordnung für die Teilnehmer-Quellen (Klassenbuch).
+        var quellenJeUNr = verSlots
+            .Where(s => !string.Equals(s.Art, "Sperre", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(s => UNrSchluessel(s.UNr, s.Lehrer))
+            .ToDictionary(g => g.Key, g => QuellenAus(g));
 
         foreach (var e in eintraege)
         {
@@ -335,11 +474,17 @@ public static class WochenplanService
                         if (!string.IsNullOrWhiteSpace(e.Fach)) x.Fach = e.Fach;
                         if (e.UNr.HasValue && e.UNr.Value > 0) x.UNr = e.UNr.Value;
                         ErgaenzeGruppen(x, e.UNr, x.Lehrer, eKlassen, gruppenJeUNr);
+                        // Teilnehmer sind die der verlegten Stunde.
+                        SetzeQuellen(x, e.UNr, x.Lehrer, eKlassen, quellenJeUNr);
                         Markiere(x, status, "verlegt");
                     }
                     else
                     {
-                        if (zusaetzlich) ErgaenzeGruppen(x, e.UNr ?? e.GrundUNr, orig, eKlassen, gruppenJeUNr);
+                        if (zusaetzlich)
+                        {
+                            ErgaenzeGruppen(x, e.UNr ?? e.GrundUNr, orig, eKlassen, gruppenJeUNr);
+                            SetzeQuellen(x, e.UNr ?? e.GrundUNr, orig, eKlassen, quellenJeUNr);
+                        }
                         Markiere(x, status, InfoText(status));
                     }
                     break;
@@ -370,7 +515,43 @@ public static class WochenplanService
             if (!string.IsNullOrWhiteSpace(slot.LerngruppeKey)) x.Gruppen.Add(slot.LerngruppeKey);
             if (!string.IsNullOrWhiteSpace(slot.Klasse)) x.Klassen.Add(slot.Klasse.Trim());
         }
+        x.Quellen.AddRange(QuellenAus(slots));
         return x;
+    }
+
+    /// <summary>Teilnehmer-Quellen aus Grundplan-Slots (ohne Doppelte).</summary>
+    private static List<PlanQuelle> QuellenAus(IEnumerable<GrundplanSlot> slots)
+    {
+        var ergebnis = new List<PlanQuelle>();
+        var gesehen = new HashSet<string>(Cmp);
+        foreach (var s in slots)
+        {
+            string key = (s.LerngruppeKey ?? "").Trim();
+            if (key.Length == 0) continue;
+            string typ = string.IsNullOrWhiteSpace(s.LerngruppeTyp) ? "Klasse" : s.LerngruppeTyp.Trim();
+            string? sg = string.IsNullOrWhiteSpace(s.Schuelergruppe) ? null : s.Schuelergruppe.Trim();
+            if (!gesehen.Add($"{typ}|{key}|{sg}")) continue;
+            ergebnis.Add(new PlanQuelle(typ, key, (s.Klasse ?? "").Trim(), sg));
+        }
+        return ergebnis;
+    }
+
+    /// <summary>
+    /// Quellen einer verlegten bzw. zusätzlichen Stunde: aus dem Grundplan der UNr dieser
+    /// Lehrkraft; ohne Treffer aus den Klassen des Vertretungseintrags (nur echte Klassen).
+    /// </summary>
+    private static void SetzeQuellen(
+        Std x, int? unr, string lehrer, List<string> eKlassen, Dictionary<string, List<PlanQuelle>> quellenJeUNr)
+    {
+        if (unr.HasValue && quellenJeUNr.TryGetValue(UNrSchluessel(unr.Value, lehrer), out var q) && q.Count > 0)
+        {
+            x.Quellen.Clear();
+            x.Quellen.AddRange(q);
+            return;
+        }
+        if (x.Quellen.Count > 0) return;
+        foreach (var k in eKlassen.Where(k => KlassenMuster.IsMatch(k)).Distinct(Cmp))
+            x.Quellen.Add(new PlanQuelle("Klasse", k.ToUpperInvariant(), k, null));
     }
 
     /// <summary>Stunde, die im Grundplan nicht vorkommt (z. B. Verlegung auf eine freie Stunde).</summary>
@@ -403,7 +584,7 @@ public static class WochenplanService
         }
     }
 
-    private static bool Passt(Std x, WochenZielArt art, HashSet<string> werte)
+    private static bool Passt(Std x, WochenZielArt art, HashSet<string> werte, Func<string, bool> gruppeFertig)
     {
         // Vertretungsbereitschaft (VBer), UV-Stunden und Pseudofächer (PSF…, Art „Pseudo")
         // sind Dienste der Lehrkraft, kein Unterricht einer Lerngruppe.
@@ -413,11 +594,33 @@ public static class WochenplanService
             WochenZielArt.Lehrer => werte.Contains(x.Lehrer)
                                     || (x.OriginalLehrer != null && werte.Contains(x.OriginalLehrer)),
             WochenZielArt.Klasse => !bereitschaft && (x.Klassen.Overlaps(werte) || x.Gruppen.Overlaps(werte)),
+            WochenZielArt.Schueler => !bereitschaft && PasstSchueler(x, werte, gruppeFertig),
             _ => !bereitschaft && x.Gruppen.Overlaps(werte)
         };
     }
 
-    private static WochenStundeDto ZuDto(Std x) => new(
+    /// <summary>
+    /// Schülerplan (Phase 3.1): Eine Stunde mit zusammengestellter Sek-I-Gruppe (Religion, WP …)
+    /// sieht nur, wer in der Gruppe ist; sonst wie bisher alle Schüler der genannten Klasse(n).
+    /// </summary>
+    private static bool PasstSchueler(Std x, HashSet<string> werte, Func<string, bool> gruppeFertig)
+    {
+        if (x.Quellen.Count == 0) return x.Gruppen.Overlaps(werte);
+        foreach (var q in x.Quellen)
+        {
+            if (q.Typ == "Klasse" && q.Schuelergruppe != null && gruppeFertig(q.Schuelergruppe))
+            {
+                if (werte.Contains(q.Schuelergruppe)) return true;
+            }
+            else if (werte.Contains(q.Key))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static WochenStundeDto ZuDto(Std x, bool erfasst) => new(
         x.Stunde,
         x.UNr,
         x.Fach,
@@ -430,7 +633,11 @@ public static class WochenplanService
         x.Art,
         x.Status,
         x.Info,
-        x.Geaendert);
+        x.Geaendert,
+        x.GrundUNr,
+        x.GrundLehrer,
+        KlassenbuchMoeglich(x.Art, x.Status, x.Quellen),
+        erfasst);
 
     // =================================================================
     //  Hilfsfunktionen

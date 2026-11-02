@@ -20,6 +20,7 @@ public class AppDbContext : DbContext
     public DbSet<Lektion> Lektionen => Set<Lektion>();                       // Tabelle KlassenbuchLektionen (Phase 3.1)
     public DbSet<Anwesenheit> Anwesenheiten => Set<Anwesenheit>();           // Phase 3.1
     public DbSet<KlassenbuchProtokoll> KlassenbuchProtokolle => Set<KlassenbuchProtokoll>(); // Phase 3.1
+    public DbSet<Entschuldigung> Entschuldigungen => Set<Entschuldigung>();  // Phase 3.2
 
     // Grundplan + Kalender (Phase 2, Schritt 1)
     public DbSet<GrundplanVersion> GrundplanVersionen => Set<GrundplanVersion>();
@@ -80,6 +81,20 @@ public class AppDbContext : DbContext
             .OnDelete(DeleteBehavior.Cascade);
         b.Entity<Anwesenheit>().HasIndex(a => new { a.LektionId, a.SchuelerId }).IsUnique();
         b.Entity<Anwesenheit>().HasIndex(a => a.SchuelerId);
+
+        // Phase 3.2: Entschuldigungen (Zeitraum je Schüler). Wird eine gelöscht, setzt der Dienst
+        // die abgedeckten Fehlstunden selbst zurück auf „offen" (Verweis zusätzlich SetNull).
+        b.Entity<Entschuldigung>()
+            .HasOne(e => e.Schueler!)
+            .WithMany()
+            .HasForeignKey(e => e.SchuelerId)
+            .OnDelete(DeleteBehavior.Cascade);
+        b.Entity<Entschuldigung>().HasIndex(e => new { e.SchuelerId, e.Von });
+        b.Entity<Anwesenheit>()
+            .HasOne<Entschuldigung>()
+            .WithMany()
+            .HasForeignKey(a => a.EntschuldigungId)
+            .OnDelete(DeleteBehavior.SetNull);
 
         b.Entity<KlassenbuchProtokoll>().HasIndex(p => p.LektionId);
         b.Entity<KlassenbuchProtokoll>().HasIndex(p => p.Gruppe);

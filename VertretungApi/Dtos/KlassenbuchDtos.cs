@@ -53,7 +53,11 @@ public record KbTeilnehmerDto(
     string? Klasse,                        // Klasse (Sek I) bzw. Stufe (Sek II)
     string Status,
     int? Minuten,                          // nur bei Verspaetet
-    bool NichtInListe);                    // hat einen Eintrag, gehört aber nicht mehr zur Liste
+    bool NichtInListe,                     // hat einen Eintrag, gehört aber nicht mehr zur Liste
+    string? Bewertung,                     // Phase 3.2: Offen | Entschuldigt | Unentschuldigt (null = keine Fehlzeit)
+    bool Festgelegt,                       // von KL/SK/Admin einzeln bewertet
+    string? FestgelegtVon,
+    bool Gesperrt);                        // festgelegt und die angemeldete Person darf die Zeile nicht ändern
 
 /// <summary>Sek-I-Gruppe der Stunde, die noch nicht zusammengestellt ist.</summary>
 public record KbOffeneGruppeDto(

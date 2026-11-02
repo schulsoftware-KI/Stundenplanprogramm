@@ -279,6 +279,80 @@
     </section>
   </main>
 
+  <!-- Fehlzeiten (Phase 3.2): nicht erfasste Stunden, Kurse, Klassen/Stufen, Schülerdetail
+       mit Entschuldigungen. Personenbezogenes nur im Arbeitsspeicher; beim Verlassen geleert. -->
+  <main id="fehlzeiten" class="verwaltung fehlzeiten" hidden>
+    <div class="verw-kopf">
+      <button id="fzZurueck" class="textknopf" type="button">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span id="fzZurueckText">Zum Plan</span>
+      </button>
+    </div>
+    <div id="fzReiter" class="modi verw-reiter" role="tablist" aria-label="Bereich" hidden></div>
+    <p id="fzFehler" class="fehler" role="alert" hidden></p>
+
+    <!-- Nicht erfasste Stunden -->
+    <section id="fzNe" class="fz-bereich" aria-label="Nicht erfasste Stunden" hidden>
+      <div id="fzNeWahl" class="modi fz-wahl" role="group" aria-label="Welche Stunden?"></div>
+      <div id="fzNeFilter" class="k-filter" hidden>
+        <label for="fzNeLehrer" class="vh">Lehrkraft</label>
+        <select id="fzNeLehrer" class="eingabe"></select>
+        <label for="fzNeKlasse" class="vh">Klasse oder Stufe</label>
+        <select id="fzNeKlasse" class="eingabe"></select>
+      </div>
+      <p id="fzNeInfo" class="such-info" role="status"></p>
+      <ul id="fzNeListe" class="k-liste" aria-label="Stunden ohne Anwesenheit"></ul>
+    </section>
+
+    <!-- Meine Kurse -->
+    <section id="fzKurse" class="fz-bereich" aria-label="Meine Kurse" hidden>
+      <p id="fzKurseInfo" class="such-info" role="status"></p>
+      <ul id="fzKurseListe" class="k-liste" aria-label="Unterrichte"></ul>
+    </section>
+
+    <!-- Klasse/Stufe wählen -->
+    <div id="fzKlasseBox" class="fz-bereich" hidden>
+      <label for="fzKlasseWahl" class="vh">Klasse oder Stufe</label>
+      <select id="fzKlasseWahl" class="eingabe"></select>
+    </div>
+
+    <!-- Liste: Klasse/Stufe oder Unterricht -->
+    <section id="fzListe" class="fz-bereich" aria-labelledby="fzListeTitel" hidden>
+      <div class="karte kb-kopf">
+        <p id="fzListeWann" class="kb-wann"></p>
+        <h2 id="fzListeTitel" class="kb-fach"></h2>
+        <p id="fzListeInfo" class="kb-wer"></p>
+      </div>
+      <div class="tabelle-huelle fz-huelle">
+        <table class="tabelle fz-tabelle">
+          <thead><tr>
+            <th scope="col">Name</th>
+            <th scope="col" class="zahl"><abbr title="Fehlstunden">Fehlst.</abbr></th>
+            <th scope="col" class="zahl">offen</th>
+            <th scope="col" class="zahl"><abbr title="unentschuldigt">unent.</abbr></th>
+            <th scope="col" class="zahl"><abbr title="Verspätungen">Versp.</abbr></th>
+          </tr></thead>
+          <tbody id="fzListeZeilen"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Schüler -->
+    <section id="fzSchueler" class="fz-bereich" aria-labelledby="fzSName" hidden>
+      <div class="karte kb-kopf">
+        <p id="fzSWann" class="kb-wann"></p>
+        <h2 id="fzSName" class="kb-fach"></h2>
+        <p id="fzSInfo" class="kb-wer"></p>
+      </div>
+      <div id="fzSumme" class="fz-summe"></div>
+      <div id="fzEntsch" class="fz-entsch"></div>
+      <div id="fzFaecher"></div>
+      <h3 id="fzEintraegeTitel" class="fz-titel">Einträge</h3>
+      <p id="fzEintraegeInfo" class="such-info"></p>
+      <ul id="fzEintraege" class="k-liste fz-eintraege" aria-labelledby="fzEintraegeTitel"></ul>
+    </section>
+  </main>
+
   <main id="inhalt" hidden>
     <section id="auswahl" class="auswahl" aria-label="Was möchtest du sehen?">
       <div class="modi" role="group" aria-label="Ansicht">
@@ -343,6 +417,7 @@
     </div>
     <button id="meinPlan" class="menuepunkt" type="button">Mein Plan</button>
     <button id="kbGruppenKnopf" class="menuepunkt" type="button" hidden>Meine Gruppen</button>
+    <button id="fzKnopf" class="menuepunkt" type="button" hidden>Fehlzeiten</button>
     <button id="kontenKnopf" class="menuepunkt" type="button" hidden>Konten verwalten</button>
     <button id="pwAendernKnopf" class="menuepunkt" type="button">Passwort ändern</button>
     <button id="abmelden" class="menuepunkt" type="button">Abmelden</button>
@@ -466,6 +541,63 @@
     <button id="khZu" class="menuepunkt schliessen" type="button">Schließen</button>
   </dialog>
 
+  <!-- Fehlzeiten: eine Fehlstunde bewerten -->
+  <dialog id="fzBewertDialog" class="fenster" aria-labelledby="fbTitel">
+    <h2 id="fbTitel" class="karte-titel">Fehlstunde bewerten</h2>
+    <p id="fbWas" class="kleingedruckt ohne-einzug"></p>
+    <fieldset class="art-wahl fb-wahl">
+      <legend class="vh">Bewertung</legend>
+      <label class="schalter gross"><input type="radio" name="fbBew" value="Entschuldigt" /> <span>entschuldigt</span></label>
+      <div id="fbGrundBox" class="fb-grund">
+        <label for="fbGrund" class="vh">Grund</label>
+        <select id="fbGrund" class="eingabe">
+          <option value="Krankheit">Krankheit</option>
+          <option value="Arzttermin">Arzttermin</option>
+          <option value="Familiaer">familiär</option>
+          <option value="Sonstiges">sonstiges</option>
+        </select>
+      </div>
+      <label class="schalter gross"><input type="radio" name="fbBew" value="Offen" /> <span>offen</span></label>
+      <label class="schalter gross"><input type="radio" name="fbBew" value="Unentschuldigt" /> <span>unentschuldigt</span></label>
+    </fieldset>
+    <p id="fbHinweis" class="kleingedruckt ohne-einzug" hidden></p>
+    <p id="fbFehler" class="fehler klein" role="alert" hidden></p>
+    <div class="knopfreihe">
+      <button id="fbSpeichern" class="hauptknopf" type="button">Speichern</button>
+      <button id="fbAbbrechen" class="textknopf" type="button">Abbrechen</button>
+    </div>
+  </dialog>
+
+  <!-- Fehlzeiten: Entschuldigung für einen Zeitraum -->
+  <dialog id="fzEntschDialog" class="fenster" aria-labelledby="feTitel">
+    <h2 id="feTitel" class="karte-titel">Entschuldigung eintragen</h2>
+    <p id="feFuer" class="kleingedruckt ohne-einzug"></p>
+    <div class="fe-daten">
+      <div>
+        <label class="feld" for="feVon">Von</label>
+        <input id="feVon" class="eingabe" type="date" />
+      </div>
+      <div>
+        <label class="feld" for="feBis">Bis</label>
+        <input id="feBis" class="eingabe" type="date" />
+      </div>
+    </div>
+    <label class="feld" for="feGrund">Grund</label>
+    <select id="feGrund" class="eingabe">
+      <option value="Krankheit">Krankheit</option>
+      <option value="Arzttermin">Arzttermin</option>
+      <option value="Familiaer">familiär</option>
+      <option value="Sonstiges">sonstiges</option>
+    </select>
+    <p class="kleingedruckt ohne-einzug fe-hinweis">Gilt für alle Fehlstunden und Verspätungen im Zeitraum – auch für
+      solche, die erst später eingetragen werden.</p>
+    <p id="feFehler" class="fehler klein" role="alert" hidden></p>
+    <div class="knopfreihe">
+      <button id="feSpeichern" class="hauptknopf" type="button">Eintragen</button>
+      <button id="feAbbrechen" class="textknopf" type="button">Abbrechen</button>
+    </div>
+  </dialog>
+
   <!-- kurze Rückmeldungen -->
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
@@ -474,6 +606,7 @@
 
   <script src="konten.js"></script>
   <script src="klassenbuch.js"></script>
+  <script src="fehlzeiten.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

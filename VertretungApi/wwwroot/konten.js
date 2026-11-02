@@ -221,6 +221,8 @@ function zeigePflicht() {
   verwaltungLeeren();
   klassenbuchLeeren();
   el("klassenbuch").hidden = true;
+  fehlzeitenLeeren();
+  el("fehlzeiten").hidden = true;
   if (state.anmeldung && !state.anmeldung.mussPasswortAendern) {
     state.anmeldung.mussPasswortAendern = true;
     anmeldungSpeichern();
@@ -330,6 +332,7 @@ function zeigeVerwaltung() {
   if (!darfKonten()) return;
   kontoSchliessen();
   if (!klassenbuchSchliessen()) return; // Klassenbuch offen mit Ungespeichertem: abgebrochen
+  fehlzeitenSchliessen();
   ladenAbbrechen();
   const admin = darfVerwalten();
   el("inhalt").hidden = true;

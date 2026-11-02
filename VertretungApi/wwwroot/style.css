@@ -1011,6 +1011,105 @@ button.kb-person:hover { background: var(--akzent-hell); }
 #kgsInfo { margin: 0 2px; }
 /* Im Klassenbuch erscheint die Rückmeldung oben unter dem Kopf – nicht über der Speichern-Leiste */
 main.klassenbuch:not([hidden]) ~ .toast { bottom: auto; top: calc(74px + env(safe-area-inset-top, 0px)); }
+main.fehlzeiten:not([hidden]) ~ .toast { bottom: auto; top: calc(74px + env(safe-area-inset-top, 0px)); }
+
+/* =====================================================================
+   Fehlzeiten (Phase 3.2)
+   ===================================================================== */
+
+main.fehlzeiten { max-width: 760px; }
+.fz-bereich { display: grid; gap: 10px; margin-bottom: 12px; }
+.fz-wahl { margin: 0; }
+.fz-wahl button[aria-pressed="true"] { background: var(--akzent); color: var(--auf-akzent); }
+#fzNeFilter { margin: 0; }
+#fzNeInfo, #fzKurseInfo, #fzEintraegeInfo { margin: 0 2px; }
+.fz-titel { margin: 6px 2px 0 2px; font-size: 1rem; font-weight: 750; }
+.fz-kopfzeile { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.fz-kopfzeile .fz-titel { margin: 0; }
+.fz-entsch:empty, #fzFaecher:empty { display: none; }
+.fz-entsch .such-info { margin: 0 2px; }
+
+/* Summen */
+.fz-summe { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.fz-karte {
+  display: grid;
+  gap: 1px;
+  padding: 12px 14px;
+  border: 1px solid var(--linie);
+  border-left: 4px solid var(--vertretung);
+  border-radius: 0 12px 12px 0;
+  background: var(--papier);
+}
+.fz-karte.offen { border-left-color: var(--verlegung); }
+.fz-karte.unent { border-left-color: var(--entfall); }
+.fz-zahl { font-size: 1.7rem; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.fz-was { font-weight: 650; }
+.fz-details { font-size: 0.82rem; color: var(--leise); }
+
+/* Tabellen (Klasse/Stufe, Unterricht, Fächer) */
+.fz-huelle { margin-top: 0; background: var(--papier); }
+.fz-tabelle th[scope="row"] { font-weight: 600; }
+.fz-tabelle .zahl { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; width: 3.4rem; padding-left: 4px; }
+.fz-tabelle th, .fz-tabelle td { padding-top: 5px; padding-bottom: 5px; }
+@media (max-width: 420px) {
+  .fz-tabelle { font-size: 0.88rem; }
+  .fz-tabelle .zahl { width: 2.8rem; padding-right: 8px; }
+}
+.fz-tabelle td.offen { color: var(--verlegung); font-weight: 750; }
+.fz-tabelle td.unent { color: var(--entfall); font-weight: 750; }
+.fz-tabelle abbr { text-decoration: none; }
+.fz-name {
+  display: grid;
+  width: 100%;
+  min-height: 40px;
+  padding: 4px 0;
+  border: none;
+  background: none;
+  text-align: left;
+  font-weight: 650;
+  color: var(--akzent);
+}
+.fz-name:hover { text-decoration: underline; }
+.fz-klasse { display: block; font-size: 0.78rem; font-weight: 500; color: var(--leise); }
+
+/* Entschuldigungen */
+.fz-ent { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; }
+.fz-ent-text { min-width: 0; overflow-wrap: anywhere; }
+.fz-ent-wer { display: block; font-size: 0.8rem; color: var(--leise); }
+.fz-ent .textknopf { flex: none; }
+.fz-ent .textknopf.warnung { color: var(--rot); }
+
+/* Einträge */
+.fz-eintrag.b-offen { border-left-color: var(--verlegung); }
+.fz-eintrag.b-unentschuldigt { border-left-color: var(--entfall); }
+.fz-eintrag.b-entschuldigt { border-left-color: var(--vertretung); }
+.fz-unten { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 10px; }
+.marke.fz-status { background: var(--frei); }
+.marke.fz-status.s-fehlt { background: var(--entfall); }
+.marke.fz-status.s-spaet { background: var(--verlegung); }
+.marke.fz-status.s-urlaub { background: var(--betreuung); }
+.marke.fz-status.s-veranst { background: var(--sonst); }
+.marke.fz-bew { background: transparent; color: var(--tinte); box-shadow: inset 0 0 0 1.5px var(--linie); }
+.marke.fz-bew.b-offen { color: var(--verlegung); box-shadow: inset 0 0 0 1.5px var(--verlegung); }
+.marke.fz-bew.b-entschuldigt { color: var(--vertretung); box-shadow: inset 0 0 0 1.5px var(--vertretung); }
+.marke.fz-bew.b-unentschuldigt { color: var(--entfall); box-shadow: inset 0 0 0 1.5px var(--entfall); }
+.fz-hinweis { font-size: 0.8rem; color: var(--leise); }
+.fz-aktion { justify-self: start; margin-top: 2px; font-size: 0.85rem; font-weight: 700; color: var(--akzent); }
+
+/* Dialoge */
+.fb-wahl { margin-top: 8px; }
+.fb-grund { margin: 0 0 6px 28px; }
+.fe-daten { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.fe-hinweis { margin-top: 10px; }
+
+/* Stundenblatt: Entschuldigung anzeigen */
+.kb-bew { font-weight: 700; }
+.kb-bew.b-entschuldigt { color: var(--vertretung); }
+.kb-bew.b-unentschuldigt { color: var(--entfall); }
+/* Festgelegt (Nachtrag 3.2): Zeile nicht änderbar für Fach-/Kurslehrkraft */
+.kb-zeile.gesperrt .kb-person { cursor: default; }
+.kb-zeile.gesperrt button.kb-person:hover { background: transparent; }
+.kb-schloss { display: grid; place-items: center; border-left: 1px solid var(--linie); color: var(--leise); }
 
 /* ---- Rückmeldung ---- */
 .toast {

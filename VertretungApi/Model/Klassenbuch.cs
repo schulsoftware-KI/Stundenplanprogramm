@@ -20,6 +20,14 @@ namespace VertretungApi.Model;
 //     Lektion als „erfasst" vermerkt ist.
 //   - KlassenbuchProtokoll: Änderungshistorie (wer, wann, alt → neu).
 //
+//  Phase 3.2 (Entschuldigungen/Fehlzeiten):
+//   - Jede Fehlstunde/Verspätung (Anwesenheit) trägt eine Bewertung
+//     (offen/entschuldigt/unentschuldigt) samt Grund-Kategorie.
+//   - Entschuldigung: Zeitraum (von–bis) eines Schülers; deckt alle
+//     Fehlstunden und Verspätungen darin ab – auch später nachgetragene.
+//     „Beurlaubt" gilt immer als entschuldigt, „schulische Veranstaltung"
+//     ist keine Fehlzeit.
+//
 //  Alle Datensätze tragen IstPseudo: in der Entwicklung nur synthetische
 //  Daten; echte SchILD-Daten kommen erst im Produktivsystem (Phase 5).
 // =====================================================================
@@ -106,7 +114,13 @@ public class Lektion
 /// <summary>Status einer Schülerin / eines Schülers in einer Lektion. Anwesend wird nicht gespeichert.</summary>
 public enum AnwesenheitStatus { Anwesend = 0, Fehlt = 1, Verspaetet = 2, Beurlaubt = 3, Schulveranstaltung = 4 }
 
-/// <summary>Abweichung von „anwesend" in einer Lektion (Phase 3.1).</summary>
+/// <summary>Bewertung einer Fehlstunde bzw. Verspätung (Phase 3.2).</summary>
+public enum FehlBewertung { Offen = 0, Entschuldigt = 1, Unentschuldigt = 2 }
+
+/// <summary>Grund einer Entschuldigung – nur als Kategorie, kein Freitext (Phase 3.2).</summary>
+public enum FehlGrund { Krankheit = 0, Arzttermin = 1, Familiaer = 2, Sonstiges = 3 }
+
+/// <summary>Abweichung von „anwesend" in einer Lektion (Phase 3.1, Bewertung Phase 3.2).</summary>
 public class Anwesenheit
 {
     public int Id { get; set; }
@@ -118,6 +132,34 @@ public class Anwesenheit
     public int? Minuten { get; set; }                  // nur bei Verspaetet
     public string? GeaendertVon { get; set; }
     public DateTime GeaendertAm { get; set; } = DateTime.UtcNow;
+
+    // Phase 3.2: Bewertung (gilt für Fehlt und Verspaetet; Beurlaubt ist immer entschuldigt).
+    public FehlBewertung Bewertung { get; set; } = FehlBewertung.Offen;
+    public FehlGrund? Grund { get; set; }
+    public int? EntschuldigungId { get; set; }         // gesetzt, wenn ein Zeitraum sie abdeckt
+    public string? BewertetVon { get; set; }
+    public DateTime? BewertetAm { get; set; }          // UTC
+    // Von Klassenleitung/Stufenkoordination/Admin bewertet (einzeln oder per Zeitraum):
+    // Die Kurslehrkraft (Oberstufe) kann die Bewertung dann nicht mehr ändern.
+    public bool Festgelegt { get; set; }
+}
+
+/// <summary>
+/// Entschuldigung eines Schülers für einen Zeitraum (Phase 3.2). Eingetragen von Klassenleitung
+/// bzw. Stufenkoordination oder Admin; deckt alle Fehlstunden und Verspätungen von
+/// <see cref="Von"/> bis <see cref="Bis"/> ab.
+/// </summary>
+public class Entschuldigung
+{
+    public int Id { get; set; }
+    public int SchuelerId { get; set; }
+    public Schueler? Schueler { get; set; }
+    public DateOnly Von { get; set; }
+    public DateOnly Bis { get; set; }
+    public FehlGrund Grund { get; set; }
+    public string ErfasstVon { get; set; } = "";
+    public DateTime ErfasstAm { get; set; } = DateTime.UtcNow;   // UTC
+    public bool IstPseudo { get; set; }
 }
 
 /// <summary>
@@ -130,7 +172,7 @@ public class KlassenbuchProtokoll
     public int Id { get; set; }
     public DateTime Zeit { get; set; } = DateTime.UtcNow;   // UTC
     public string Akteur { get; set; } = "";                // Benutzername
-    public string Art { get; set; } = "";                   // Anwesenheit | Erfasst | Gruppe
+    public string Art { get; set; } = "";                   // Anwesenheit | Erfasst | Gruppe | Bewertung | Entschuldigung
     public int? LektionId { get; set; }
     public string? Gruppe { get; set; }                     // Schülergruppe bei Art "Gruppe"
     public int? SchuelerId { get; set; }

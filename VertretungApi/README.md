@@ -267,6 +267,53 @@ Status. Bei Doppelstunden bietet die 1. Stunde den Schalter „Auch für die 2. 
 nur im Arbeitsspeicher, nie im Browser-Speicher (ein Offline-Speicher für freigegebene
 Schulverwaltungs-PCs folgt später).
 
+## Fehlzeiten und Entschuldigungen (Phase 3.2)
+
+| Methode | Pfad | Zweck | Auth |
+|---|---|---|---|
+| GET | `/api/fehlzeiten/rechte` | was darf ich sehen (Lehrkraft, Admin, Klassen/Stufen) | Personal |
+| GET | `/api/fehlzeiten/nicht-erfasst?ansicht=ich\|zustaendig\|alle&lehrer=&klasse=` | Stunden ohne Anwesenheit (ab `Klassenbuch:ErfassungAb`, offen ab dem Folgetag; höchstens 500 + Anzahl je Lehrkraft) | ich: Lehrkraft · zustaendig: KL/SK · alle: Admin |
+| GET | `/api/fehlzeiten/unterrichte` | „Meine Kurse“ (Unterrichte der Lehrkraft im gültigen Grundplan) | Personal |
+| GET | `/api/fehlzeiten/unterricht?unr=&lehrer=` | Schüler eines Unterrichts mit Summen | die Lehrkraft selbst, Admin |
+| GET | `/api/fehlzeiten/klasse/{klasse}` | Schüler einer Klasse bzw. Stufe (EF/Q1/Q2) mit Summen | KL/SK zuständig, Admin |
+| GET | `/api/fehlzeiten/schueler/{id}?unr=&lehrer=` | Fehlzeiten eines Schülers (Summen, je Fach, Einträge, Entschuldigungen) | Personal (Lehrkräfte ohne Zuständigkeit: nur Einträge aus eigenen Stunden) |
+| GET | `/api/fehlzeiten/ich` | eigene Fehlzeiten | Schülerkonto |
+| POST | `/api/fehlzeiten/schueler/{id}/entschuldigung` | Zeitraum entschuldigen `{ von, bis, grund }` | KL/SK zuständig, Admin |
+| DELETE | `/api/fehlzeiten/entschuldigung/{id}` | Entschuldigung löschen (Stunden wieder „offen“) | KL/SK zuständig, Admin |
+| PUT | `/api/fehlzeiten/eintrag/{id}` | eine Fehlstunde/Verspätung bewerten `{ bewertung, grund? }` | KL/SK zuständig, Admin; Kurslehrkraft der Oberstufe in eigenen Kursstunden |
+
+Ohne `von`/`bis` gilt das laufende Schuljahr laut Kalender.
+
+- **Zählung:** Fehlstunden = „fehlt“ + „beurlaubt“ (beurlaubt = entschuldigt); Verspätungen getrennt
+  (Anzahl, Minuten); „schulische Veranstaltung“ ist keine Fehlzeit.
+- **Bewertung** je Fehlstunde/Verspätung: `Offen`, `Entschuldigt` (mit Grund `Krankheit`,
+  `Arzttermin`, `Familiaer`, `Sonstiges` – kein Freitext) oder `Unentschuldigt`. Unentschuldigt
+  wird nur von Hand gesetzt, es gibt keine Frist.
+- **Entschuldigung (Zeitraum):** Sie deckt alle Fehlstunden und Verspätungen von–bis ab, auch
+  später nachgetragene (beim Speichern im Stundenblatt). Wird sie gelöscht, sind die Stunden wieder
+  „offen“, außer ein anderer Zeitraum deckt sie ab.
+- **Oberstufe:** Die Kurslehrkraft (Lehrkraft laut Plan, nicht die Vertretung) bewertet in ihren
+  eigenen Kursstunden. Bewertungen von KL/SK/Admin und Zeitraum-Entschuldigungen sind
+  **festgelegt**; dann kann die Kurslehrkraft nichts mehr ändern. Setzt die Stufenkoordination
+  eine Stunde zurück auf „offen“, ist sie wieder frei.
+- **Festgelegt im Stundenblatt:** Eine von KL/SK/Admin **einzeln** bewertete Fehlstunde/Verspätung
+  kann die Fach- bzw. Kurslehrkraft auch über die Anwesenheit nicht mehr ändern (Teilnehmer mit
+  `festgelegt`, `festgelegtVon`, `gesperrt`; `PUT /api/klassenbuch/stunde` antwortet sonst 403).
+  KL/SK/Admin dürfen ändern (die App fragt einmal nach). Über einen Zeitraum entschuldigte Stunden
+  bleiben für die Lehrkraft änderbar.
+- **Historie** (`KlassenbuchProtokolle`, Art `Bewertung` bzw. `Entschuldigung`): jede Bewertung
+  alt → neu, jede Entschuldigung (eingetragen/gelöscht).
+- **Schema:** neue Tabelle `Entschuldigungen`, neue Spalten in `Anwesenheiten` (`Bewertung`, `Grund`,
+  `EntschuldigungId`, `BewertetVon`, `BewertetAm`, `Festgelegt`). Die Schema-Nachrüstung ergänzt sie;
+  die DB muss nicht gelöscht werden.
+- **Einstellung** `Klassenbuch:ErfassungAb` (Standard `2026-11-02`): Ab diesem Tag zählen Stunden
+  ohne Anwesenheit als „nicht erfasst“.
+
+In der PWA: Kontomenü → „Fehlzeiten“ (Personal) bzw. „Meine Fehlzeiten“ (Schüler). Reiter
+„Nicht erfasst“ (Antippen öffnet das Stundenblatt), „Meine Kurse“ und „Klasse/Stufe“ bzw.
+„Klassen“ (Admin); Schülerdetail mit Summen, Entschuldigungen und Einträgen. Im Stundenblatt
+steht bei einer fehlenden Person „entschuldigt“ bzw. „unentschuldigt“.
+
 ## Produktiv: Migrations statt EnsureCreated
 
 `EnsureCreated` ist nur für die Entwicklung gedacht und verträgt sich **nicht** mit Migrations.
@@ -284,8 +331,7 @@ ersetzen und `Database:SchemaNachruesten` auf `false` setzen.
 ## Nächste Schritte
 
 1. **Schülerkonten aus SchILD** (Phase 5): Import statt Pseudodaten, Zuordnung über `ExtId`.
-2. **Klassenbuch (Phase 3):** 3.2 Entschuldigungen + Fehlzeiten, 3.3 Inhalte/Hausaufgaben,
-   3.4 Klassenbucheinträge.
+2. **Klassenbuch (Phase 3):** 3.3 Inhalte/Hausaufgaben, 3.4 Klassenbucheinträge.
 3. **Web-Push:** Benachrichtigung der Apps bei Änderung.
 4. **Produktiv:** Schlüssel aus Umgebungsvariablen, EF-Migrations, PostgreSQL, CORS auf die
    App-Adresse einschränken, Login-Bremse hinter dem Reverse-Proxy je echter Adresse.

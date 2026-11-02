@@ -28,6 +28,12 @@ namespace VertretungApi.Services;
 //    Gruppen zusammenstellen: Lehrkräfte der Gruppe laut Grundplan + Admin;
 //    ansehen zusätzlich Klassenleitung/Stufenkoordination der Pool-Klassen.
 //
+//  Festgelegt (Nachtrag 3.2, Nutzer 02.11.2026): Eine Fehlstunde/Verspätung,
+//  die Klassenleitung/Stufenkoordination/Admin EINZELN bewertet haben, kann
+//  nur noch von ihnen geändert werden – auch nicht über die Anwesenheit
+//  (z. B. auf „anwesend"). Über einen Entschuldigungs-Zeitraum entschuldigte
+//  Stunden bleiben für die Lehrkraft änderbar.
+//
 //  Doppelstunde (Nachtrag 3.1, Nutzer 02.11.2026): Folgt direkt dieselbe
 //  Stunde (gleiche UNr + Lehrkraft laut Grundplan), kann die Erfassung der
 //  1. Stunde beim Speichern in die 2. übernommen werden – „verspätet" wird
@@ -55,7 +61,7 @@ public sealed record KbErgebnis(int Status, string? Fehler = null, bool Konflikt
 public static class KlassenbuchService
 {
     private static readonly StringComparer Cmp = StringComparer.OrdinalIgnoreCase;
-    private static readonly StringComparer NamenCmp = DeutscheSortierung();
+    internal static readonly StringComparer NamenCmp = DeutscheSortierung();
 
     /// <summary>Namen deutsch sortieren (Ö bei O); ohne Sprachdaten auf dem Server ordinal.</summary>
     private static StringComparer DeutscheSortierung()
@@ -67,7 +73,7 @@ public static class KlassenbuchService
     /// <summary>Höchstens so viele Minuten Verspätung.</summary>
     public const int MaxMinuten = 240;
 
-    private sealed record Teilnehmer(int Id, string Vorname, string Nachname, string? Klasse, bool IstPseudo);
+    internal sealed record Teilnehmer(int Id, string Vorname, string Nachname, string? Klasse, bool IstPseudo);
 
     public static DateOnly Heute() => DateOnly.FromDateTime(DateTime.Now);
 
@@ -157,8 +163,12 @@ public static class KlassenbuchService
         {
             inListe.Add(t.Id);
             eintraege.TryGetValue(t.Id, out var a);
+            bool fest = a != null && EinzelnFestgelegt(a);
             teilnehmer.Add(new KbTeilnehmerDto(t.Id, t.Vorname, t.Nachname, t.Klasse,
-                (a?.Status ?? AnwesenheitStatus.Anwesend).ToString(), a?.Minuten, false));
+                (a?.Status ?? AnwesenheitStatus.Anwesend).ToString(), a?.Minuten, false,
+                a == null ? null : BewertungText(a),
+                fest, fest ? a!.BewertetVon : null,
+                fest && !FehlzeitenService.IstLeitungFuer(u, t.Klasse, null)));
         }
 
         // Einträge von Schülern, die nicht (mehr) zur Liste gehören (z. B. Gruppe geändert):
@@ -174,8 +184,13 @@ public static class KlassenbuchService
             foreach (var p in personen)
             {
                 var a = eintraege[p.Id];
+                string? kl = klassen.TryGetValue(p.Id, out var k) ? k : null;
+                bool fest = EinzelnFestgelegt(a);
                 teilnehmer.Add(new KbTeilnehmerDto(p.Id, p.Vorname, p.Nachname,
-                    klassen.TryGetValue(p.Id, out var k) ? k : p.Stufe, a.Status.ToString(), a.Minuten, true));
+                    kl ?? p.Stufe, a.Status.ToString(), a.Minuten, true,
+                    BewertungText(a),
+                    fest, fest ? a.BewertetVon : null,
+                    fest && !FehlzeitenService.IstLeitungFuer(u, kl, p.Stufe)));
             }
         }
 
@@ -303,6 +318,22 @@ public static class KlassenbuchService
             if (neu.Keys.Any(id => !erlaubt.Contains(id)))
                 return new KbErgebnis(400, "Mindestens eine Schülerin bzw. ein Schüler gehört nicht zu dieser Stunde.");
 
+            // Nachtrag 3.2: einzeln festgelegte Fehlstunden ändert nur KL/SK/Admin.
+            if (lektion != null)
+            {
+                foreach (var f in lektion.Anwesenheiten.Where(EinzelnFestgelegt))
+                {
+                    var (sNeuF, mNeuF) = neu.TryGetValue(f.SchuelerId, out var nf) ? nf : (AnwesenheitStatus.Anwesend, (int?)null);
+                    if (sNeuF == f.Status && mNeuF == f.Minuten) continue;
+                    if (await LeitungFuerSchuelerAsync(db, u, f.SchuelerId, liste)) continue;
+                    var name = await db.Schueler.AsNoTracking().Where(x => x.Id == f.SchuelerId)
+                        .Select(x => x.Vorname + " " + x.Nachname).FirstOrDefaultAsync();
+                    return new KbErgebnis(403,
+                        $"Die Fehlstunde von {name ?? "einem Schüler"} wurde von {f.BewertetVon ?? "der Klassenleitung bzw. Stufenkoordination"} " +
+                        "festgelegt. Ändern kann sie nur die Klassenleitung bzw. Stufenkoordination.");
+                }
+            }
+
             var jetzt = DateTime.UtcNow;
             bool pseudo = liste.Any(t => t.IstPseudo);
             bool neuAngelegt = lektion == null;
@@ -325,6 +356,17 @@ public static class KlassenbuchService
 
             var alt = lektion.Anwesenheiten.ToDictionary(a => a.SchuelerId);
             var historie = new List<KlassenbuchProtokoll>();
+
+            // Phase 3.2: Entschuldigungen, die diesen Tag abdecken – neue Fehlstunden und
+            // Verspätungen gelten dann gleich als entschuldigt.
+            var neuIds = neu.Keys.ToList();
+            var abdeckend = neuIds.Count == 0
+                ? new Dictionary<int, Entschuldigung>()
+                : (await db.Entschuldigungen.AsNoTracking()
+                        .Where(e => neuIds.Contains(e.SchuelerId) && e.Von <= tag.Datum && e.Bis >= tag.Datum)
+                        .ToListAsync())
+                    .GroupBy(e => e.SchuelerId)
+                    .ToDictionary(g => g.Key, g => g.OrderByDescending(e => e.ErfasstAm).First());
             if (neuAngelegt)
             {
                 string text = neu.Count == 0 ? "alle anwesend" : $"erfasst, {neu.Count} Abweichung(en)";
@@ -353,10 +395,12 @@ public static class KlassenbuchService
                     a.Minuten = mNeu;
                     a.GeaendertVon = u.Name;
                     a.GeaendertAm = jetzt;
+                    if (a.Bewertung == FehlBewertung.Offen && a.EntschuldigungId == null)
+                        ZeitraumAnwenden(a, abdeckend);
                 }
                 else
                 {
-                    db.Anwesenheiten.Add(new Anwesenheit
+                    var neueA = new Anwesenheit
                     {
                         LektionId = lektion.Id,
                         SchuelerId = id,
@@ -364,7 +408,9 @@ public static class KlassenbuchService
                         Minuten = mNeu,
                         GeaendertVon = u.Name,
                         GeaendertAm = jetzt
-                    });
+                    };
+                    ZeitraumAnwenden(neueA, abdeckend);
+                    db.Anwesenheiten.Add(neueA);
                 }
             }
 
@@ -429,6 +475,50 @@ public static class KlassenbuchService
             .ToList();
     }
 
+    /// <summary>
+    /// Von Klassenleitung/Stufenkoordination/Admin einzeln bewertet (nicht über einen Zeitraum):
+    /// Die Fach- bzw. Kurslehrkraft kann die Zeile nicht mehr ändern.
+    /// </summary>
+    public static bool EinzelnFestgelegt(Anwesenheit a)
+        => a.Festgelegt && a.EntschuldigungId == null
+           && a.Status is AnwesenheitStatus.Fehlt or AnwesenheitStatus.Verspaetet;
+
+    /// <summary>Ist die angemeldete Person Klassenleitung/Stufenkoordination dieses Schülers (oder Admin)?</summary>
+    private static async Task<bool> LeitungFuerSchuelerAsync(AppDbContext db, KbNutzer u, int schuelerId, List<Teilnehmer> liste)
+    {
+        if (u.IstAdmin) return true;
+        if (!u.IstKlassenleitungOderKoordination) return false;
+        var t = liste.FirstOrDefault(x => x.Id == schuelerId);
+        if (t != null && FehlzeitenService.IstLeitungFuer(u, t.Klasse, null)) return true;
+        var stufe = await db.Schueler.AsNoTracking().Where(x => x.Id == schuelerId).Select(x => x.Stufe).FirstOrDefaultAsync();
+        var klassen = await KlassenAsync(db, new List<int> { schuelerId }, "");
+        return FehlzeitenService.IstLeitungFuer(u, klassen.TryGetValue(schuelerId, out var k) ? k : null, stufe);
+    }
+
+    /// <summary>Fehlstunde/Verspätung, die ein Entschuldigungs-Zeitraum abdeckt: als entschuldigt markieren.</summary>
+    private static void ZeitraumAnwenden(Anwesenheit a, Dictionary<int, Entschuldigung> abdeckend)
+    {
+        if (a.Status is not (AnwesenheitStatus.Fehlt or AnwesenheitStatus.Verspaetet)) return;
+        if (!abdeckend.TryGetValue(a.SchuelerId, out var e)) return;
+        a.Bewertung = FehlBewertung.Entschuldigt;
+        a.Grund = e.Grund;
+        a.EntschuldigungId = e.Id;
+        a.BewertetVon = e.ErfasstVon;
+        a.BewertetAm = DateTime.UtcNow;
+        a.Festgelegt = true;   // Zeitraum-Entschuldigungen tragen nur KL/SK/Admin ein
+    }
+
+    /// <summary>
+    /// Bewertung für die Anzeige: Beurlaubt = entschuldigt, schulische Veranstaltung = keine
+    /// Fehlzeit (null); sonst die gespeicherte Bewertung (Offen | Entschuldigt | Unentschuldigt).
+    /// </summary>
+    public static string? BewertungText(Anwesenheit a) => a.Status switch
+    {
+        AnwesenheitStatus.Beurlaubt => FehlBewertung.Entschuldigt.ToString(),
+        AnwesenheitStatus.Fehlt or AnwesenheitStatus.Verspaetet => a.Bewertung.ToString(),
+        _ => null
+    };
+
     public static string StatusText(AnwesenheitStatus s, int? minuten) => s switch
     {
         AnwesenheitStatus.Fehlt => "fehlt",
@@ -442,7 +532,7 @@ public static class KlassenbuchService
     //  Teilnehmer
     // =================================================================
 
-    private static async Task<(List<Teilnehmer> Liste, List<KbOffeneGruppeDto> Offen, List<string> Hinweise)>
+    internal static async Task<(List<Teilnehmer> Liste, List<KbOffeneGruppeDto> Offen, List<string> Hinweise)>
         TeilnehmerAsync(AppDbContext db, KbNutzer u, TagKontext tag, PlanStunde st)
     {
         var hinweise = new List<string>();
@@ -526,7 +616,7 @@ public static class KlassenbuchService
     }
 
     /// <summary>Klasse (Lerngruppe Typ Klasse) je Schüler, bevorzugt im angegebenen Schuljahr.</summary>
-    private static async Task<Dictionary<int, string>> KlassenAsync(AppDbContext db, List<int> schuelerIds, string schuljahr)
+    internal static async Task<Dictionary<int, string>> KlassenAsync(AppDbContext db, List<int> schuelerIds, string schuljahr)
     {
         if (schuelerIds.Count == 0) return new Dictionary<int, string>();
         var zeilen = await db.Zugehoerigkeiten.AsNoTracking()
@@ -740,7 +830,7 @@ public static class KlassenbuchService
             .Distinct(Cmp).OrderBy(l => l, Cmp).ToList());
 
     /// <summary>Grundplan-Version, die heute gilt (sonst die erste des Schuljahres bzw. die neueste).</summary>
-    private static async Task<GrundplanVersion?> AktuelleVersionAsync(AppDbContext db)
+    internal static async Task<GrundplanVersion?> AktuelleVersionAsync(AppDbContext db)
     {
         var heute = Heute();
         var kal = await db.Kalender.AsNoTracking()
@@ -806,6 +896,6 @@ public static class KlassenbuchService
             .ThenByDescending(l => l.Id)
             .FirstOrDefault();
 
-    private static bool Gleich(string? a, string? b)
+    internal static bool Gleich(string? a, string? b)
         => a != null && b != null && string.Equals(a.Trim(), b.Trim(), StringComparison.OrdinalIgnoreCase);
 }

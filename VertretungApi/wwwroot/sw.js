@@ -6,7 +6,7 @@
 //    Anfragen mit Anmeldung (Authorization) landen nie im Cache.
 //  Neue Version = neuer Cache-Name; alte Caches werden beim Aktivieren gelöscht.
 
-const CACHE = "stundenplan-shell-v7";
+const CACHE = "stundenplan-shell-v8";
 const SHELL = [
   "./",
   "index.html",
@@ -14,6 +14,7 @@ const SHELL = [
   "app.js",
   "konten.js",
   "klassenbuch.js",
+  "fehlzeiten.js",
   "manifest.webmanifest",
   "icons/icon-192.png",
   "icons/icon-512.png",

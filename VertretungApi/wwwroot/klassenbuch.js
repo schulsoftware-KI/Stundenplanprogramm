@@ -37,12 +37,14 @@ const KB_MAX_MINUTEN = 240;
 
 const kb = {
   ansicht: null,          // "stunde" | "gruppe" | "gruppen"
+  herkunft: "plan",       // Stundenblatt geöffnet aus "plan" | "fehlzeiten" (Phase 3.2)
   ladeNr: 0,
   schluessel: null,       // { datum, stunde, unr, lehrer } des Stundenblatts
   blatt: null,            // Antwort GET api/klassenbuch/stunde
   stand: new Map(),       // Schüler-Id -> { status, minuten } (bearbeitet)
   geaendert: false,
   folgeAn: true,          // Doppelstunde: 2. Stunde beim Speichern mit erfassen
+  festOk: new Set(),      // festgelegte Zeilen, deren Änderung die Leitung bestätigt hat
   speichert: false,
   konflikt: false,
   statusFuer: null,       // Schüler im Statusdialog
@@ -126,6 +128,7 @@ function zeigeKlassenbuch(ansicht) {
   kb.ansicht = ansicht;
   el("inhalt").hidden = true;
   el("verwaltung").hidden = true;
+  el("fehlzeiten").hidden = true;   // Zustand bleibt erhalten (Rückkehr aus dem Stundenblatt)
   el("klassenbuch").hidden = false;
   el("aktualisieren").hidden = false;
   el("kbStunde").hidden = ansicht !== "stunde";
@@ -140,6 +143,7 @@ function zeigeKlassenbuch(ansicht) {
   el("grundplan").textContent = "";
   const zurueck = ansicht === "gruppe" && kb.gruppeZurueck === "stunde" ? "Zurück zur Stunde"
     : ansicht === "gruppe" && kb.gruppeZurueck === "gruppen" ? "Zurück zu den Gruppen"
+    : ansicht === "stunde" && kb.herkunft === "fehlzeiten" ? "Zurück zur Liste"
     : "Zum Plan";
   el("kbZurueckText").textContent = zurueck;
   window.scrollTo(0, 0);
@@ -149,6 +153,7 @@ function zeigeKlassenbuch(ansicht) {
 function klassenbuchLeeren() {
   kb.ladeNr++;
   kb.ansicht = null;
+  kb.herkunft = "plan";
   kb.schluessel = null;
   kb.blatt = null;
   kb.stand = new Map();
@@ -191,7 +196,9 @@ function klassenbuchSchliessen() {
 /** Zurück zum Plan (fragt bei Ungespeichertem nach). false = abgebrochen. */
 function klassenbuchVerlassen() {
   if (!klassenbuchOffen()) return true;
+  const herkunft = kb.herkunft;
   if (!klassenbuchSchliessen()) return false;
+  if (herkunft === "fehlzeiten" && fz.stapel.length) { fehlzeitenWiederZeigen(); return true; }
   el("inhalt").hidden = false;
   render();
   if (state.plan) ladeWoche({ still: true });
@@ -227,9 +234,10 @@ function kbAktualisieren() {
 //  Stundenblatt
 // ---------------------------------------------------------------------
 
-/** Aus dem Plan: Stunde s am Tag datum öffnen. */
-function stundenblattOeffnen(s, datum) {
+/** Aus dem Plan (bzw. aus „nicht erfasst"): Stunde s am Tag datum öffnen. */
+function stundenblattOeffnen(s, datum, herkunft = "plan") {
   if (!kbDarfOeffnen(s)) return;
+  kb.herkunft = herkunft;
   kb.schluessel = { datum, stunde: s.stunde, unr: s.grundUNr, lehrer: s.grundLehrer };
   kb.blatt = null;
   kb.stand = new Map();
@@ -275,6 +283,7 @@ async function stundeLaden() {
 function blattUebernehmen(d) {
   kb.blatt = d;
   kb.stand = new Map(d.teilnehmer.map((t) => [t.id, { status: t.status, minuten: t.minuten }]));
+  kb.festOk = new Set();
   kb.geaendert = false;
   kb.folgeAn = true;
   renderStunde();
@@ -288,6 +297,54 @@ const kbFolgeMoeglich = () => {
 const kbMitFolge = () => kbFolgeMoeglich() && kb.folgeAn;
 
 const kbAbweichungen = () => [...kb.stand.entries()].filter(([, v]) => v.status !== "Anwesend");
+
+/** Teilnehmer, die von Klassenleitung/Stufenkoordination/Admin einzeln festgelegt sind (Nachtrag 3.2). */
+const kbFestgelegt = (id) => {
+  const t = kb.blatt && (kb.blatt.teilnehmer || []).find((x) => x.id === id);
+  return t && t.festgelegt ? t : null;
+};
+
+/** Abweichungen, die „Alle anwesend" zurücksetzen darf (ohne festgelegte). */
+const kbAenderbareAbweichungen = () => kbAbweichungen().filter(([id]) => !kbFestgelegt(id));
+
+/**
+ * Leitung ändert eine festgelegte Fehlstunde: einmal nachfragen. true = darf ändern.
+ * (Gesperrte Zeilen – Fach-/Kurslehrkraft – lassen sich gar nicht erst antippen.)
+ */
+function kbFestgelegtOk(id) {
+  const t = kbFestgelegt(id);
+  if (!t || kb.festOk.has(id)) return true;
+  const was = t.bewertung === "Entschuldigt" ? "entschuldigt" : "unentschuldigt";
+  const ok = window.confirm(`Die Fehlstunde von ${t.vorname} ${t.nachname} ist als ${was} festgelegt` +
+    (t.festgelegtVon ? ` (von ${t.festgelegtVon})` : "") + ". Wirklich ändern?");
+  if (ok) kb.festOk.add(id);
+  return ok;
+}
+
+function kbGesperrtHinweis(t) {
+  toast(`Festgelegt von ${t.festgelegtVon || "der Klassenleitung bzw. Stufenkoordination"} – ` +
+    "ändern kann das nur die Klassenleitung bzw. Stufenkoordination.");
+}
+
+/** Kleines Schloss für gesperrte Zeilen. */
+function kbSchloss() {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "18");
+  svg.setAttribute("height", "18");
+  svg.setAttribute("aria-hidden", "true");
+  for (const d of ["M6.5 10.5h11a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z", "M8.5 10.5V7.8a3.5 3.5 0 0 1 7 0v2.7"]) {
+    const p = document.createElementNS(ns, "path");
+    p.setAttribute("d", d);
+    p.setAttribute("fill", "none");
+    p.setAttribute("stroke", "currentColor");
+    p.setAttribute("stroke-width", "2");
+    p.setAttribute("stroke-linejoin", "round");
+    svg.append(p);
+  }
+  return svg;
+}
 
 function kbStatusText(v, lang = false) {
   const st = KB_STATUS[v.status] || KB_STATUS.Anwesend;
@@ -328,7 +385,7 @@ function renderStunde() {
   const liste = d.teilnehmer || [];
   const keineListe = liste.length === 0;
   el("kbListeKopf").hidden = keineListe;
-  el("kbAlleDa").hidden = !d.darfSchreiben || kbAbweichungen().length === 0;
+  el("kbAlleDa").hidden = !d.darfSchreiben || kbAenderbareAbweichungen().length === 0;
   el("kbListe").replaceChildren(...liste.map(teilnehmerZeile));
   renderZahlen();
   renderLeiste();
@@ -365,9 +422,14 @@ function teilnehmerZeile(t) {
   const info = KB_STATUS[v.status] || KB_STATUS.Anwesend;
   const name = `${t.nachname}, ${t.vorname}`;
   const zeigeKlasse = !!t.klasse && ((kb.blatt.klassen || []).length !== 1 || t.nichtInListe);
+  // Phase 3.2: Entschuldigung zur (unveränderten) Fehlstunde/Verspätung anzeigen.
+  const bewertet = t.bewertung && t.bewertung !== "Offen" && v.status === t.status &&
+    (t.status === "Fehlt" || t.status === "Verspaetet");
   const unter = [
     zeigeKlasse ? h("span", { class: "kb-klasse" }, t.klasse) : null,
     t.nichtInListe ? h("span", { class: "kb-ausser" }, "nicht mehr in der Liste") : null,
+    bewertet ? h("span", { class: "kb-bew b-" + t.bewertung.toLowerCase() },
+      (t.bewertung === "Entschuldigt" ? "entschuldigt" : "unentschuldigt") + (t.festgelegt ? " · festgelegt" : "")) : null,
   ].filter(Boolean);
   const inhalt = [
     h("span", { class: "kb-namezeile" },
@@ -380,6 +442,17 @@ function teilnehmerZeile(t) {
   if (!kb.blatt.darfSchreiben) {
     return h("li", { class: klassen.join(" ") },
       h("div", { class: "kb-person nur-lesen" }, inhalt));
+  }
+  if (t.gesperrt) {
+    // Nachtrag 3.2: von KL/SK festgelegt – Fach-/Kurslehrkraft kann nicht ändern.
+    klassen.push("gesperrt");
+    return h("li", { class: klassen.join(" "), "data-id": t.id },
+      h("button", {
+        class: "kb-person", type: "button",
+        title: `Festgelegt von ${t.festgelegtVon || "der Klassenleitung bzw. Stufenkoordination"}`,
+        onclick: () => kbGesperrtHinweis(t),
+      }, inhalt, h("span", { class: "vh" }, ", festgelegt – nicht änderbar")),
+      h("span", { class: "kb-schloss", title: "festgelegt" }, kbSchloss(), h("span", { class: "vh" }, "festgelegt")));
   }
   return h("li", { class: klassen.join(" "), "data-id": t.id },
     h("button", {
@@ -398,6 +471,7 @@ function teilnehmerZeile(t) {
 
 /** Antippen des Namens: anwesend ⇄ fehlt (andere Status -> anwesend). */
 function umschalten(id) {
+  if (!kbFestgelegtOk(id)) return;
   const v = kb.stand.get(id) || { status: "Anwesend", minuten: null };
   statusSetzen(id, v.status === "Anwesend" ? "Fehlt" : "Anwesend", null);
 }
@@ -417,7 +491,7 @@ function statusSetzen(id, status, minuten) {
     alt.replaceWith(neu);
     if (fokus) neu.querySelector(fokusMehr ? ".kb-mehr" : ".kb-person").focus();
   }
-  el("kbAlleDa").hidden = !kb.blatt.darfSchreiben || kbAbweichungen().length === 0;
+  el("kbAlleDa").hidden = !kb.blatt.darfSchreiben || kbAenderbareAbweichungen().length === 0;
   renderZahlen();
   renderLeiste();
 }
@@ -535,7 +609,8 @@ async function stundeSpeichern() {
 
 function alleAnwesend() {
   if (!kb.blatt || !kb.blatt.darfSchreiben) return;
-  for (const [id, v] of kb.stand) if (v.status !== "Anwesend") kb.stand.set(id, { status: "Anwesend", minuten: null });
+  // Festgelegte Fehlstunden bleiben unberührt (nur einzeln änderbar).
+  for (const [id] of kbAenderbareAbweichungen()) kb.stand.set(id, { status: "Anwesend", minuten: null });
   kb.geaendert = true;
   el("kbListe").replaceChildren(...(kb.blatt.teilnehmer || []).map(teilnehmerZeile));
   el("kbAlleDa").hidden = true;
@@ -546,6 +621,7 @@ function alleAnwesend() {
 // ---- Statusdialog ----
 
 function statusDialogOeffnen(t) {
+  if (!kbFestgelegtOk(t.id)) return;
   kb.statusFuer = t;
   const v = kb.stand.get(t.id) || { status: "Anwesend", minuten: null };
   el("ksName").textContent = `${t.vorname} ${t.nachname}`;
@@ -875,6 +951,7 @@ function klassenbuchInit() {
   el("kbFolge").addEventListener("change", (e) => { kb.folgeAn = e.target.checked; renderLeiste(); });
   el("kbGruppenKnopf").addEventListener("click", () => {
     kontoSchliessen();
+    fehlzeitenSchliessen();
     if (verwaltungOffen()) {
       if (!startpasswoerterVerwerfen()) return;
       verwaltungLeeren();

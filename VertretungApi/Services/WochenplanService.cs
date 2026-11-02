@@ -217,54 +217,92 @@ public static class WochenplanService
     /// kein Grundplan). Klassenbezogen freie Zeiten stehen in <see cref="TagKontext.FreieKlassen"/>.
     /// </summary>
     public static async Task<TagKontext?> TagAsync(AppDbContext db, DateOnly d)
+        => (await TageAsync(db, d, d)).FirstOrDefault();
+
+    /// <summary>
+    /// Unterrichtstage von <paramref name="von"/> bis <paramref name="bis"/> mit ihren effektiven
+    /// Stunden (Phase 3.2, z. B. für „nicht erfasste Stunden"). Tage ohne Unterricht (Wochenende,
+    /// Ferien, ganz frei, kein Grundplan) fehlen in der Liste. Lädt Kalender, Grundplan-Versionen
+    /// und Vertretungstage nur einmal für den ganzen Zeitraum.
+    /// </summary>
+    public static async Task<List<TagKontext>> TageAsync(AppDbContext db, DateOnly von, DateOnly bis)
     {
-        var kal = await db.Kalender.Include(k => k.FreieZeiten)
+        var ergebnis = new List<TagKontext>();
+        if (bis < von) return ergebnis;
+
+        var kalender = await db.Kalender.AsNoTracking().Include(k => k.FreieZeiten)
+            .Where(k => k.Start <= bis && k.Ende >= von)
+            .ToListAsync();
+        if (kalender.Count == 0) return ergebnis;
+
+        var schuljahre = kalender.Select(k => k.Schuljahr).Distinct().ToList();
+        var versionen = await db.GrundplanVersionen.AsNoTracking()
+            .Where(v => schuljahre.Contains(v.Schuljahr) && v.GueltigAb <= bis)
+            .ToListAsync();
+        var vertretungsTage = await db.Tage.AsNoTracking().Include(t => t.Eintraege)
+            .Where(t => t.Datum >= von && t.Datum <= bis)
+            .ToListAsync();
+        var slotsJeVersion = new Dictionary<int, List<GrundplanSlot>>();
+
+        for (var d = von; d <= bis; d = d.AddDays(1))
+        {
+            var kal = kalender.Where(k => k.Start <= d && d <= k.Ende).OrderByDescending(k => k.Id).FirstOrDefault();
+            if (kal == null) continue;
+
+            int iso = IsoTag(d);
+            if (!RasterTage(kal).Contains(iso)) continue;
+            if (kal.FreieZeiten.Any(f => f.Von <= d && d <= f.Bis && string.IsNullOrWhiteSpace(f.Klassen)))
+                continue;
+
+            var ver = versionen
+                .Where(v => v.Schuljahr == kal.Schuljahr && v.GueltigAb <= d)
+                .OrderByDescending(v => v.GueltigAb).ThenByDescending(v => v.Id)
+                .FirstOrDefault();
+            if (ver == null) continue;
+
+            if (!slotsJeVersion.TryGetValue(ver.Id, out var slots))
+            {
+                slots = await db.GrundplanSlots.AsNoTracking().Where(s => s.VersionId == ver.Id).ToListAsync();
+                slotsJeVersion[ver.Id] = slots;
+            }
+
+            // Veröffentlichter Vertretungstag: bevorzugt aus demselben Schuljahr (wie BerechneAsync).
+            var vt = vertretungsTage.Where(t => t.Datum == d)
+                .OrderByDescending(t => t.Schuljahr == kal.Schuljahr)
+                .ThenByDescending(t => t.Id)
+                .FirstOrDefault();
+
+            var teilFrei = kal.FreieZeiten
+                .Where(f => f.Von <= d && d <= f.Bis && !string.IsNullOrWhiteSpace(f.Klassen))
+                .ToList();
+
+            var stunden = EffektiverTag(slots, iso, vt?.Eintraege, teilFrei)
+                .Select(x => new PlanStunde(
+                    x.Stunde, x.UNr, x.GrundUNr, x.Fach, x.Lehrer, x.GrundLehrer,
+                    string.IsNullOrWhiteSpace(x.OriginalLehrer) || Gleich(x.OriginalLehrer, x.Lehrer) ? null : x.OriginalLehrer,
+                    x.Raum, x.Art, x.Status, x.Info,
+                    x.Klassen.OrderBy(k => k, Cmp).ToList(),
+                    x.Gruppen.OrderBy(g => g, Cmp).ToList(),
+                    x.Quellen.ToList()))
+                .ToList();
+
+            var freieKlassen = teilFrei
+                .SelectMany(f => Liste(f.Klassen).Select(k => new FreieKlasse(k, FreiText(f))))
+                .GroupBy(f => f.Klasse, Cmp)
+                .Select(g => g.First())
+                .ToList();
+
+            ergebnis.Add(new TagKontext(d, kal.Schuljahr, ver.Id, stunden, freieKlassen));
+        }
+        return ergebnis;
+    }
+
+    /// <summary>Kalender (Schuljahr), in dem <paramref name="d"/> liegt – oder null.</summary>
+    public static Task<KalenderDb?> KalenderAsync(AppDbContext db, DateOnly d)
+        => db.Kalender.AsNoTracking()
             .Where(k => k.Start <= d && k.Ende >= d)
             .OrderByDescending(k => k.Id)
             .FirstOrDefaultAsync();
-        if (kal == null) return null;
-
-        int iso = IsoTag(d);
-        if (!RasterTage(kal).Contains(iso)) return null;
-        if (kal.FreieZeiten.Any(f => f.Von <= d && d <= f.Bis && string.IsNullOrWhiteSpace(f.Klassen)))
-            return null;
-
-        var ver = await db.GrundplanVersionen
-            .Where(v => v.Schuljahr == kal.Schuljahr && v.GueltigAb <= d)
-            .OrderByDescending(v => v.GueltigAb).ThenByDescending(v => v.Id)
-            .FirstOrDefaultAsync();
-        if (ver == null) return null;
-
-        var slots = await db.GrundplanSlots.AsNoTracking().Where(s => s.VersionId == ver.Id).ToListAsync();
-
-        // Veröffentlichter Vertretungstag: bevorzugt aus demselben Schuljahr (wie BerechneAsync).
-        var vt = (await db.Tage.AsNoTracking().Include(t => t.Eintraege).Where(t => t.Datum == d).ToListAsync())
-            .OrderByDescending(t => t.Schuljahr == kal.Schuljahr)
-            .ThenByDescending(t => t.Id)
-            .FirstOrDefault();
-
-        var teilFrei = kal.FreieZeiten
-            .Where(f => f.Von <= d && d <= f.Bis && !string.IsNullOrWhiteSpace(f.Klassen))
-            .ToList();
-
-        var stunden = EffektiverTag(slots, iso, vt?.Eintraege, teilFrei)
-            .Select(x => new PlanStunde(
-                x.Stunde, x.UNr, x.GrundUNr, x.Fach, x.Lehrer, x.GrundLehrer,
-                string.IsNullOrWhiteSpace(x.OriginalLehrer) || Gleich(x.OriginalLehrer, x.Lehrer) ? null : x.OriginalLehrer,
-                x.Raum, x.Art, x.Status, x.Info,
-                x.Klassen.OrderBy(k => k, Cmp).ToList(),
-                x.Gruppen.OrderBy(g => g, Cmp).ToList(),
-                x.Quellen.ToList()))
-            .ToList();
-
-        var freieKlassen = teilFrei
-            .SelectMany(f => Liste(f.Klassen).Select(k => new FreieKlasse(k, FreiText(f))))
-            .GroupBy(f => f.Klasse, Cmp)
-            .Select(g => g.First())
-            .ToList();
-
-        return new TagKontext(d, kal.Schuljahr, ver.Id, stunden, freieKlassen);
-    }
 
     /// <summary>
     /// Gibt es zu dieser Stunde ein Klassenbuch? Nur Unterricht, der stattfindet (nicht entfallen,
@@ -520,7 +558,7 @@ public static class WochenplanService
     }
 
     /// <summary>Teilnehmer-Quellen aus Grundplan-Slots (ohne Doppelte).</summary>
-    private static List<PlanQuelle> QuellenAus(IEnumerable<GrundplanSlot> slots)
+    internal static List<PlanQuelle> QuellenAus(IEnumerable<GrundplanSlot> slots)
     {
         var ergebnis = new List<PlanQuelle>();
         var gesehen = new HashSet<string>(Cmp);

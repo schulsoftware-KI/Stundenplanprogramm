@@ -33,6 +33,8 @@
 //  Klassenbuch (Phase 3.1, Code in klassenbuch.js): Stunden mit Klassenbuch
 //  sind für Berechtigte antippbar (Stundenblatt mit Anwesenheit); erfasste
 //  Stunden tragen ein Häkchen. Kontomenü „Meine Gruppen".
+//  Fehlzeiten (Phase 3.2, Code in fehlzeiten.js): Kontomenü „Fehlzeiten" bzw.
+//  „Meine Fehlzeiten".
 // =====================================================================
 
 const MODI = {
@@ -995,9 +997,11 @@ function zeigeAnmeldung(hinweis) {
   alleDialogeZu();
   verwaltungLeeren();
   klassenbuchLeeren();
+  fehlzeitenLeeren();
   el("inhalt").hidden = true;
   el("verwaltung").hidden = true;
   el("klassenbuch").hidden = true;
+  el("fehlzeiten").hidden = true;
   el("pflicht").hidden = true;
   el("anmeldung").hidden = false;
   el("aktualisieren").hidden = true;
@@ -1019,10 +1023,12 @@ function appStarten() {
   alleDialogeZu();
   verwaltungLeeren();
   klassenbuchLeeren();
+  fehlzeitenLeeren();
   el("anmeldung").hidden = true;
   el("pflicht").hidden = true;
   el("verwaltung").hidden = true;
   el("klassenbuch").hidden = true;
+  el("fehlzeiten").hidden = true;
   el("inhalt").hidden = false;
   el("aktualisieren").hidden = false;
   const k = el("kontoKnopf");
@@ -1182,6 +1188,7 @@ function kontoOeffnen() {
   el("meinPlan").hidden = !(istPersonal() && eigenesKuerzel());
   kontoMenueAnpassen();
   klassenbuchMenueAnpassen();
+  fehlzeitenMenueAnpassen();
   ueberallZuruecksetzen();
   kontoFehler("");
   if (typeof konto.showModal === "function") { if (!konto.open) konto.showModal(); }
@@ -1289,6 +1296,7 @@ el("nurAenderungen").addEventListener("change", (e) => {
 el("aktualisieren").addEventListener("click", () => {
   if (verwaltungOffen()) { verwaltungAktualisieren(); return; }
   if (klassenbuchOffen()) { kbAktualisieren(); return; }
+  if (fehlzeitenOffen()) { fzAktualisieren(); return; }
   ladeAuswahl();
   ladeWoche();
 });
@@ -1345,6 +1353,10 @@ el("meinPlan").addEventListener("click", () => {
   }
   if (klassenbuchOffen()) {
     if (!klassenbuchSchliessen()) return;
+    el("inhalt").hidden = false;
+  }
+  if (fehlzeitenOffen()) {
+    fehlzeitenSchliessen();
     el("inhalt").hidden = false;
   }
   state.modus = "lehrer";
@@ -1435,6 +1447,7 @@ window.addEventListener("storage", (e) => {
 async function start() {
   kontenInit();
   klassenbuchInit();
+  fehlzeitenInit();
   altlastenEntfernen();
   state.anmeldung = anmeldungLesen();
   state.anmeldungNoetig = lokal.lesen("optionen", { anmeldungNoetig: true }).anmeldungNoetig !== false;

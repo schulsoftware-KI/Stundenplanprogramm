@@ -4,6 +4,8 @@ namespace VertretungApi.Dtos;
 //  Klassenbuch (Phase 3.1): Stundenblatt mit Anwesenheit, Änderungshistorie
 //  und Gruppenlisten (Sek-I-Teilgruppen laut Schülergruppe der UV).
 //  Status der Anwesenheit: Anwesend | Fehlt | Verspaetet | Beurlaubt | Schulveranstaltung.
+//  Phase 3.3: Thema und Hausaufgabe im Stundenblatt, Sichtbarkeit je Unterricht,
+//  Themenliste, Hausaufgaben für Schüler.
 // =====================================================================
 
 /// <summary>Stundenblatt einer Lektion: Kopf, Rechte, Erfassungsstand und Teilnehmerliste.</summary>
@@ -32,18 +34,40 @@ public record KbStundeDto(
     IReadOnlyList<KbOffeneGruppeDto> OffeneGruppen,
     IReadOnlyList<string> Hinweise,
     KbFolgeDto? Folge,                     // Doppelstunde: direkt folgende Stunde (nur wenn sie mit übernommen werden darf)
+    KbInhaltDto Inhalt,                    // Phase 3.3: Thema und Hausaufgabe
     string? Meldung);                      // nur in der Antwort auf das Speichern, z. B. „… für die 3. und 4. Stunde gespeichert“
 
 /// <summary>
 /// Doppelstunde (Nachtrag 3.1): die direkt folgende Stunde desselben Unterrichts (gleiche UNr und
 /// Lehrkraft laut Grundplan). Ist sie noch nicht erfasst, kann die Erfassung beim Speichern
-/// mit übernommen werden.
+/// mit übernommen werden; hat sie noch kein Thema, auch das Thema (Phase 3.3).
 /// </summary>
 public record KbFolgeDto(
     int Stunde,
     bool Erfasst,
     string? ErfasstVon,
-    DateTime? ErfasstAm);
+    DateTime? ErfasstAm,
+    bool HatThema);
+
+/// <summary>
+/// Thema und Hausaufgabe einer Stunde (Phase 3.3). Schreiben: haltende und ursprüngliche
+/// Lehrkraft sowie Admin; Klassenleitung/Stufenkoordination lesen nur.
+/// </summary>
+public record KbInhaltDto(
+    string? Thema,
+    string? Hausaufgabe,
+    DateOnly? Faellig,
+    bool DarfSchreiben,
+    string? Sperrgrund,                    // warum nicht (Zukunft, nur lesen)
+    KbVorigeDto? Vorige,                   // vorige Stunde desselben Unterrichts mit Thema/Hausaufgabe
+    DateOnly? NaechsteStunde,              // Vorschlag „fällig am“: nächste Stunde des Unterrichts laut Plan
+    int UNr,                               // } Unterricht (UNr + Lehrkraft laut Plan) – für Sichtbarkeit
+    string Lehrer,                         // }   und Themenliste
+    bool HausaufgabenSichtbar,             // Schüler sehen die Hausaufgaben dieses Unterrichts
+    bool DarfSichtbarkeit);                // Lehrkraft laut Plan oder Admin
+
+/// <summary>Vorige Stunde desselben Unterrichts (Hinweis im Stundenblatt).</summary>
+public record KbVorigeDto(DateOnly Datum, int Stunde, string? Thema, string? Hausaufgabe, DateOnly? Faellig);
 
 /// <summary>Eine Schülerin / ein Schüler im Stundenblatt.</summary>
 public record KbTeilnehmerDto(
@@ -67,7 +91,10 @@ public record KbOffeneGruppeDto(
     IReadOnlyList<string> Lehrer,
     bool DarfZusammenstellen);
 
-/// <summary>Anwesenheit speichern: alle Abweichungen der Lektion (wer fehlt, ist nicht anwesend).</summary>
+/// <summary>
+/// Stundenblatt speichern: alle Abweichungen der Lektion (wer fehlt, ist nicht anwesend) und –
+/// Phase 3.3 – Thema/Hausaufgabe. Eine gemeinsame Version für beides.
+/// </summary>
 public record KbSpeichernDto(
     DateOnly Datum,
     int Stunde,
@@ -75,15 +102,60 @@ public record KbSpeichernDto(
     string GrundLehrer,
     int Version,                           // Version des geladenen Stundenblatts (neu: 0)
     List<KbEintragDto>? Eintraege,
-    bool FolgestundeUebernehmen = false);  // Doppelstunde: auch die folgende Stunde erfassen
+    bool FolgestundeUebernehmen = false,   // Doppelstunde: auch die folgende Stunde erfassen
+    bool AnwesenheitErfassen = true,       // false: nur Thema/Hausaufgabe (Anwesenheit bleibt unverändert)
+    KbInhaltSpeichernDto? Inhalt = null);  // null: Thema/Hausaufgabe bleiben unverändert
 
 public record KbEintragDto(int SchuelerId, string Status, int? Minuten);
+
+/// <summary>Thema und Hausaufgabe (leer bzw. null = löschen). Fällig nur mit Hausaufgabe.</summary>
+public record KbInhaltSpeichernDto(string? Thema, string? Hausaufgabe, DateOnly? Faellig);
+
+/// <summary>Sichtbarkeit der Hausaufgaben eines Unterrichts für Schüler (Phase 3.3, Entscheidung 30).</summary>
+public record KbSichtbarkeitDto(int UNr, string Lehrer, bool Sichtbar, DateOnly? Datum);
+
+/// <summary>Themenliste eines Unterrichts (Phase 3.3).</summary>
+public record KbThemenDto(
+    string Titel,
+    int UNr,
+    string Lehrer,
+    DateOnly Von,
+    DateOnly Bis,
+    bool HausaufgabenSichtbar,
+    bool DarfSichtbarkeit,
+    IReadOnlyList<KbThemaZeileDto> Stunden);
+
+public record KbThemaZeileDto(
+    DateOnly Datum,
+    int Stunde,
+    int GrundUNr,
+    string GrundLehrer,
+    string Lehrer,                         // haltende Lehrkraft
+    string Status,
+    IReadOnlyList<string> Klassen,
+    bool Erfasst,                          // Anwesenheit erfasst
+    string? Thema,
+    string? Hausaufgabe,
+    DateOnly? Faellig);
+
+/// <summary>„Was ist auf?" – Hausaufgaben eines Schülers (Phase 3.3).</summary>
+public record HaListeDto(DateOnly Heute, DateOnly Von, IReadOnlyList<HaEintragDto> Aufgaben);
+
+public record HaEintragDto(
+    string Schluessel,                     // Lektion (Datum|Stunde|UNr|Lehrkraft) – zum Abhaken auf dem Gerät
+    DateOnly Datum,
+    int Stunde,
+    string Fach,
+    string Lehrer,
+    string? Thema,
+    string Hausaufgabe,
+    DateOnly Faellig);
 
 /// <summary>Ein Eintrag der Änderungshistorie einer Lektion.</summary>
 public record KbHistorieDto(
     DateTime Zeit,
     string Akteur,
-    string Art,                            // Erfasst | Anwesenheit
+    string Art,                            // Erfasst | Anwesenheit | Bewertung | Thema | Hausaufgabe
     string? Schueler,
     string? Alt,
     string? Neu);

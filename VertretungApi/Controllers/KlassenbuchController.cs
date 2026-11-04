@@ -17,7 +17,12 @@ namespace VertretungApi.Controllers;
 ///   GET  api/klassenbuch/gruppen                                „Meine Gruppen" (Admin: alle)
 ///   GET  api/klassenbuch/gruppe?schluessel=…                    Gruppe mit Pool (Schüler der Klassen)
 ///   PUT  api/klassenbuch/gruppe?schluessel=…                    Gruppe zusammenstellen ({ mitglieder: [ids] })
-/// Rechte siehe Services/KlassenbuchService.cs.
+///   Phase 3.3:
+///   PUT  api/klassenbuch/stunde nimmt zusätzlich inhalt { thema, hausaufgabe, faellig } und
+///        anwesenheitErfassen (false = nur Thema/Hausaufgabe speichern)
+///   GET  api/klassenbuch/themen?unr=&amp;lehrer=&amp;von=&amp;bis=        Themenliste eines Unterrichts (Lehrkraft selbst, Admin)
+///   PUT  api/klassenbuch/sichtbarkeit                           Hausaufgaben für Schüler sichtbar? (KbSichtbarkeitDto)
+/// Rechte siehe Services/KlassenbuchService.cs und Services/UnterrichtInhaltService.cs.
 /// </summary>
 [ApiController]
 [Route("api/klassenbuch")]
@@ -94,6 +99,33 @@ public class KlassenbuchController : ControllerBase
         var e = await KlassenbuchService.GruppeSpeichernAsync(_db, u, g, dto.Mitglieder ?? new List<int>());
         if (e.Status != 200) return StatusCode(e.Status, new { fehler = e.Fehler });
         return Ok(await KlassenbuchService.GruppeAsync(_db, u, g));
+    }
+
+    /// <summary>Themenliste eines Unterrichts (UNr + Lehrkraft laut Plan); Standard: laufendes Schuljahr.</summary>
+    [HttpGet("themen")]
+    public async Task<IActionResult> Themen(
+        [FromQuery] int unr, [FromQuery] string? lehrer, [FromQuery] DateOnly? von, [FromQuery] DateOnly? bis)
+    {
+        var u = await NutzerAsync();
+        if (u == null) return Unauthorized();
+        if (string.IsNullOrWhiteSpace(lehrer)) return BadRequest(new { fehler = "Die Lehrkraft fehlt." });
+        if (!u.IstAdmin && !KlassenbuchService.Gleich(u.Kuerzel, lehrer))
+            return StatusCode(403, new { fehler = "Die Themenliste sieht nur die Lehrkraft des Unterrichts." });
+
+        var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
+        var d = await UnterrichtInhaltService.ThemenAsync(_db, u, unr, lehrer, v, b);
+        return d == null ? NotFound(new { fehler = "Diesen Unterricht gibt es nicht." }) : Ok(d);
+    }
+
+    /// <summary>Hausaufgaben eines Unterrichts für Schüler sichtbar bzw. ausgeblendet (Entscheidung 30).</summary>
+    [HttpPut("sichtbarkeit")]
+    public async Task<IActionResult> Sichtbarkeit([FromBody] KbSichtbarkeitDto dto)
+    {
+        var u = await NutzerAsync();
+        if (u == null) return Unauthorized();
+        var e = await UnterrichtInhaltService.SichtbarkeitSetzenAsync(_db, u, dto);
+        if (e.Status != 200) return StatusCode(e.Status, new { fehler = e.Fehler, konflikt = e.Konflikt });
+        return Ok(new { sichtbar = dto.Sichtbar, meldung = e.Meldung });
     }
 
     // -----------------------------------------------------------------

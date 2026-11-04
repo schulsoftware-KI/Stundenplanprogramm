@@ -17,6 +17,13 @@
 //    „Auch für die 2. Stunde" die Erfassung beim Speichern (verspätet zählt
 //    dort als anwesend; eine schon erfasste 2. Stunde bleibt unverändert).
 //
+//  - Thema und Hausaufgabe (Phase 3.3): über der Anwesenheitsliste, gemeinsame
+//    Speichern-Leiste. Schreiben: unterrichtende/ursprüngliche Lehrkraft und
+//    Admin; Klassenleitung/Stufenkoordination lesen. „Fällig am" mit
+//    Schnellwahl (nächste Stunde laut Plan, in 1 Woche). Doppelstunde: das
+//    Thema wird mit übernommen, die Hausaufgabe nicht. Schalter „Hausaufgaben
+//    für Schüler sichtbar" gilt für den ganzen Kurs (Lehrkraft laut Plan).
+//
 //  Datenschutz: Namen und Anwesenheiten stehen nur im Arbeitsspeicher –
 //  nie im Browser-Speicher – und werden beim Verlassen gelöscht.
 //
@@ -34,6 +41,7 @@ const KB_STATUS = {
 };
 const KB_REIHENFOLGE = ["Anwesend", "Fehlt", "Verspaetet", "Beurlaubt", "Schulveranstaltung"];
 const KB_MAX_MINUTEN = 240;
+const KB_WT = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 
 const kb = {
   ansicht: null,          // "stunde" | "gruppe" | "gruppen"
@@ -53,6 +61,7 @@ const kb = {
   gruppeGeaendert: false,
   gruppeZurueck: null,    // "stunde" | "gruppen" | null (Plan)
   gruppen: null,          // Antwort GET api/klassenbuch/gruppen
+  sichtbarLaeuft: false,  // Phase 3.3: Sichtbarkeit wird gerade gespeichert
 };
 
 // ---------------------------------------------------------------------
@@ -107,11 +116,81 @@ function kbSymbol(erfasst) {
 }
 
 // ---------------------------------------------------------------------
+//  Text-Hilfen (Phase 3.3) – auch für Hausaufgaben und Themenliste
+// ---------------------------------------------------------------------
+
+/** „Mi 05.11." */
+const kbDatumKurz = (iso) => { const d = ausIso(iso); return `${KB_WT[d.getDay()]} ${pad(d.getDate())}.${pad(d.getMonth() + 1)}.`; };
+
+/**
+ * Wie der Server (UnterrichtInhaltService.Normalisiert): Steuerzeichen weg, Tab → Leerzeichen,
+ * einzeilig ohne Umbrüche; mehrzeilig ohne Leerzeichen am Zeilenende und höchstens eine Leerzeile
+ * am Stück. Leer → null.
+ */
+function kbNormText(text, mehrzeilig) {
+  if (text === null || text === undefined) return null;
+  let s = "";
+  for (const c of String(text).replace(/\r\n?/g, "\n")) {
+    if (c === "\n") s += mehrzeilig ? "\n" : " ";
+    else if (c === "\t") s += " ";
+    else if (!/[\u0000-\u001f\u007f-\u009f]/.test(c)) s += c;
+  }
+  if (mehrzeilig) {
+    const zeilen = [];
+    let leer = 0;
+    for (const z of s.split("\n")) {
+      const zeile = z.replace(/\s+$/u, "");
+      if (zeile === "") { if (++leer > 1) continue; } else leer = 0;
+      zeilen.push(zeile);
+    }
+    s = zeilen.join("\n");
+  }
+  s = s.trim();
+  return s === "" ? null : s;
+}
+
+/** Text als Knoten; https-Links werden klickbar (öffnen in neuem Tab). Kein innerHTML. */
+function kbTextMitLinks(text) {
+  const teile = [];
+  const re = /https:\/\/[^\s<>"']+/g;
+  let pos = 0;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    let url = m[0];
+    const rest = url.match(/[.,;:!?)\]]+$/);
+    if (rest) url = url.slice(0, -rest[0].length);
+    let gueltig = url.length > 8;
+    try { if (gueltig) new URL(url); } catch { gueltig = false; }
+    if (!gueltig) continue;
+    if (m.index > pos) teile.push(text.slice(pos, m.index));
+    teile.push(h("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, url));
+    pos = m.index + url.length;
+    re.lastIndex = pos;
+  }
+  if (pos < text.length) teile.push(text.slice(pos));
+  return teile;
+}
+
+/** Thema/Hausaufgabe zum Lesen (Stundenblatt ohne Schreibrecht, Plan-Dialog). */
+function kbInhaltLeseTeile(thema, ha, faellig) {
+  if (!thema && !ha) return [h("p", { class: "kl-leer" }, "Noch kein Thema und keine Hausaufgabe eingetragen.")];
+  return [
+    h("div", { class: "kl-block" },
+      h("p", { class: "kl-etikett" }, "Thema"),
+      h("p", { class: "kl-text" + (thema ? "" : " kl-leer") }, thema ? kbTextMitLinks(thema) : "noch keins eingetragen")),
+    ha ? h("div", { class: "kl-block" },
+      h("p", { class: "kl-etikett" }, "Hausaufgabe" + (faellig ? ` · fällig ${kbDatumKurz(faellig)}` : "")),
+      h("p", { class: "kl-text" }, kbTextMitLinks(ha))) : null,
+  ].filter(Boolean);
+}
+
+// ---------------------------------------------------------------------
 //  Ansicht öffnen / verlassen
 // ---------------------------------------------------------------------
 
 function kbUngespeichert() {
-  return (kb.ansicht === "stunde" && kb.geaendert) || (kb.ansicht === "gruppe" && kb.gruppeGeaendert);
+  return (kb.ansicht === "stunde" && (kb.geaendert || kbInhaltGeaendert())) ||
+    (kb.ansicht === "gruppe" && kb.gruppeGeaendert);
 }
 
 /** true = darf weiter (nichts Ungespeichertes bzw. bestätigt). */
@@ -119,7 +198,7 @@ function kbVerwerfenErlaubt() {
   if (!kbUngespeichert()) return true;
   return window.confirm(kb.ansicht === "gruppe"
     ? "Die Gruppe wurde noch nicht gespeichert. Änderungen verwerfen?"
-    : "Die Anwesenheit wurde noch nicht gespeichert. Änderungen verwerfen?");
+    : "Das Stundenblatt wurde noch nicht gespeichert. Änderungen verwerfen?");
 }
 
 function zeigeKlassenbuch(ansicht) {
@@ -167,10 +246,14 @@ function klassenbuchLeeren() {
   kb.gruppeGeaendert = false;
   kb.gruppeZurueck = null;
   kb.gruppen = null;
-  for (const id of ["kbListe", "kbOffen", "kbHinweise", "kgKlassen", "kgsListe", "khListe", "ksWahl"])
+  kb.sichtbarLaeuft = false;
+  for (const id of ["kbListe", "kbOffen", "kbHinweise", "kgKlassen", "kgsListe", "khListe", "ksWahl",
+    "kbVorige", "kbInhaltLesen", "kbFaelligSchnell"])
     el(id).replaceChildren();
+  for (const id of ["kbThema", "kbHa", "kbFaellig"]) el(id).value = "";
+  el("kbInhalt").hidden = true;
   for (const id of ["kbWann", "kbFach", "kbWer", "kbErfasst", "kbZahlen", "kgTitel", "kgInfo", "kgStand",
-    "kgsInfo", "khInfo", "ksName", "ksKlasse", "kbFolgeText", "kbFolgeInfo"])
+    "kgsInfo", "khInfo", "ksName", "ksKlasse", "kbFolgeText", "kbFolgeInfo", "kbInhaltSperre", "kbSichtbarInfo"])
     el(id).textContent = "";
   el("kgFilter").value = "";
   el("ksMinuten").value = "";
@@ -286,14 +369,26 @@ function blattUebernehmen(d) {
   kb.festOk = new Set();
   kb.geaendert = false;
   kb.folgeAn = true;
+  // Phase 3.3: Eingabefelder auf den gespeicherten Stand setzen.
+  const i = d.inhalt || {};
+  el("kbThema").value = i.thema || "";
+  el("kbHa").value = i.hausaufgabe || "";
+  el("kbFaellig").value = i.hausaufgabe && i.faellig ? i.faellig : "";
+  el("kbFaelligBox").hidden = !i.hausaufgabe;
   renderStunde();
+  kbHaHoehe();
 }
 
-/** Doppelstunde: Die folgende Stunde kann beim Speichern mit erfasst werden. */
-const kbFolgeMoeglich = () => {
+/** Doppelstunde: Die folgende Stunde kann beim Speichern mit erfasst werden (Anwesenheit und/oder Thema). */
+const kbFolgeAnw = () => {
   const d = kb.blatt;
   return !!(d && d.darfSchreiben && d.folge && !d.folge.erfasst);
 };
+const kbFolgeThema = () => {
+  const d = kb.blatt;
+  return !!(d && d.inhalt && d.inhalt.darfSchreiben && d.folge && !d.folge.hatThema && kbInhaltEingaben().thema);
+};
+const kbFolgeMoeglich = () => kbFolgeAnw() || kbFolgeThema();
 const kbMitFolge = () => kbFolgeMoeglich() && kb.folgeAn;
 
 const kbAbweichungen = () => [...kb.stand.entries()].filter(([, v]) => v.status !== "Anwesend");
@@ -365,6 +460,7 @@ function renderStunde() {
     el("kbListe").replaceChildren();
     el("kbListeKopf").hidden = true;
     el("kbLeiste").hidden = true;
+    el("kbInhalt").hidden = true;
     return;
   }
 
@@ -381,6 +477,7 @@ function renderStunde() {
 
   el("kbHinweise").replaceChildren(...(d.hinweise || []).map((t) => h("p", { class: "hinweis" }, t)));
   el("kbOffen").replaceChildren(...(d.offeneGruppen || []).map(offeneGruppeKarte));
+  renderInhalt();
 
   const liste = d.teilnehmer || [];
   const keineListe = liste.length === 0;
@@ -415,6 +512,124 @@ function offeneGruppeKarte(g) {
         }, "Gruppe zusammenstellen")]
       : h("p", { class: "kleingedruckt ohne-einzug" },
           `Das macht die Lehrkraft der Gruppe (${wer}). Bis dahin kann hier keine Anwesenheit erfasst werden.`));
+}
+
+// ---- Thema und Hausaufgabe (Phase 3.3) ----
+
+/** Eingaben bereinigt wie auf dem Server. */
+function kbInhaltEingaben() {
+  const thema = kbNormText(el("kbThema").value, false);
+  const hausaufgabe = kbNormText(el("kbHa").value, true);
+  return { thema, hausaufgabe, faellig: hausaufgabe ? (el("kbFaellig").value || null) : null };
+}
+
+/** Weichen Thema/Hausaufgabe/Fälligkeit vom gespeicherten Stand ab? */
+function kbInhaltGeaendert() {
+  const i = kb.blatt && kb.blatt.inhalt;
+  if (!i || !i.darfSchreiben) return false;
+  const e = kbInhaltEingaben();
+  return (e.thema || null) !== (i.thema || null) ||
+    (e.hausaufgabe || null) !== (i.hausaufgabe || null) ||
+    (!!e.hausaufgabe && (e.faellig || null) !== (i.faellig || null));
+}
+
+const kbFaelligStandard = () =>
+  (kb.blatt && kb.blatt.inhalt && kb.blatt.inhalt.naechsteStunde) || plusTage(kb.schluessel.datum, 7);
+
+/** Schnellwahl „nächste Stunde" (laut Plan) und „in 1 Woche". */
+function kbFaelligRendern() {
+  const i = kb.blatt && kb.blatt.inhalt;
+  if (!i || !kb.schluessel) return;
+  const wert = el("kbFaellig").value;
+  const woche = plusTage(kb.schluessel.datum, 7);
+  const vorschlaege = [];
+  if (i.naechsteStunde) vorschlaege.push({ text: "nächste Stunde", datum: i.naechsteStunde });
+  if (!vorschlaege.some((v) => v.datum === woche)) vorschlaege.push({ text: "in 1 Woche", datum: woche });
+  el("kbFaellig").min = plusTage(kb.schluessel.datum, 1);
+  el("kbFaelligSchnell").replaceChildren(...vorschlaege.map((v) => h("button", {
+    class: "kb-chip", type: "button", "aria-pressed": String(v.datum === wert),
+    onclick: () => { el("kbFaellig").value = v.datum; kbInhaltEingabe(); },
+  }, `${v.text} · ${kbDatumKurz(v.datum)}`)));
+}
+
+/** Textfeld der Hausaufgabe wächst mit dem Text (bis zu einer Höchsthöhe). */
+function kbHaHoehe() {
+  const t = el("kbHa");
+  if (!t || t.offsetParent === null) return;
+  t.style.height = "auto";
+  t.style.height = Math.min(t.scrollHeight + 2, 360) + "px";
+}
+
+/** Eingabe in Thema/Hausaufgabe/Fälligkeit. */
+function kbInhaltEingabe() {
+  if (!kb.blatt || !kb.blatt.inhalt) return;
+  const ha = el("kbHa").value.trim() !== "";
+  el("kbFaelligBox").hidden = !ha;
+  if (ha && !el("kbFaellig").value) el("kbFaellig").value = kbFaelligStandard();
+  kbFaelligRendern();
+  kbHaHoehe();
+  fehlerIn("kbFehler", "");
+  renderLeiste();
+}
+
+function renderInhalt() {
+  const d = kb.blatt;
+  const i = d && d.inhalt;
+  el("kbInhalt").hidden = !i;
+  if (!i) return;
+
+  // Vorige Stunde desselben Unterrichts (Entscheidung 28)
+  const v = i.vorige;
+  el("kbVorige").hidden = !v;
+  el("kbVorige").replaceChildren(...(v ? [
+    h("p", { class: "kb-vorige-kopf" }, `Letzte Stunde · ${kbDatumKurz(v.datum)}, ${v.stunde}. Std.`),
+    v.thema ? h("p", { class: "kb-vorige-text" }, kbTextMitLinks(v.thema)) : null,
+    v.hausaufgabe ? h("p", { class: "kb-vorige-text" },
+      h("span", { class: "kb-vorige-etikett" }, v.faellig ? `Hausaufgabe bis ${kbDatumKurz(v.faellig)}: ` : "Hausaufgabe: "),
+      kbTextMitLinks(v.hausaufgabe)) : null,
+  ] : []));
+
+  const schreiben = !!i.darfSchreiben;
+  el("kbInhaltForm").hidden = !schreiben;
+  el("kbInhaltLesen").hidden = schreiben;
+  if (schreiben) kbFaelligRendern();
+  else el("kbInhaltLesen").replaceChildren(...kbInhaltLeseTeile(i.thema, i.hausaufgabe, i.faellig));
+  el("kbInhaltSperre").textContent = schreiben ? "" : (i.sperrgrund || "");
+  el("kbInhaltSperre").hidden = schreiben || !i.sperrgrund;
+
+  // Sichtbarkeit für Schüler (Entscheidung 30): Schalter für die Lehrkraft laut Plan bzw. Admin.
+  el("kbSichtbarSchalter").hidden = !i.darfSichtbarkeit;
+  el("kbSichtbar").checked = !!i.hausaufgabenSichtbar;
+  el("kbSichtbar").disabled = kb.sichtbarLaeuft;
+  const info = !i.darfSichtbarkeit && !i.hausaufgabenSichtbar
+    ? "Die Hausaufgaben dieses Kurses sind für Schüler ausgeblendet." : "";
+  el("kbSichtbarInfo").textContent = info;
+  el("kbSichtbarInfo").hidden = !info;
+}
+
+async function kbSichtbarSetzen() {
+  const i = kb.blatt && kb.blatt.inhalt;
+  if (!i || !i.darfSichtbarkeit || kb.sichtbarLaeuft) return;
+  const an = el("kbSichtbar").checked;
+  kb.sichtbarLaeuft = true;
+  el("kbSichtbar").disabled = true;
+  fehlerIn("kbFehler", "");
+  const nr = kb.ladeNr;
+  try {
+    const a = await senden("PUT", "api/klassenbuch/sichtbarkeit",
+      { uNr: i.uNr, lehrer: i.lehrer, sichtbar: an, datum: kb.schluessel.datum });
+    if (nr !== kb.ladeNr) return;
+    i.hausaufgabenSichtbar = !!a.sichtbar;
+    toast(a.meldung || "Gespeichert.");
+  } catch (f) {
+    if (nr !== kb.ladeNr) return;
+    el("kbSichtbar").checked = !an;
+    const t = aktionsFehler(f);
+    if (t !== null) fehlerIn("kbFehler", t);
+  } finally {
+    kb.sichtbarLaeuft = false;
+    if (nr === kb.ladeNr) el("kbSichtbar").disabled = false;
+  }
 }
 
 function teilnehmerZeile(t) {
@@ -515,10 +730,14 @@ function renderLeiste() {
   const knopf = el("kbSpeichern");
   const leiste = el("kbLeiste");
   if (!d) { leiste.hidden = true; return; }
-  el("kbHistorieKnopf").hidden = !d.erfasstAm;
-  knopf.hidden = !d.darfSchreiben;
+  const darfAnw = !!d.darfSchreiben;
+  const darfInh = !!(d.inhalt && d.inhalt.darfSchreiben);
+  el("kbHistorieKnopf").hidden = !(d.erfasstAm || d.version > 0);
+  knopf.hidden = !darfAnw && !darfInh;
   leiste.hidden = knopf.hidden && el("kbHistorieKnopf").hidden;
-  leiste.classList.toggle("ungespeichert", kb.geaendert);
+  const aenderung = kb.geaendert || kbInhaltGeaendert();
+  leiste.classList.toggle("ungespeichert", aenderung);
+  for (const id of ["kbThema", "kbHa", "kbFaellig"]) el(id).readOnly = kb.speichert;
   renderFolge();
   knopf.classList.remove("gespeichert");
   if (kb.speichert) {
@@ -526,20 +745,25 @@ function renderLeiste() {
     knopf.textContent = "Speichern …";
     return;
   }
-  if (!d.erfasstAm) {
+  const e = darfInh ? kbInhaltEingaben() : {};
+  if (darfAnw && !d.erfasstAm) {
     knopf.disabled = false;
-    knopf.textContent = kbAbweichungen().length === 0 ? "Alle anwesend – speichern" : "Anwesenheit speichern";
-  } else if (kb.geaendert) {
+    knopf.textContent = kbAbweichungen().length === 0 ? "Alle anwesend – speichern"
+      : e.thema || e.hausaufgabe ? "Speichern" : "Anwesenheit speichern";
+  } else if (aenderung) {
     knopf.disabled = false;
     knopf.textContent = "Änderungen speichern";
   } else if (kbMitFolge()) {
-    // 1. Stunde schon erfasst, 2. noch nicht: nur übernehmen.
+    // 1. Stunde schon gespeichert, in der 2. fehlt noch Anwesenheit bzw. Thema: nur übernehmen.
     knopf.disabled = false;
     knopf.textContent = `In die ${d.folge.stunde}. Stunde übernehmen`;
-  } else {
+  } else if (d.erfasstAm || (d.inhalt && (d.inhalt.thema || d.inhalt.hausaufgabe))) {
     knopf.disabled = true;
     knopf.textContent = "✓ Gespeichert";
     knopf.classList.add("gespeichert");
+  } else {
+    knopf.disabled = true;
+    knopf.textContent = "Speichern";
   }
 }
 
@@ -548,15 +772,24 @@ function renderFolge() {
   const d = kb.blatt;
   const schalter = el("kbFolgeSchalter");
   const info = el("kbFolgeInfo");
-  const f = d && d.darfSchreiben ? d.folge : null;
-  schalter.hidden = !kbFolgeMoeglich();
+  const f = d ? d.folge : null;
+  const moeglich = kbFolgeMoeglich();
+  schalter.hidden = !moeglich;
   let text = "";
-  if (kbFolgeMoeglich()) {
+  if (moeglich) {
     el("kbFolge").checked = kb.folgeAn;
     el("kbFolge").disabled = kb.speichert;
     el("kbFolgeText").textContent = `Auch für die ${f.stunde}. Stunde übernehmen (Doppelstunde)`;
-    if (kb.folgeAn && kbAbweichungen().some(([, v]) => v.status === "Verspaetet"))
-      text = `Verspätete gelten in der ${f.stunde}. Stunde als anwesend.`;
+    if (kb.folgeAn) {
+      const teile = [];
+      if (kbFolgeAnw() && kbAbweichungen().some(([, v]) => v.status === "Verspaetet"))
+        teile.push(`Verspätete gelten in der ${f.stunde}. Stunde als anwesend.`);
+      if (!kbFolgeAnw() && f.erfasst)
+        teile.push(`Die Anwesenheit der ${f.stunde}. Stunde ist schon erfasst – übernommen wird nur das Thema.`);
+      if (kbFolgeThema() && kbInhaltEingaben().hausaufgabe)
+        teile.push("Die Hausaufgabe steht nur in dieser Stunde.");
+      text = teile.join(" ");
+    }
   } else if (f && f.erfasst) {
     text = `Doppelstunde: Die ${f.stunde}. Stunde ist schon erfasst` +
       (f.erfasstVon ? ` (${f.erfasstVon}, ${kurzZeit(f.erfasstAm)}).` : ".");
@@ -567,7 +800,9 @@ function renderFolge() {
 
 async function stundeSpeichern() {
   const d = kb.blatt;
-  if (!d || !d.darfSchreiben || kb.speichert) return;
+  const darfAnw = !!(d && d.darfSchreiben);
+  const darfInh = !!(d && d.inhalt && d.inhalt.darfSchreiben);
+  if (!d || (!darfAnw && !darfInh) || kb.speichert) return;
   if (kb.konflikt) { stundeLaden(); return; }
   kb.speichert = true;
   fehlerIn("kbFehler", "");
@@ -580,8 +815,12 @@ async function stundeSpeichern() {
       grundUNr: kb.schluessel.unr,
       grundLehrer: kb.schluessel.lehrer,
       version: d.version,
-      eintraege: kbAbweichungen().map(([id, v]) => ({ schuelerId: id, status: v.status, minuten: v.minuten })),
+      anwesenheitErfassen: darfAnw,
+      eintraege: darfAnw
+        ? kbAbweichungen().map(([id, v]) => ({ schuelerId: id, status: v.status, minuten: v.minuten }))
+        : [],
       folgestundeUebernehmen: kbMitFolge(),
+      inhalt: darfInh ? kbInhaltEingaben() : null,
     });
     if (nr !== kb.ladeNr) return;
     kb.speichert = false;
@@ -589,7 +828,7 @@ async function stundeSpeichern() {
     blattUebernehmen(antwort);
     kb.folgeAn = folgeAn;
     renderLeiste();
-    toast(antwort.meldung || "Anwesenheit gespeichert.");
+    toast(antwort.meldung || (darfInh ? "Gespeichert." : "Anwesenheit gespeichert."));
   } catch (f) {
     kb.speichert = false;
     if (nr !== kb.ladeNr) return;
@@ -690,9 +929,10 @@ async function historieOeffnen() {
     el("khInfo").textContent = liste.length ? "" : "Noch keine Änderungen.";
     el("khListe").replaceChildren(...liste.map((p) => h("li", { class: "p-eintrag" },
       h("span", { class: "p-zeit" }, `${datumZeit(p.zeit)} · ${p.akteur}`),
-      h("span", { class: "p-text" }, p.art === "Erfasst"
+      h("span", { class: "p-text" + (p.art === "Thema" || p.art === "Hausaufgabe" ? " kh-inhalt" : "") }, p.art === "Erfasst"
         ? `Anwesenheit ${p.neu || "erfasst"}`
-        : [h("strong", null, p.schueler || ""), ": ", p.alt ? korrektur(p.alt, p.neu) : p.neu]))));
+        : [h("strong", null, p.art === "Thema" || p.art === "Hausaufgabe" ? p.art : p.schueler || ""), ": ",
+           p.alt ? korrektur(p.alt, p.neu) : p.neu]))));
   } catch (f) {
     if (nr !== kb.ladeNr) return;
     const text = aktionsFehler(f);
@@ -949,6 +1189,15 @@ function klassenbuchInit() {
   el("kbAlleDa").addEventListener("click", alleAnwesend);
   el("kbHistorieKnopf").addEventListener("click", historieOeffnen);
   el("kbFolge").addEventListener("change", (e) => { kb.folgeAn = e.target.checked; renderLeiste(); });
+
+  // Phase 3.3: Thema und Hausaufgabe
+  for (const id of ["kbThema", "kbHa", "kbFaellig"]) el(id).addEventListener("input", kbInhaltEingabe);
+  el("kbFaellig").addEventListener("change", kbInhaltEingabe);
+  el("kbThema").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); el("kbHa").focus(); }
+  });
+  el("kbSichtbar").addEventListener("change", kbSichtbarSetzen);
+  window.addEventListener("resize", kbHaHoehe);
   el("kbGruppenKnopf").addEventListener("click", () => {
     kontoSchliessen();
     fehlzeitenSchliessen();

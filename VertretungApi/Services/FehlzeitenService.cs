@@ -26,6 +26,8 @@ namespace VertretungApi.Services;
 //  Nicht erfasste Stunden: ab „Klassenbuch:ErfassungAb", offen ab dem
 //  Folgetag; Lehrkraft = eigene gehaltene Stunden, KL/SK = Stunden ihrer
 //  Klasse/Stufe, Admin = alle (Filter Lehrkraft/Klasse).
+//  Phase 3.3: dazu Stunden ohne Thema (ab „Klassenbuch:ThemaAb", ohne
+//  Betreuung) – Marke „Thema fehlt", Filter alle | anwesenheit | thema.
 // =====================================================================
 
 public static class FehlzeitenService
@@ -565,23 +567,33 @@ public static class FehlzeitenService
     // =================================================================
 
     /// <param name="ansicht">ich (eigene gehaltene Stunden) | zustaendig (Klasse/Stufe) | alle (Admin).</param>
+    /// <param name="art">
+    /// Phase 3.3 (Entscheidung 20): alle | anwesenheit (ohne Anwesenheit) | thema (ohne Thema; ab
+    /// <paramref name="themaAb"/>, Betreuung ausgenommen).
+    /// </param>
     public static async Task<FzNichtErfasstDto> NichtErfasstAsync(
         AppDbContext db, KbNutzer u, string ansicht, string? lehrer, string? klasse,
-        DateOnly erfassungAb, DateOnly? von, DateOnly? bis)
+        DateOnly erfassungAb, DateOnly themaAb, string art, DateOnly? von, DateOnly? bis)
     {
+        bool mitAnwesenheit = art is "alle" or "anwesenheit";
+        bool mitThema = art is "alle" or "thema";
+        var ab = mitAnwesenheit && mitThema ? (erfassungAb < themaAb ? erfassungAb : themaAb)
+            : mitThema ? themaAb : erfassungAb;
+
         var gestern = KlassenbuchService.Heute().AddDays(-1);   // offen ab dem Folgetag
-        var start = von is DateOnly v && v > erfassungAb ? v : erfassungAb;
+        var start = von is DateOnly v && v > ab ? v : ab;
         var ende = bis is DateOnly b && b < gestern ? b : gestern;
         if (ende < start)
-            return new FzNichtErfasstDto(start, ende, 0, Array.Empty<FzNeLehrerDto>(), Array.Empty<FzNeStundeDto>(), false);
+            return new FzNichtErfasstDto(start, ende, 0, Array.Empty<FzNeLehrerDto>(), Array.Empty<FzNeStundeDto>(), false,
+                0, 0, erfassungAb, themaAb);
 
         var tage = await WochenplanService.TageAsync(db, start, ende);
-        var erfasst = (await db.Lektionen.AsNoTracking()
-                .Where(l => l.Datum >= start && l.Datum <= ende && l.ErfasstAm != null)
-                .Select(l => new { l.Datum, l.Stunde, l.GrundUNr, l.GrundLehrer })
+        var lektionen = (await db.Lektionen.AsNoTracking()
+                .Where(l => l.Datum >= start && l.Datum <= ende)
+                .Select(l => new { l.Datum, l.Stunde, l.GrundUNr, l.GrundLehrer, Erfasst = l.ErfasstAm != null, HatThema = l.Thema != null })
                 .ToListAsync())
-            .Select(l => WochenplanService.LektionSchluessel(l.Datum, l.Stunde, l.GrundUNr, l.GrundLehrer))
-            .ToHashSet(StringComparer.Ordinal);
+            .GroupBy(l => WochenplanService.LektionSchluessel(l.Datum, l.Stunde, l.GrundUNr, l.GrundLehrer), StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => (Erfasst: g.Any(x => x.Erfasst), HatThema: g.Any(x => x.HatThema)), StringComparer.Ordinal);
         var fertig = await WochenplanService.FertigeGruppenAsync(db);
         var klasseFilter = string.IsNullOrWhiteSpace(klasse) ? null : new List<string> { klasse.Trim() };
 
@@ -603,13 +615,17 @@ public static class FehlzeitenService
                     _ => false
                 };
                 if (!passt) continue;
-                if (erfasst.Contains(WochenplanService.LektionSchluessel(tag.Datum, st.Stunde, st.GrundUNr, st.GrundLehrer)))
-                    continue;
+
+                lektionen.TryGetValue(WochenplanService.LektionSchluessel(tag.Datum, st.Stunde, st.GrundUNr, st.GrundLehrer), out var l);
+                bool anwesenheitFehlt = mitAnwesenheit && tag.Datum >= erfassungAb && !l.Erfasst;
+                // Betreuung/Aufsicht braucht kein Thema (Entscheidung 20).
+                bool themaFehlt = mitThema && tag.Datum >= themaAb && st.Status != "Betreuung" && !l.HatThema;
+                if (!anwesenheitFehlt && !themaFehlt) continue;
 
                 bool gruppeFehlt = st.Quellen.Any(q => q.Typ == "Klasse" && q.Schuelergruppe != null
                     && !fertig.Contains(WochenplanService.GruppenSchluessel(tag.Schuljahr, q.Schuelergruppe)));
                 treffer.Add(new FzNeStundeDto(tag.Datum, st.Stunde, st.GrundUNr, st.GrundLehrer, st.Fach,
-                    st.Lehrer, st.OriginalLehrer, st.Klassen, st.Status, gruppeFehlt));
+                    st.Lehrer, st.OriginalLehrer, st.Klassen, st.Status, gruppeFehlt, anwesenheitFehlt, themaFehlt));
             }
         }
 
@@ -622,6 +638,7 @@ public static class FehlzeitenService
             .OrderByDescending(t => t.Datum).ThenBy(t => t.Stunde).ThenBy(t => t.Lehrer, Cmp)
             .Take(MaxNichtErfasst)
             .ToList();
-        return new FzNichtErfasstDto(start, ende, treffer.Count, proLehrer, stunden, treffer.Count > stunden.Count);
+        return new FzNichtErfasstDto(start, ende, treffer.Count, proLehrer, stunden, treffer.Count > stunden.Count,
+            treffer.Count(t => t.AnwesenheitFehlt), treffer.Count(t => t.ThemaFehlt), erfassungAb, themaAb);
     }
 }

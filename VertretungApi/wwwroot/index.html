@@ -226,6 +226,31 @@
       </div>
       <div id="kbHinweise"></div>
       <div id="kbOffen"></div>
+      <!-- Phase 3.3: Thema und Hausaufgabe (über der Anwesenheitsliste, gemeinsame Speichern-Leiste) -->
+      <div id="kbInhalt" class="karte kb-inhalt" hidden>
+        <div id="kbVorige" class="kb-vorige" hidden></div>
+        <div id="kbInhaltForm" class="kb-inhalt-form" hidden>
+          <label class="feld" for="kbThema">Thema der Stunde</label>
+          <input id="kbThema" class="eingabe" type="text" maxlength="300" autocomplete="off" enterkeyhint="next" />
+          <label class="feld" for="kbHa">Hausaufgabe</label>
+          <textarea id="kbHa" class="eingabe kb-ha" rows="2" maxlength="2000" aria-describedby="kbInhaltRegel"></textarea>
+          <div id="kbFaelligBox" class="kb-faellig" hidden>
+            <label class="feld" for="kbFaellig">Fällig am</label>
+            <div class="kb-faellig-reihe">
+              <input id="kbFaellig" class="eingabe" type="date" />
+              <div id="kbFaelligSchnell" class="kb-faellig-schnell" role="group" aria-label="Schnellwahl Fälligkeit"></div>
+            </div>
+          </div>
+          <p id="kbInhaltRegel" class="regel">Nur Text – Links (https://…) werden klickbar. Bitte keine Schülernamen.</p>
+        </div>
+        <div id="kbInhaltLesen" class="kb-inhalt-lesen" hidden></div>
+        <p id="kbInhaltSperre" class="kleingedruckt ohne-einzug" hidden></p>
+        <label id="kbSichtbarSchalter" class="schalter kb-sichtbar" hidden>
+          <input id="kbSichtbar" type="checkbox" />
+          <span>Hausaufgaben für Schüler sichtbar <span class="kb-sichtbar-zusatz">(gilt für den ganzen Kurs)</span></span>
+        </label>
+        <p id="kbSichtbarInfo" class="kleingedruckt ohne-einzug" hidden></p>
+      </div>
       <div id="kbListeKopf" class="kb-listekopf" hidden>
         <p id="kbZahlen" class="kb-zahlen" role="status"></p>
         <button id="kbAlleDa" class="textknopf klein" type="button" hidden>Alle anwesend</button>
@@ -294,6 +319,7 @@
     <!-- Nicht erfasste Stunden -->
     <section id="fzNe" class="fz-bereich" aria-label="Nicht erfasste Stunden" hidden>
       <div id="fzNeWahl" class="modi fz-wahl" role="group" aria-label="Welche Stunden?"></div>
+      <div id="fzNeArt" class="modi fz-wahl" role="group" aria-label="Was fehlt?"></div>
       <div id="fzNeFilter" class="k-filter" hidden>
         <label for="fzNeLehrer" class="vh">Lehrkraft</label>
         <select id="fzNeLehrer" class="eingabe"></select>
@@ -301,7 +327,7 @@
         <select id="fzNeKlasse" class="eingabe"></select>
       </div>
       <p id="fzNeInfo" class="such-info" role="status"></p>
-      <ul id="fzNeListe" class="k-liste" aria-label="Stunden ohne Anwesenheit"></ul>
+      <ul id="fzNeListe" class="k-liste" aria-label="Offene Stunden"></ul>
     </section>
 
     <!-- Meine Kurse -->
@@ -314,6 +340,12 @@
     <div id="fzKlasseBox" class="fz-bereich" hidden>
       <label for="fzKlasseWahl" class="vh">Klasse oder Stufe</label>
       <select id="fzKlasseWahl" class="eingabe"></select>
+    </div>
+
+    <!-- Unterricht: Fehlzeiten bzw. Themen und Hausaufgaben (Phase 3.3) -->
+    <div id="fzUWahl" class="modi fz-wahl" role="group" aria-label="Ansicht des Unterrichts" hidden>
+      <button type="button" data-u="unterricht" aria-pressed="true">Fehlzeiten</button>
+      <button type="button" data-u="themen" aria-pressed="false">Themen</button>
     </div>
 
     <!-- Liste: Klasse/Stufe oder Unterricht -->
@@ -337,6 +369,22 @@
       </div>
     </section>
 
+    <!-- Themenliste eines Unterrichts (Phase 3.3) -->
+    <section id="fzThemen" class="fz-bereich" aria-labelledby="fzTTitel" hidden>
+      <div class="karte kb-kopf">
+        <p id="fzTWann" class="kb-wann"></p>
+        <h2 id="fzTTitel" class="kb-fach"></h2>
+        <p id="fzTInfo" class="kb-wer"></p>
+        <label id="fzTSichtbarSchalter" class="schalter kb-sichtbar" hidden>
+          <input id="fzTSichtbar" type="checkbox" />
+          <span>Hausaufgaben für Schüler sichtbar</span>
+        </label>
+        <p id="fzTSichtbarInfo" class="kleingedruckt ohne-einzug" hidden></p>
+      </div>
+      <p id="fzTLeer" class="such-info" role="status"></p>
+      <ul id="fzTListe" class="k-liste fz-themen" aria-label="Stunden mit Thema und Hausaufgabe"></ul>
+    </section>
+
     <!-- Schüler -->
     <section id="fzSchueler" class="fz-bereich" aria-labelledby="fzSName" hidden>
       <div class="karte kb-kopf">
@@ -353,7 +401,26 @@
     </section>
   </main>
 
+  <!-- Hausaufgaben (Phase 3.3, nur Schülerkonten): „Was ist auf?". Offline lesbar (je Benutzer,
+       beim Abmelden gelöscht); „erledigt" merkt sich nur dieses Gerät. -->
+  <main id="hausaufgaben" class="verwaltung hausaufgaben" hidden>
+    <div class="verw-kopf">
+      <button id="haZurueck" class="textknopf" type="button">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Zum Plan</span>
+      </button>
+    </div>
+    <p id="haInfo" class="such-info" role="status"></p>
+    <p id="haFehler" class="fehler" role="alert" hidden></p>
+    <div id="haListe" class="ha-gruppen"></div>
+    <p class="kleingedruckt ohne-einzug ha-fuss">Abgehakt wird nur auf diesem Gerät – die Schule sieht das nicht.</p>
+  </main>
+
   <main id="inhalt" hidden>
+    <button id="haLeiste" class="ha-leiste" type="button" hidden>
+      <span class="ha-leiste-text">Hausaufgaben</span>
+      <span id="haLeisteZahl" class="ha-leiste-zahl"></span>
+    </button>
     <section id="auswahl" class="auswahl" aria-label="Was möchtest du sehen?">
       <div class="modi" role="group" aria-label="Ansicht">
         <button type="button" data-modus="lehrer" aria-pressed="false">Lehrkraft</button>
@@ -417,6 +484,7 @@
     </div>
     <button id="meinPlan" class="menuepunkt" type="button">Mein Plan</button>
     <button id="kbGruppenKnopf" class="menuepunkt" type="button" hidden>Meine Gruppen</button>
+    <button id="haKnopf" class="menuepunkt" type="button" hidden>Hausaufgaben</button>
     <button id="fzKnopf" class="menuepunkt" type="button" hidden>Fehlzeiten</button>
     <button id="kontenKnopf" class="menuepunkt" type="button" hidden>Konten verwalten</button>
     <button id="pwAendernKnopf" class="menuepunkt" type="button">Passwort ändern</button>
@@ -535,7 +603,7 @@
   <!-- Klassenbuch: Änderungshistorie einer Stunde -->
   <dialog id="kbHistorieDialog" class="fenster" aria-labelledby="khTitel">
     <h2 id="khTitel" class="karte-titel">Änderungen</h2>
-    <p class="kleingedruckt ohne-einzug">Wer hat wann was an der Anwesenheit dieser Stunde geändert.</p>
+    <p class="kleingedruckt ohne-einzug">Wer hat wann was an Anwesenheit, Thema und Hausaufgabe dieser Stunde geändert.</p>
     <p id="khInfo" class="such-info" role="status"></p>
     <ul id="khListe" class="p-liste kh-liste"></ul>
     <button id="khZu" class="menuepunkt schliessen" type="button">Schließen</button>
@@ -598,6 +666,14 @@
     </div>
   </dialog>
 
+  <!-- Plan: Thema und Hausaufgabe einer Stunde (nur lesen; Phase 3.3) -->
+  <dialog id="inhaltDialog" class="fenster" aria-labelledby="idTitel">
+    <p id="idWann" class="kb-wann"></p>
+    <h2 id="idTitel" class="karte-titel"></h2>
+    <div id="idInhalt" class="kb-inhalt-lesen"></div>
+    <button id="idZu" class="menuepunkt schliessen" type="button">Schließen</button>
+  </dialog>
+
   <!-- kurze Rückmeldungen -->
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
@@ -607,6 +683,7 @@
   <script src="konten.js"></script>
   <script src="klassenbuch.js"></script>
   <script src="fehlzeiten.js"></script>
+  <script src="hausaufgaben.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -1186,6 +1186,164 @@ main.fehlzeiten { max-width: 760px; }
   .woche { grid-template-columns: 38px auto 38px auto; }
 }
 
+/* =====================================================================
+   Thema und Hausaufgabe (Phase 3.3)
+   ===================================================================== */
+
+textarea { font: inherit; color: inherit; }
+
+/* Stundenblatt: Karte über der Anwesenheitsliste */
+.kb-inhalt { padding: 12px 16px 14px 16px; }
+.kb-inhalt-form { display: grid; }
+.kb-inhalt-form .feld { margin: 10px 0 4px 0; }
+.kb-inhalt-form > .feld:first-child { margin-top: 2px; }
+.kb-ha { resize: vertical; min-height: 3.4em; line-height: 1.4; }
+.kb-faellig { display: grid; }
+.kb-faellig-reihe { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.kb-faellig-reihe input[type="date"] { width: auto; flex: 0 1 11.5rem; min-width: 9.5rem; padding-top: 8px; padding-bottom: 8px; }
+.kb-faellig-schnell { display: flex; flex-wrap: wrap; gap: 6px; }
+.kb-chip {
+  min-height: 40px;
+  padding: 6px 12px;
+  border: 1px solid var(--linie);
+  border-radius: 999px;
+  background: var(--seite);
+  color: var(--tinte);
+  font-size: 0.88rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.kb-chip:hover { background: var(--akzent-hell); }
+.kb-chip[aria-pressed="true"] { border-color: var(--akzent); background: var(--akzent-hell); box-shadow: inset 0 0 0 1px var(--akzent); }
+.kb-inhalt .regel { margin: 8px 0 0 0; }
+.kb-sichtbar { margin-top: 10px; color: var(--tinte); white-space: normal; align-items: flex-start; min-height: 32px; }
+.kb-sichtbar input { flex: none; margin-top: 1px; }
+.kb-sichtbar-zusatz { color: var(--leise); font-size: 0.85rem; }
+#kbInhaltSperre, #kbSichtbarInfo { margin-top: 8px; }
+.kb-vorige {
+  margin: 0 0 6px 0;
+  padding: 7px 10px;
+  border-left: 3px solid var(--linie);
+  border-radius: 0 8px 8px 0;
+  background: var(--seite);
+  font-size: 0.9rem;
+}
+.kb-vorige p { margin: 0; overflow-wrap: anywhere; white-space: pre-line; }
+.kb-vorige-kopf { font-size: 0.8rem; font-weight: 700; color: var(--leise); }
+.kb-vorige-etikett { font-weight: 650; }
+
+/* Thema/Hausaufgabe lesen (Stundenblatt ohne Schreibrecht, Dialog im Plan) */
+.kb-inhalt-lesen { display: grid; gap: 10px; }
+.kl-block { display: grid; gap: 1px; }
+.kl-etikett { margin: 0; font-size: 0.8rem; font-weight: 700; color: var(--leise); }
+.kl-text { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
+.kl-leer { margin: 0; color: var(--leise); font-style: italic; }
+.kb-inhalt a, .kb-inhalt-lesen a, .ha-gruppen a { color: var(--akzent); text-decoration: underline; overflow-wrap: anywhere; }
+#inhaltDialog .kb-wann { margin-bottom: 2px; }
+#inhaltDialog .kb-inhalt-lesen { margin: 10px 0 4px 0; }
+
+/* Historie: Thema/Hausaufgabe mehrzeilig */
+.kh-inhalt { white-space: pre-line; }
+
+/* Plan: Marke „HA" */
+.ha-marke {
+  flex: none;
+  padding: 0 5px;
+  border: 1.5px solid var(--akzent);
+  border-radius: 6px;
+  color: var(--akzent);
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1.35;
+}
+
+/* Nicht erfasst: Marke „Thema fehlt" */
+.marke.thema { background: var(--sonst); }
+
+/* Themenliste je Unterricht */
+.fz-thema { gap: 3px; }
+.fz-t-thema, .fz-t-ha {
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.fz-t-thema { font-weight: 600; }
+.fz-t-thema.leer { color: var(--leise); font-weight: 500; font-style: italic; }
+.fz-t-ha { font-size: 0.9rem; white-space: pre-line; }
+.fz-t-etikett { font-weight: 650; color: var(--leise); }
+.kb-kopf .kb-sichtbar { margin-top: 8px; }
+#fzTLeer { margin: 0 2px; }
+
+/* Hausaufgaben (Schüler) */
+main.hausaufgaben { max-width: 720px; }
+.ha-leiste {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  margin: 0 0 12px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--linie);
+  border-left: 4px solid var(--akzent);
+  border-radius: 12px;
+  background: var(--papier);
+  color: var(--tinte);
+  text-align: left;
+  font-weight: 700;
+}
+.ha-leiste:hover { background: var(--akzent-hell); }
+.ha-leiste-zahl { color: var(--leise); font-size: 0.9rem; font-weight: 650; white-space: nowrap; }
+.ha-leiste.dringend { border-left-color: var(--verlegung); }
+.ha-leiste.dringend .ha-leiste-zahl { color: var(--verlegung); }
+@media (min-width: 760px), (orientation: landscape) and (min-width: 600px) {
+  .ha-leiste { grid-column: 1 / -1; justify-self: start; width: auto; min-width: 320px; }
+}
+#haInfo.offline { color: var(--rot); font-weight: 650; }
+.ha-gruppen { display: grid; gap: 14px; margin-top: 8px; }
+.ha-gruppen:empty { display: none; }
+.ha-gruppe { display: grid; gap: 6px; }
+.ha-titel { margin: 0 2px; font-size: 1rem; font-weight: 750; }
+.ha-heute .ha-titel { color: var(--verlegung); }
+.ha-vorbei .ha-titel { color: var(--leise); }
+.ha-liste { list-style: none; margin: 0; padding: 0; background: var(--papier); border: 1px solid var(--linie); border-radius: 12px; overflow: hidden; }
+.ha-eintrag { display: grid; grid-template-columns: 48px 1fr; align-items: stretch; }
+.ha-eintrag + .ha-eintrag { border-top: 1px solid var(--linie); }
+.ha-haken {
+  display: grid;
+  place-items: start center;
+  width: 48px;
+  min-height: 52px;
+  padding: 12px 0 0 0;
+  border: none;
+  background: transparent;
+  color: var(--leise);
+}
+.ha-haken:hover { background: var(--akzent-hell); }
+.ha-haken .haken { opacity: 0; }
+.ha-haken[aria-pressed="true"] { color: var(--vertretung); }
+.ha-haken[aria-pressed="true"] .haken { opacity: 1; }
+.ha-haken:focus-visible { outline-offset: -3px; }
+.ha-text { min-width: 0; padding: 10px 12px 11px 2px; }
+.ha-text p { margin: 0; }
+.ha-kopf { font-size: 0.85rem; color: var(--leise); overflow-wrap: anywhere; }
+.ha-kopf strong { color: var(--tinte); font-size: 0.98rem; }
+.ha-text .ha-auftrag { margin-top: 2px; white-space: pre-line; overflow-wrap: anywhere; }
+.ha-text .ha-thema { margin-top: 3px; font-size: 0.85rem; color: var(--leise); overflow-wrap: anywhere; }
+.ha-eintrag.erledigt { background: var(--seite); }
+.ha-eintrag.erledigt .ha-auftrag { color: var(--leise); text-decoration: line-through 1.5px var(--leise); }
+.ha-fuss { margin-top: 14px; }
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .kb-inhalt { padding: 8px 14px 10px 14px; }
+  .kb-inhalt-form .feld { margin-top: 6px; }
+  .ha-leiste { min-height: 44px; padding: 6px 12px; margin-bottom: 8px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .laedt .symbol svg { animation: none; }
 }

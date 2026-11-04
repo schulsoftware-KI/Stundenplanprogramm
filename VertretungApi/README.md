@@ -314,6 +314,52 @@ In der PWA: Kontomenü → „Fehlzeiten“ (Personal) bzw. „Meine Fehlzeiten�
 „Klassen“ (Admin); Schülerdetail mit Summen, Entschuldigungen und Einträgen. Im Stundenblatt
 steht bei einer fehlenden Person „entschuldigt“ bzw. „unentschuldigt“.
 
+## Unterrichtsinhalt und Hausaufgaben (Phase 3.3)
+
+| Methode | Pfad | Zweck | Auth |
+|---|---|---|---|
+| GET | `/api/klassenbuch/stunde?…` | Stundenblatt – jetzt mit `inhalt` (Thema, Hausaufgabe, fällig, Rechte, vorige Stunde, Vorschlag „nächste Stunde“, Sichtbarkeit) | wie 3.1 |
+| PUT | `/api/klassenbuch/stunde` | zusätzlich `inhalt: { thema, hausaufgabe, faellig }` und `anwesenheitErfassen` (false = nur Thema/Hausaufgabe) | Anwesenheit wie 3.1; Inhalt: haltende/ursprüngliche Lehrkraft, Admin |
+| GET | `/api/klassenbuch/themen?unr=&lehrer=&von=&bis=` | Themenliste eines Unterrichts (neueste zuerst, höchstens 400) | die Lehrkraft selbst, Admin |
+| PUT | `/api/klassenbuch/sichtbarkeit` | `{ uNr, lehrer, sichtbar, datum? }` – Hausaufgaben des Unterrichts für Schüler sichtbar/ausgeblendet | Lehrkraft laut Plan, Admin |
+| GET | `/api/hausaufgaben/ich` | „Was ist auf?“ – eigene Hausaufgaben nach Fälligkeit (Stunden der letzten 5 Wochen, bis 7 Tage überfällig) | Schülerkonto |
+| GET | `/api/fehlzeiten/nicht-erfasst?…&art=alle\|anwesenheit\|thema` | zusätzlich Stunden ohne Thema (`themaFehlt`, `anwesenheitFehlt`, Zähler `ohneAnwesenheit`/`ohneThema`) | wie 3.2 |
+
+- **Thema** bis 300 Zeichen (einzeilig), **Hausaufgabe** bis 2000 Zeichen (mehrzeilig) mit
+  **fällig am**. Nur Text; die App macht `https://`-Links klickbar. Keine Dateien.
+- **Gespeichert** wird zusammen mit der Anwesenheit (eine Version, Konfliktschutz wie 3.1). Thema und
+  Hausaufgabe gibt es erst ab dem Tag der Stunde. Bei noch nicht zusammengestellter Gruppe lässt
+  sich das Thema allein speichern (`anwesenheitErfassen: false`) – die Stunde bleibt „nicht erfasst“.
+- **Rechte:** schreiben dürfen die haltende und die ursprüngliche Lehrkraft sowie Admin;
+  Klassenleitung/Stufenkoordination lesen. Im Wochenplan (`/api/woche/…`) stehen `thema`,
+  `hausaufgabe`, `hausaufgabeFaellig` für: Admin, die Lehrkräfte der Stunde, KL/SK der Klasse/Stufe
+  und Lehrkräfte, die die Klasse bzw. Stufe laut Grundplan unterrichten. Schüler sehen in
+  `/api/woche/ich` das Thema ihrer Stunden immer, die Hausaufgabe nur, wenn der Unterricht sie nicht
+  ausgeblendet hat. Ohne Anmeldung: nichts.
+- **Fälligkeit:** Vorschlag = nächster Tag, an dem derselbe Unterricht (UNr + Lehrkraft laut Plan)
+  stattfindet – Ferien, freie Tage und veröffentlichter Entfall übersprungen (sucht 4 Wochen voraus,
+  sonst eine Woche).
+- **Doppelstunde:** Mit „Auch für die n. Stunde übernehmen“ geht das Thema in die 2. Stunde, wenn dort
+  noch keins steht (nie überschrieben). Die Hausaufgabe steht nur in der 1. Stunde.
+- **Sichtbarkeit** je Unterricht (Tabelle `UnterrichtEinstellungen`: Schuljahr, UNr, Lehrkraft;
+  Standard sichtbar). Betrifft nur Hausaufgaben, nicht das Thema. Lehrkräfte sehen immer alles.
+- **Historie:** Arten `Thema` und `Hausaufgabe` (alt → neu, mit Fälligkeit) in der Lektion;
+  `Sichtbarkeit` als eigener Eintrag (Gruppe = `UNr|LEHRKRAFT`).
+- **Nicht erfasst:** erfasste Stunden ohne Thema zählen ab `Klassenbuch:ThemaAb` (Standard
+  `2026-11-03`), Betreuung ausgenommen.
+- **Schema:** neue Spalten `Thema`, `Hausaufgabe`, `HausaufgabeFaellig` in `KlassenbuchLektionen`,
+  neue Tabelle `UnterrichtEinstellungen`. Die Schema-Nachrüstung ergänzt sie; die DB muss nicht
+  gelöscht werden. Eine Lektion kann jetzt auch ohne Anwesenheit existieren („erfasst“ =
+  `ErfasstAm` gesetzt).
+
+In der PWA (`wwwroot/hausaufgaben.js`, dazu klassenbuch.js/fehlzeiten.js/app.js): Im Stundenblatt
+über der Anwesenheitsliste „Thema der Stunde“, „Hausaufgabe“, „Fällig am“ (Schnellwahl nächste
+Stunde / in 1 Woche), Hinweis auf die vorige Stunde und der Schalter „Hausaufgaben für Schüler
+sichtbar“. „Fehlzeiten → Meine Kurse → Kurs → Themen“: Themenliste mit demselben Schalter.
+Schüler: Leiste „Hausaufgaben“ über dem Plan und Kontomenü „Hausaufgaben“ (Abhaken nur auf dem
+Gerät, offline lesbar); im Plan „HA“-Marke, Antippen zeigt Thema und Hausaufgabe. Personal:
+Thema/Hausaufgabe landen nie im Browser-Speicher. Service-Worker v9.
+
 ## Produktiv: Migrations statt EnsureCreated
 
 `EnsureCreated` ist nur für die Entwicklung gedacht und verträgt sich **nicht** mit Migrations.
@@ -331,7 +377,7 @@ ersetzen und `Database:SchemaNachruesten` auf `false` setzen.
 ## Nächste Schritte
 
 1. **Schülerkonten aus SchILD** (Phase 5): Import statt Pseudodaten, Zuordnung über `ExtId`.
-2. **Klassenbuch (Phase 3):** 3.3 Inhalte/Hausaufgaben, 3.4 Klassenbucheinträge.
+2. **Klassenbuch (Phase 3):** 3.3b Arbeitsauftrag für die Vertretung, 3.4 Klassenbucheinträge.
 3. **Web-Push:** Benachrichtigung der Apps bei Änderung.
 4. **Produktiv:** Schlüssel aus Umgebungsvariablen, EF-Migrations, PostgreSQL, CORS auf die
    App-Adresse einschränken, Login-Bremse hinter dem Reverse-Proxy je echter Adresse.

@@ -87,14 +87,18 @@ public record FzRechteDto(
     IReadOnlyList<string> Klassen,         // wählbare Klassen/Stufen (Zuständigkeit bzw. Admin: alle)
     DateOnly ErfassungAb);
 
-/// <summary>Nicht erfasste Stunden (offen ab dem Folgetag).</summary>
+/// <summary>Nicht erfasste Stunden (offen ab dem Folgetag); Phase 3.3: auch Stunden ohne Thema.</summary>
 public record FzNichtErfasstDto(
     DateOnly Von,
     DateOnly Bis,
     int Anzahl,
     IReadOnlyList<FzNeLehrerDto> ProLehrer,
     IReadOnlyList<FzNeStundeDto> Stunden,
-    bool Gekuerzt);                        // mehr als angezeigt (höchstens 500)
+    bool Gekuerzt,                         // mehr als angezeigt (höchstens 500)
+    int OhneAnwesenheit,                   // davon ohne Anwesenheit
+    int OhneThema,                         // davon ohne Thema
+    DateOnly ErfassungAb,                  // Anwesenheit zählt ab diesem Tag
+    DateOnly ThemaAb);                     // Thema zählt ab diesem Tag
 
 public record FzNeLehrerDto(string Lehrer, int Anzahl);
 
@@ -108,7 +112,9 @@ public record FzNeStundeDto(
     string? OriginalLehrer,
     IReadOnlyList<string> Klassen,
     string Status,
-    bool GruppeFehlt);                     // Sek-I-Gruppe noch nicht zusammengestellt
+    bool GruppeFehlt,                      // Sek-I-Gruppe noch nicht zusammengestellt
+    bool AnwesenheitFehlt,                 // Phase 3.3
+    bool ThemaFehlt);
 
 public record FzEntschuldigungNeuDto(DateOnly Von, DateOnly Bis, string Grund);
 

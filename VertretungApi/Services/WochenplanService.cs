@@ -30,7 +30,32 @@ namespace VertretungApi.Services;
 //   - Jede Stunde meldet GrundUNr/GrundLehrer (Schlüssel der Lektion), ob es ein
 //     Klassenbuch gibt und ob die Anwesenheit schon erfasst ist.
 //   - TagAsync liefert die effektiven Stunden eines Tages für das Klassenbuch.
+//
+//  Phase 3.3 (Thema/Hausaufgabe): Jede Stunde trägt Thema und Hausaufgabe,
+//  wenn die anfragende Person sie lesen darf (InhaltLeser):
+//    Schüler: eigene Stunden (der Plan enthält nur diese); die Hausaufgabe nur,
+//             wenn der Unterricht sie nicht ausgeblendet hat (Entscheidung 30).
+//    Personal: Admin; haltende/ursprüngliche Lehrkraft; Klassenleitung bzw.
+//             Stufenkoordination der Klasse/Stufe; Lehrkräfte, die die Klasse
+//             bzw. Stufe laut Grundplan unterrichten (Entscheidung 23).
+//    Ohne Anmeldung: nichts.
 // =====================================================================
+
+/// <summary>
+/// Wer im Wochenplan Thema und Hausaufgabe der Stunden lesen darf (Phase 3.3).
+/// <see cref="Zustaendig"/> nur bei Klassenleitung/Stufenkoordination.
+/// </summary>
+public sealed record InhaltLeser(bool Admin, string? Kuerzel, IReadOnlyList<string> Zustaendig, bool Schueler)
+{
+    public static InhaltLeser FuerSchueler() => new(false, null, Array.Empty<string>(), true);
+
+    public static InhaltLeser FuerPersonal(KbNutzer u) => new(
+        u.IstAdmin, u.Kuerzel,
+        u.IstKlassenleitungOderKoordination ? u.Zustaendig : Array.Empty<string>(),
+        false);
+
+    internal bool Aktiv => Admin || Schueler || Kuerzel != null || Zustaendig.Count > 0;
+}
 
 /// <summary>
 /// Herkunft der Teilnehmer einer Stunde (aus einem Grundplan-Slot):
@@ -73,9 +98,10 @@ public static class WochenplanService
     /// Nur Schülerplan (Phase 3.1): zusammengestellte Sek-I-Gruppen als "Schuljahr|SCHLÜSSEL"
     /// (siehe <see cref="FertigeGruppenAsync"/>).
     /// </param>
+    /// <param name="leser">Phase 3.3: wer Thema/Hausaufgabe lesen darf; null = niemand.</param>
     public static async Task<WochenplanDto> BerechneAsync(
         AppDbContext db, WochenZielArt art, string anzeige, IEnumerable<string> werte,
-        DateOnly datum, int wochen, ISet<string>? fertigeGruppen = null)
+        DateOnly datum, int wochen, ISet<string>? fertigeGruppen = null, InhaltLeser? leser = null)
     {
         wochen = Math.Clamp(wochen, 1, 6);
         var von = Montag(datum);
@@ -116,13 +142,58 @@ public static class WochenplanService
             .Where(t => t.Datum >= von && t.Datum <= bis)
             .ToListAsync();
 
-        // Phase 3.1: Lektionen mit erfasster Anwesenheit (für die Markierung im Plan).
-        var erfasst = (await db.Lektionen.AsNoTracking()
-                .Where(l => l.Datum >= von && l.Datum <= bis && l.ErfasstAm != null)
-                .Select(l => new { l.Datum, l.Stunde, l.GrundUNr, l.GrundLehrer })
-                .ToListAsync())
-            .Select(l => LektionSchluessel(l.Datum, l.Stunde, l.GrundUNr, l.GrundLehrer))
-            .ToHashSet(StringComparer.Ordinal);
+        // Phase 3.1: Lektionen mit erfasster Anwesenheit (für die Markierung im Plan);
+        // Phase 3.3: dazu Thema/Hausaufgabe (nur für berechtigte Leser).
+        bool mitInhalt = leser != null && leser.Aktiv;
+        var lektionen = await db.Lektionen.AsNoTracking()
+            .Where(l => l.Datum >= von && l.Datum <= bis
+                        && (l.ErfasstAm != null || (mitInhalt && (l.Thema != null || l.Hausaufgabe != null))))
+            .Select(l => new
+            {
+                l.Datum, l.Stunde, l.GrundUNr, l.GrundLehrer, Erfasst = l.ErfasstAm != null,
+                l.Thema, l.Hausaufgabe, l.HausaufgabeFaellig
+            })
+            .ToListAsync();
+        var erfasst = new HashSet<string>(StringComparer.Ordinal);
+        var inhalte = new Dictionary<string, StundenInhalt>(StringComparer.Ordinal);
+        foreach (var l in lektionen)
+        {
+            string key = LektionSchluessel(l.Datum, l.Stunde, l.GrundUNr, l.GrundLehrer);
+            if (l.Erfasst) erfasst.Add(key);
+            if (mitInhalt && (!string.IsNullOrWhiteSpace(l.Thema) || !string.IsNullOrWhiteSpace(l.Hausaufgabe)))
+                inhalte[key] = new StundenInhalt(
+                    string.IsNullOrWhiteSpace(l.Thema) ? null : l.Thema,
+                    string.IsNullOrWhiteSpace(l.Hausaufgabe) ? null : l.Hausaufgabe,
+                    string.IsNullOrWhiteSpace(l.Hausaufgabe) ? null : l.HausaufgabeFaellig);
+        }
+
+        // Schüler: Unterrichte, deren Hausaufgaben die Lehrkraft ausgeblendet hat.
+        var verborgen = new HashSet<string>(StringComparer.Ordinal);
+        if (mitInhalt && leser!.Schueler && inhalte.Count > 0)
+        {
+            var aus = await db.UnterrichtEinstellungen.AsNoTracking()
+                .Where(x => !x.HausaufgabenSichtbar)
+                .Select(x => new { x.Schuljahr, x.UNr, x.Lehrer })
+                .ToListAsync();
+            foreach (var a in aus) verborgen.Add(UnterrichtSchluessel(a.Schuljahr, a.UNr, a.Lehrer));
+        }
+
+        // Personal: Klassen/Stufen, die die Lehrkraft laut Grundplan unterrichtet (je Version).
+        var lehrerKlassen = new Dictionary<int, HashSet<string>>();
+        string? leserKuerzel = leser?.Kuerzel;
+        HashSet<string> KlassenDerLehrkraft(int verId, List<GrundplanSlot> slots)
+        {
+            if (lehrerKlassen.TryGetValue(verId, out var k)) return k;
+            k = new HashSet<string>(Cmp);
+            if (leserKuerzel != null)
+                foreach (var slot in slots)
+                    if (Gleich(slot.Lehrer, leserKuerzel)
+                        && string.Equals(slot.Art, "Unterricht", StringComparison.OrdinalIgnoreCase)
+                        && !string.IsNullOrWhiteSpace(slot.Klasse))
+                        k.Add(slot.Klasse.Trim());
+            lehrerKlassen[verId] = k;
+            return k;
+        }
 
         // ---- Tag für Tag zusammensetzen ----
         var ergebnis = new List<WochenTagDto>();
@@ -184,10 +255,27 @@ public static class WochenplanService
             bool GruppeFertig(string sg) =>
                 fertigeGruppen != null && fertigeGruppen.Contains(GruppenSchluessel(sj, sg));
 
+            // Phase 3.3: Thema/Hausaufgabe, soweit die anfragende Person sie lesen darf.
+            int versionId = ver.Id;
+            StundenInhalt? InhaltFuer(Std x)
+            {
+                if (!mitInhalt || !inhalte.TryGetValue(LektionSchluessel(d, x.Stunde, x.GrundUNr, x.GrundLehrer), out var i))
+                    return null;
+                if (leser!.Schueler)
+                    return verborgen.Contains(UnterrichtSchluessel(sj, x.UNr, x.GrundLehrer)) ? i with { Hausaufgabe = null, Faellig = null } : i;
+                bool darf = leser.Admin
+                            || (leser.Kuerzel != null && (Gleich(leser.Kuerzel, x.Lehrer) || Gleich(leser.Kuerzel, x.GrundLehrer)
+                                                          || Gleich(leser.Kuerzel, x.OriginalLehrer)))
+                            || (leser.Zustaendig.Count > 0 && KlassenbuchService.ZustaendigFuer(leser.Zustaendig, x.Klassen))
+                            || (leser.Kuerzel != null && x.Klassen.Overlaps(KlassenDerLehrkraft(versionId, verSlots)));
+                return darf ? i : null;
+            }
+
             var stunden = EffektiverTag(verSlots, iso, vt?.Eintraege, teilFrei)
                 .Where(st => Passt(st, art, zielWerte, GruppeFertig))
                 .OrderBy(st => st.Stunde).ThenBy(st => st.Fach, Cmp).ThenBy(st => st.Lehrer, Cmp)
-                .Select(st => ZuDto(st, erfasst.Contains(LektionSchluessel(d, st.Stunde, st.GrundUNr, st.GrundLehrer))))
+                .Select(st => ZuDto(st, erfasst.Contains(LektionSchluessel(d, st.Stunde, st.GrundUNr, st.GrundLehrer)),
+                    InhaltFuer(st)))
                 .ToList();
 
             // Alle Stunden des Ziels wegen einer freien Zeit entfallen (z. B. Q2 an Abiturtagen):
@@ -317,6 +405,10 @@ public static class WochenplanService
     /// <summary>Schlüssel einer Lektion (auch für die „erfasst"-Markierung im Plan).</summary>
     public static string LektionSchluessel(DateOnly datum, int stunde, int grundUNr, string grundLehrer)
         => $"{datum:yyyy-MM-dd}|{stunde}|{grundUNr}|{grundLehrer.Trim().ToUpperInvariant()}";
+
+    /// <summary>Schlüssel eines Unterrichts (Phase 3.3): "Schuljahr|UNr|LEHRKRAFT" (Lehrkraft laut Plan).</summary>
+    public static string UnterrichtSchluessel(string schuljahr, int unr, string lehrer)
+        => $"{schuljahr.Trim()}|{unr}|{lehrer.Trim().ToUpperInvariant()}";
 
     /// <summary>Schlüssel einer zusammengestellten Gruppe: "Schuljahr|SCHÜLERGRUPPE".</summary>
     public static string GruppenSchluessel(string schuljahr, string schuelergruppe)
@@ -658,7 +750,10 @@ public static class WochenplanService
         return false;
     }
 
-    private static WochenStundeDto ZuDto(Std x, bool erfasst) => new(
+    /// <summary>Thema/Hausaufgabe einer Lektion für den Wochenplan (Phase 3.3).</summary>
+    private sealed record StundenInhalt(string? Thema, string? Hausaufgabe, DateOnly? Faellig);
+
+    private static WochenStundeDto ZuDto(Std x, bool erfasst, StundenInhalt? inhalt) => new(
         x.Stunde,
         x.UNr,
         x.Fach,
@@ -675,7 +770,10 @@ public static class WochenplanService
         x.GrundUNr,
         x.GrundLehrer,
         KlassenbuchMoeglich(x.Art, x.Status, x.Quellen),
-        erfasst);
+        erfasst,
+        inhalt?.Thema,
+        inhalt?.Hausaufgabe,
+        inhalt?.Faellig);
 
     // =================================================================
     //  Hilfsfunktionen

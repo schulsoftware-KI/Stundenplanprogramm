@@ -13,6 +13,11 @@
 //    Admin sowie in der Oberstufe die Kurslehrkraft in eigenen Kursstunden
 //    (solange die Stufenkoordination nicht festgelegt hat).
 //
+//  Phase 3.3: „Nicht erfasst" zeigt auch Stunden ohne Thema (Marke „Thema
+//  fehlt", Filter Alles/Anwesenheit/Thema). Unter „Meine Kurse" je Unterricht
+//  umschaltbar: Fehlzeiten | Themen (Themenliste mit Hausaufgaben und dem
+//  Schalter „Hausaufgaben für Schüler sichtbar").
+//
 //  Datenschutz: nichts davon im Browser-Speicher; beim Verlassen geleert.
 //  Wird nach klassenbuch.js und VOR app.js geladen; Einstieg fehlzeitenInit().
 // =====================================================================
@@ -25,10 +30,11 @@ const FZ_WT = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 const fz = {
   rechte: null,      // Antwort api/fehlzeiten/rechte
   stapel: [],        // Ansichten, oben = sichtbar: { art: "reiter", reiter } | { art: "unterricht", unr, lehrer }
-                     //   | { art: "schueler", id, unr?, lehrer? } | { art: "ich" }
+                     //   | { art: "themen", unr, lehrer } | { art: "schueler", id, unr?, lehrer? } | { art: "ich" }
   ladeNr: 0,
   daten: null,       // Antwort der sichtbaren Ansicht
   neAnsicht: "ich",  // nicht erfasst: ich | zustaendig | alle
+  neArt: "alle",     // Phase 3.3: was fehlt? alle | anwesenheit | thema
   neLehrer: "",
   neKlasse: "",
   neLehrerListe: [], // Admin: Lehrkräfte mit offenen Stunden (für den Filter)
@@ -69,6 +75,7 @@ async function fehlzeitenOeffnen() {
     el("verwaltung").hidden = true;
   }
   if (!klassenbuchSchliessen()) return;
+  hausaufgabenSchliessen();
   ladenAbbrechen();
   fehlzeitenLeeren();
   el("inhalt").hidden = true;
@@ -117,12 +124,14 @@ function fehlzeitenLeeren() {
   fz.neLehrerListe = [];
   fz.klasse = "";
   fz.eintrag = null;
-  for (const id of ["fzReiter", "fzNeWahl", "fzNeLehrer", "fzNeKlasse", "fzNeListe", "fzKurseListe", "fzKlasseWahl",
-    "fzListeZeilen", "fzSumme", "fzEntsch", "fzFaecher", "fzEintraege", "fzSInfo"])
+  fz.neArt = "alle";
+  for (const id of ["fzReiter", "fzNeWahl", "fzNeArt", "fzNeLehrer", "fzNeKlasse", "fzNeListe", "fzKurseListe", "fzKlasseWahl",
+    "fzListeZeilen", "fzSumme", "fzEntsch", "fzFaecher", "fzEintraege", "fzSInfo", "fzTListe"])
     el(id).replaceChildren();
   for (const id of ["fzNeInfo", "fzKurseInfo", "fzListeWann", "fzListeTitel", "fzListeInfo", "fzSWann", "fzSName",
-    "fzEintraegeInfo", "fbWas", "feFuer"])
+    "fzEintraegeInfo", "fbWas", "feFuer", "fzTWann", "fzTTitel", "fzTInfo", "fzTLeer", "fzTSichtbarInfo"])
     el(id).textContent = "";
+  el("fzUWahl").hidden = true;
   fehlerIn("fzFehler", "");
   dialogZu(el("fzBewertDialog"));
   dialogZu(el("fzEntschDialog"));
@@ -209,14 +218,19 @@ function fzZeigen() {
   const o = fzOben();
   fehlerIn("fzFehler", "");
   fz.daten = null;
-  for (const id of ["fzNe", "fzKurse", "fzKlasseBox", "fzListe", "fzSchueler"]) el(id).hidden = true;
+  for (const id of ["fzNe", "fzKurse", "fzKlasseBox", "fzListe", "fzSchueler", "fzThemen"]) el(id).hidden = true;
   el("fzZurueckText").textContent = fz.stapel.length > 1 ? "Zurück" : "Zum Plan";
+  // Phase 3.3: Unterricht – Fehlzeiten | Themen
+  const uSicht = !!o && (o.art === "unterricht" || o.art === "themen");
+  el("fzUWahl").hidden = !uSicht;
+  if (uSicht)
+    for (const b of el("fzUWahl").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.u === o.art));
   const reiterSicht = !!o && o.art === "reiter";
   el("fzReiter").hidden = !reiterSicht || fzReiterListe().length < 2;
   if (reiterSicht) fzRenderReiter();
   if (!o) return;
 
-  fzTitel(o.art === "ich" ? "Meine Fehlzeiten" : "Fehlzeiten");
+  fzTitel(o.art === "ich" ? "Meine Fehlzeiten" : o.art === "themen" ? "Themen" : "Fehlzeiten");
   if (o.art === "reiter" && o.reiter === "ne") {
     el("fzNe").hidden = false;
     fzRenderNeWahl();
@@ -226,6 +240,13 @@ function fzZeigen() {
     el("fzKurse").hidden = false;
     el("fzKurseListe").replaceChildren();
     el("fzKurseInfo").textContent = "Wird geladen …";
+  } else if (o.art === "themen") {
+    el("fzThemen").hidden = false;
+    el("fzTListe").replaceChildren();
+    for (const id of ["fzTWann", "fzTTitel", "fzTInfo"]) el(id).textContent = "";
+    el("fzTSichtbarSchalter").hidden = true;
+    el("fzTSichtbarInfo").hidden = true;
+    el("fzTLeer").textContent = "Wird geladen …";
   } else if (o.art === "reiter" || o.art === "unterricht") {
     if (o.art === "reiter") {
       el("fzKlasseBox").hidden = fz.rechte.klassen.length < 2;
@@ -251,7 +272,7 @@ function fzZeigen() {
 function fzUrl(o) {
   const enc = encodeURIComponent;
   if (o.art === "reiter" && o.reiter === "ne") {
-    let url = `api/fehlzeiten/nicht-erfasst?ansicht=${fz.neAnsicht}`;
+    let url = `api/fehlzeiten/nicht-erfasst?ansicht=${fz.neAnsicht}&art=${fz.neArt}`;
     if (fz.neAnsicht === "alle" && fz.neLehrer) url += `&lehrer=${enc(fz.neLehrer)}`;
     if (fz.neAnsicht === "alle" && fz.neKlasse) url += `&klasse=${enc(fz.neKlasse)}`;
     return url;
@@ -259,6 +280,7 @@ function fzUrl(o) {
   if (o.art === "reiter" && o.reiter === "kurse") return "api/fehlzeiten/unterrichte";
   if (o.art === "reiter") return fz.klasse ? `api/fehlzeiten/klasse/${enc(fz.klasse)}` : null;
   if (o.art === "unterricht") return `api/fehlzeiten/unterricht?unr=${o.unr}&lehrer=${enc(o.lehrer)}`;
+  if (o.art === "themen") return `api/klassenbuch/themen?unr=${o.unr}&lehrer=${enc(o.lehrer)}`;
   if (o.art === "schueler")
     return `api/fehlzeiten/schueler/${o.id}` + (o.unr ? `?unr=${o.unr}&lehrer=${enc(o.lehrer)}` : "");
   return "api/fehlzeiten/ich";
@@ -277,13 +299,14 @@ async function fzLaden() {
     fz.daten = d;
     if (o.art === "reiter" && o.reiter === "ne") fzRenderNe(d);
     else if (o.art === "reiter" && o.reiter === "kurse") fzRenderKurse(d);
+    else if (o.art === "themen") fzRenderThemen(d);
     else if (o.art === "reiter" || o.art === "unterricht") fzRenderListe(d);
     else fzRenderSchueler(d);
   } catch (f) {
     if (nr !== fz.ladeNr) return;
     const t = aktionsFehler(f);
     if (t === null) return;
-    for (const id of ["fzNeInfo", "fzKurseInfo", "fzListeInfo", "fzEintraegeInfo"]) el(id).textContent = "";
+    for (const id of ["fzNeInfo", "fzKurseInfo", "fzListeInfo", "fzEintraegeInfo", "fzTLeer"]) el(id).textContent = "";
     fehlerIn("fzFehler", t);
   } finally {
     if (nr === fz.ladeNr) document.body.classList.remove("laedt");
@@ -300,6 +323,13 @@ function fzRenderNeWahl() {
   el("fzNeWahl").replaceChildren(...ansichten.map((a) => h("button", {
     type: "button", "aria-pressed": String(a.id === fz.neAnsicht),
     onclick: () => { if (fz.neAnsicht !== a.id) { fz.neAnsicht = a.id; fzZeigen(); } },
+  }, a.text)));
+
+  // Phase 3.3 (Entscheidung 20): Was fehlt?
+  const arten = [{ id: "alle", text: "Alles" }, { id: "anwesenheit", text: "Anwesenheit" }, { id: "thema", text: "Thema" }];
+  el("fzNeArt").replaceChildren(...arten.map((a) => h("button", {
+    type: "button", "aria-pressed": String(a.id === fz.neArt),
+    onclick: () => { if (fz.neArt !== a.id) { fz.neArt = a.id; fzZeigen(); } },
   }, a.text)));
 
   const admin = fz.neAnsicht === "alle";
@@ -319,11 +349,19 @@ function fzRenderNe(d) {
     fzRenderNeWahl();
   }
   const seit = fzDatumLang(d.von);
+  const st1 = (n) => `${n} ${n === 1 ? "Stunde" : "Stunden"}`;
   let info;
-  if (d.bis < d.von) info = `Stunden ohne Anwesenheit erscheinen hier ab dem ${seit} – jeweils ab dem Folgetag.`;
-  else if (d.anzahl === 0) info = `Alle Stunden seit dem ${seit} sind erfasst.`;
-  else info = `${d.anzahl} ${d.anzahl === 1 ? "Stunde" : "Stunden"} ohne Anwesenheit seit dem ${seit}` +
-    (d.gekuerzt ? ` – die neuesten ${d.stunden.length} stehen hier.` : ".");
+  if (d.bis < d.von) info = `Offene Stunden erscheinen hier ab dem ${seit} – jeweils ab dem Folgetag.`;
+  else if (d.anzahl === 0) {
+    info = fz.neArt === "thema" ? `Alle Stunden seit dem ${seit} haben ein Thema.`
+      : fz.neArt === "anwesenheit" ? `Alle Stunden seit dem ${seit} sind erfasst.`
+      : `Seit dem ${seit} ist alles eingetragen.`;
+  } else {
+    info = fz.neArt === "thema" ? `${st1(d.anzahl)} ohne Thema seit dem ${seit}`
+      : fz.neArt === "anwesenheit" ? `${st1(d.anzahl)} ohne Anwesenheit seit dem ${seit}`
+      : `${st1(d.anzahl)} offen seit dem ${seit}: ${d.ohneAnwesenheit} ohne Anwesenheit, ${d.ohneThema} ohne Thema`;
+    info += d.gekuerzt ? ` – die neuesten ${d.stunden.length} stehen hier.` : ".";
+  }
   if (fz.neAnsicht !== "ich" && d.proLehrer.length > 1)
     info += " " + d.proLehrer.slice(0, 8).map((x) => `${x.lehrer}: ${x.anzahl}`).join(" · ");
   el("fzNeInfo").textContent = info;
@@ -341,11 +379,11 @@ function fzRenderNe(d) {
       h("span", { class: "k-name" }, `${fzDatum(s.datum)} · ${s.stunde}. Stunde`),
       mitLehrer ? h("span", { class: "k-rechts" }, s.originalLehrer ? korrektur(s.originalLehrer, s.lehrer) : s.lehrer) : null),
     h("span", { class: "k-unten" }, `${s.fach} · ${s.klassen.join(", ")}`),
-    st || s.gruppeFehlt
-      ? h("span", { class: "k-marken" },
-          st ? h("span", { class: "marke" }, st.text) : null,
-          s.gruppeFehlt ? h("span", { class: "marke start" }, "Gruppe fehlt") : null)
-      : null));
+    h("span", { class: "k-marken" },
+      s.anwesenheitFehlt ? h("span", { class: "marke start" }, "Anwesenheit fehlt") : null,
+      s.themaFehlt ? h("span", { class: "marke thema" }, "Thema fehlt") : null,
+      st ? h("span", { class: "marke" }, st.text) : null,
+      s.gruppeFehlt ? h("span", { class: "marke start" }, "Gruppe fehlt") : null)));
   }));
 }
 
@@ -355,7 +393,7 @@ function fzRenderNe(d) {
 
 function fzRenderKurse(liste) {
   el("fzKurseInfo").textContent = liste.length
-    ? "Tippe auf einen Kurs bzw. eine Klasse, um die Fehlzeiten deiner Schülerinnen und Schüler zu sehen."
+    ? "Tippe auf einen Kurs bzw. eine Klasse: Fehlzeiten deiner Schülerinnen und Schüler sowie Themen und Hausaufgaben."
     : "Im aktuellen Stundenplan hast du keinen Unterricht mit Klassenbuch.";
   el("fzKurseListe").replaceChildren(...liste.map((u) => h("li", null, h("button", {
     class: "k-zeile", type: "button",
@@ -398,6 +436,78 @@ function fzRenderListe(d) {
       zelle(s.summe.offen + s.summe.verspaetungenOffen, "offen"),
       zelle(s.summe.unentschuldigt + s.summe.verspaetungenUnentschuldigt, "unent"),
       zelle(s.summe.verspaetungen)))));
+}
+
+// ---------------------------------------------------------------------
+//  Themen und Hausaufgaben eines Unterrichts (Phase 3.3)
+// ---------------------------------------------------------------------
+
+function fzRenderThemen(d) {
+  el("fzTWann").textContent = `${fzDatumLang(d.von)} – ${fzDatumLang(fzBis(d.bis))}`;
+  el("fzTTitel").textContent = d.titel;
+  const n = d.stunden.length;
+  const mitThema = d.stunden.filter((x) => x.thema).length;
+  const mitHa = d.stunden.filter((x) => x.hausaufgabe).length;
+  el("fzTInfo").textContent = n
+    ? `${n} ${n === 1 ? "Stunde" : "Stunden"} · ${mitThema} mit Thema · ${mitHa} mit Hausaufgabe` : "";
+  el("fzTSichtbarSchalter").hidden = !d.darfSichtbarkeit;
+  el("fzTSichtbar").checked = !!d.hausaufgabenSichtbar;
+  el("fzTSichtbar").disabled = false;
+  const info = d.hausaufgabenSichtbar ? "" : "Die Hausaufgaben dieses Kurses sind für Schüler ausgeblendet.";
+  el("fzTSichtbarInfo").textContent = d.darfSichtbarkeit ? "" : info;
+  el("fzTSichtbarInfo").hidden = d.darfSichtbarkeit || !info;
+  el("fzTLeer").textContent = n ? "" : "In diesem Zeitraum gibt es noch keine Stunde mit Klassenbuch.";
+  el("fzTListe").replaceChildren(...d.stunden.map(fzThemaZeile));
+}
+
+function fzThemaZeile(s) {
+  const plan = { stunde: s.stunde, grundUNr: s.grundUNr, grundLehrer: s.grundLehrer, lehrer: s.lehrer,
+    originalLehrer: null, klassen: s.klassen, klassenbuch: true };
+  const vertretung = s.lehrer && !gleich(s.lehrer, s.grundLehrer);
+  // „Vertreten" steht schon rechts als „Vertretung L9".
+  const st = s.status && s.status !== "Normal" && !(vertretung && s.status === "Vertreten") ? STATUS[s.status] : null;
+  return h("li", null, h("button", {
+    class: "k-zeile fz-thema", type: "button", disabled: !kbDarfOeffnen(plan),
+    onclick: () => stundenblattOeffnen(plan, s.datum, "fehlzeiten"),
+  },
+  h("span", { class: "k-oben" },
+    h("span", { class: "k-name" }, `${fzDatum(s.datum)} · ${s.stunde}. Stunde`),
+    vertretung ? h("span", { class: "k-rechts" }, `Vertretung ${s.lehrer}`) : null),
+  h("span", { class: "fz-t-thema" + (s.thema ? "" : " leer") }, s.thema || "kein Thema eingetragen"),
+  s.hausaufgabe
+    ? h("span", { class: "fz-t-ha" },
+        h("span", { class: "fz-t-etikett" }, s.faellig ? `Hausaufgabe bis ${fzDatum(s.faellig)}: ` : "Hausaufgabe: "),
+        s.hausaufgabe)
+    : null,
+  !s.erfasst || st
+    ? h("span", { class: "k-marken" },
+        !s.erfasst ? h("span", { class: "marke start" }, "Anwesenheit fehlt") : null,
+        st ? h("span", { class: "marke" }, st.text) : null)
+    : null));
+}
+
+/** Schalter „Hausaufgaben für Schüler sichtbar" (gilt für den ganzen Unterricht). */
+async function fzSichtbarSetzen() {
+  const d = fz.daten;
+  const o = fzOben();
+  if (!d || !o || o.art !== "themen") return;
+  const an = el("fzTSichtbar").checked;
+  el("fzTSichtbar").disabled = true;
+  fehlerIn("fzFehler", "");
+  const nr = fz.ladeNr;
+  try {
+    const a = await senden("PUT", "api/klassenbuch/sichtbarkeit", { uNr: d.uNr, lehrer: d.lehrer, sichtbar: an, datum: null });
+    if (nr !== fz.ladeNr) return;
+    d.hausaufgabenSichtbar = !!a.sichtbar;
+    toast(a.meldung || "Gespeichert.");
+  } catch (f) {
+    if (nr !== fz.ladeNr) return;
+    el("fzTSichtbar").checked = !an;
+    const t = aktionsFehler(f);
+    if (t !== null) fehlerIn("fzFehler", t);
+  } finally {
+    if (nr === fz.ladeNr) el("fzTSichtbar").disabled = false;
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -619,6 +729,16 @@ function fehlzeitenInit() {
   el("fzKlasseWahl").addEventListener("change", (e) => { fz.klasse = e.target.value; fzZeigen(); });
   el("fzNeLehrer").addEventListener("change", (e) => { fz.neLehrer = e.target.value; fzLaden(); });
   el("fzNeKlasse").addEventListener("change", (e) => { fz.neKlasse = e.target.value; fzLaden(); });
+  // Phase 3.3: Unterricht – Fehlzeiten | Themen (ersetzt die oberste Ansicht)
+  for (const b of el("fzUWahl").querySelectorAll("button")) {
+    b.addEventListener("click", () => {
+      const o = fzOben();
+      if (!o || o.art === b.dataset.u || (o.art !== "unterricht" && o.art !== "themen")) return;
+      fz.stapel[fz.stapel.length - 1] = { art: b.dataset.u, unr: o.unr, lehrer: o.lehrer };
+      fzZeigen();
+    });
+  }
+  el("fzTSichtbar").addEventListener("change", fzSichtbarSetzen);
   el("fzReiter").addEventListener("keydown", (e) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     const liste = fzReiterListe().map((r) => r.id);

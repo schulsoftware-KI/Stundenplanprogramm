@@ -4,6 +4,8 @@ namespace VertretungApi.Dtos;
 //  Wochenansicht (Phase 2, Schritt 2): Antwort der /api/woche/...-Endpunkte.
 //  Enthält bewusst KEINE Gründe/Bemerkungen aus dem Vertretungsplan – nur,
 //  was an der Stunde geändert ist (Status + kurzer Info-Text).
+//  Phase 3.3: Thema und Hausaufgabe der Stunde, wenn die anfragende Person
+//  sie lesen darf (sonst null).
 // =====================================================================
 
 /// <summary>Plan eines Ziels (Lehrkraft, Klasse, Lerngruppe, Schüler) über eine oder mehrere Wochen.</summary>
@@ -45,7 +47,11 @@ public record WochenStundeDto(
     int GrundUNr,                         // UNr laut Grundplan    } Schlüssel der Lektion
     string GrundLehrer,                   // Lehrkraft laut Grundplan } (mit Datum + Stunde)
     bool Klassenbuch,                     // Stunde hat ein Klassenbuch (findet statt, mit Schülern)
-    bool Erfasst);                        // Anwesenheit ist erfasst
+    bool Erfasst,                         // Anwesenheit ist erfasst
+    // Phase 3.3 – nur gesetzt, wenn die anfragende Person sie lesen darf (Entscheidungen 23/24/30):
+    string? Thema,
+    string? Hausaufgabe,                  // Schüler: nur, wenn der Unterricht sie nicht ausgeblendet hat
+    DateOnly? HausaufgabeFaellig);
 
 // =====================================================================
 //  Auswahllisten für die PWA (Phase 2, Schritt 3): was man ansehen kann.

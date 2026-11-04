@@ -38,6 +38,13 @@ namespace VertretungApi.Services;
 //  Stunde (gleiche UNr + Lehrkraft laut Grundplan), kann die Erfassung der
 //  1. Stunde beim Speichern in die 2. übernommen werden – „verspätet" wird
 //  dort zu „anwesend"; eine schon erfasste 2. Stunde wird nie überschrieben.
+//
+//  Phase 3.3 (Thema/Hausaufgabe, Nutzer 03.11.2026): Das Stundenblatt trägt
+//  Thema und Hausaufgabe (Services/UnterrichtInhaltService.cs) und speichert
+//  sie zusammen mit der Anwesenheit (eine Version). Eine Lektion kann jetzt
+//  auch ohne Anwesenheit existieren (nur Thema, z. B. bei offener Gruppe) –
+//  „erfasst" heißt deshalb immer ErfasstAm != null. Doppelstunde: das Thema
+//  wird mit übernommen, wenn dort noch keins steht; die Hausaufgabe nicht.
 // =====================================================================
 
 /// <summary>Angemeldete Person (aus der Datenbank, nicht nur aus dem Token).</summary>
@@ -208,15 +215,19 @@ public static class KlassenbuchService
 
         bool darfSchreiben = DarfStunde(u, st) && sperre == null;
 
+        // Phase 3.3: Thema und Hausaufgabe (eigene Rechte: unterrichtende Lehrkraft, Admin).
+        var inhalt = await UnterrichtInhaltService.InhaltAsync(db, u, tag, st, lektion);
+
         // Doppelstunde: nur anbieten, wer auch die 2. Stunde schreiben darf.
         KbFolgeDto? folgeDto = null;
-        var folge = darfSchreiben ? Folgestunde(tag, st) : null;
+        var folge = darfSchreiben || inhalt.DarfSchreiben ? Folgestunde(tag, st) : null;
         if (folge != null && DarfStunde(u, folge))
         {
             var fl = await LektionQuery(db, tag.Datum, folge).AsNoTracking()
-                .Select(l => new { l.ErfasstVon, l.ErfasstAm })
+                .Select(l => new { l.ErfasstVon, l.ErfasstAm, HatThema = l.Thema != null })
                 .FirstOrDefaultAsync();
-            folgeDto = new KbFolgeDto(folge.Stunde, fl != null, fl?.ErfasstVon, fl?.ErfasstAm);
+            // Seit 3.3 kann eine Lektion ohne Anwesenheit existieren (nur Thema): erfasst = ErfasstAm.
+            folgeDto = new KbFolgeDto(folge.Stunde, fl?.ErfasstAm != null, fl?.ErfasstVon, fl?.ErfasstAm, fl?.HatThema ?? false);
         }
 
         return new KbStundeDto(
@@ -224,121 +235,198 @@ public static class KlassenbuchService
             st.Raum, st.Status, st.Info, st.Klassen, st.Gruppen,
             darfSchreiben, sperre,
             lektion?.Version ?? 0, lektion?.ErfasstVon, lektion?.ErfasstAm, lektion?.GeaendertVon, lektion?.GeaendertAm,
-            teilnehmer, offen, hinweise, folgeDto, meldung);
+            teilnehmer, offen, hinweise, folgeDto, inhalt, meldung);
     }
 
     /// <summary>
-    /// Speichert alle Abweichungen einer Lektion. Wer nicht in <c>Eintraege</c> steht (oder dort
-    /// „Anwesend" hat), war anwesend. Die Version muss zum geladenen Stundenblatt passen – sonst
-    /// hat inzwischen jemand anderes gespeichert (409, Konflikt).
+    /// Speichert das Stundenblatt: alle Abweichungen der Anwesenheit (wer nicht in <c>Eintraege</c>
+    /// steht oder dort „Anwesend" hat, war anwesend) und – Phase 3.3 – Thema/Hausaufgabe.
+    /// Die Version muss zum geladenen Stundenblatt passen – sonst hat inzwischen jemand anderes
+    /// gespeichert (409, Konflikt).
     /// </summary>
     public static async Task<KbErgebnis> SpeichernAsync(
         AppDbContext db, KbNutzer u, TagKontext tag, PlanStunde st, KbSpeichernDto dto)
     {
         if (tag.Datum > Heute())
-            return new KbErgebnis(400, "Die Anwesenheit kann erst ab dem Tag der Stunde erfasst werden.");
+            return new KbErgebnis(400, "Das Stundenblatt kann erst ab dem Tag der Stunde ausgefüllt werden.");
+
+        bool mitAnwesenheit = dto.AnwesenheitErfassen;
+        if (!mitAnwesenheit && dto.Inhalt == null)
+            return new KbErgebnis(400, "Es gibt nichts zu speichern.");
+
+        // Phase 3.3: Thema/Hausaufgabe prüfen (eigene Rechte, Entscheidung 22).
+        UnterrichtInhaltService.InhaltNeu? inhalt = null;
+        if (dto.Inhalt != null)
+        {
+            if (!UnterrichtInhaltService.DarfInhalt(u, st))
+                return new KbErgebnis(403, "Thema und Hausaufgabe trägt die unterrichtende Lehrkraft ein.");
+            var (geprueft, fehler) = await UnterrichtInhaltService.PruefenAsync(db, tag.Datum, st, dto.Inhalt);
+            if (fehler != null) return new KbErgebnis(400, fehler);
+            inhalt = geprueft;
+        }
 
         var (liste, offen, _) = await TeilnehmerAsync(db, u, tag, st);
-        if (offen.Count > 0)
+        if (mitAnwesenheit && offen.Count > 0)
             return new KbErgebnis(409, "Die Gruppe dieser Stunde ist noch nicht zusammengestellt.");
 
         // Neue Abweichungen lesen und prüfen.
-        var neu = new Dictionary<int, (AnwesenheitStatus Status, int? Minuten)>();
-        foreach (var e in dto.Eintraege ?? new List<KbEintragDto>())
+        Dictionary<int, (AnwesenheitStatus Status, int? Minuten)>? neu = null;
+        if (mitAnwesenheit)
         {
-            if (!Enum.TryParse(e.Status?.Trim(), true, out AnwesenheitStatus status) || !Enum.IsDefined(status))
-                return new KbErgebnis(400, $"Unbekannter Status „{e.Status}“.");
-            if (status == AnwesenheitStatus.Anwesend)
+            neu = new Dictionary<int, (AnwesenheitStatus Status, int? Minuten)>();
+            foreach (var e in dto.Eintraege ?? new List<KbEintragDto>())
             {
-                neu.Remove(e.SchuelerId);
-                continue;
+                if (!Enum.TryParse(e.Status?.Trim(), true, out AnwesenheitStatus status) || !Enum.IsDefined(status))
+                    return new KbErgebnis(400, $"Unbekannter Status „{e.Status}“.");
+                if (status == AnwesenheitStatus.Anwesend)
+                {
+                    neu.Remove(e.SchuelerId);
+                    continue;
+                }
+                int? minuten = null;
+                if (status == AnwesenheitStatus.Verspaetet)
+                {
+                    if (e.Minuten is not int m || m < 1 || m > MaxMinuten)
+                        return new KbErgebnis(400, $"Bitte bei „verspätet“ die Minuten angeben (1–{MaxMinuten}).");
+                    minuten = m;
+                }
+                neu[e.SchuelerId] = (status, minuten);
             }
-            int? minuten = null;
-            if (status == AnwesenheitStatus.Verspaetet)
-            {
-                if (e.Minuten is not int m || m < 1 || m > MaxMinuten)
-                    return new KbErgebnis(400, $"Bitte bei „verspätet“ die Minuten angeben (1–{MaxMinuten}).");
-                minuten = m;
-            }
-            neu[e.SchuelerId] = (status, minuten);
         }
 
-        var ergebnis = await SpeichereLektionAsync(db, u, tag, st, liste, neu, dto.Version, null);
+        var (ergebnis, _, _) = await SpeichereLektionAsync(db, u, tag, st, liste, neu, inhalt, dto.Version, null);
         if (ergebnis.Status != 200 || !dto.FolgestundeUebernehmen) return ergebnis;
 
-        // ---- Doppelstunde: Erfassung in die folgende Stunde übernehmen ----
+        // ---- Doppelstunde: Anwesenheit und Thema in die folgende Stunde übernehmen ----
         var folge = Folgestunde(tag, st);
         if (folge == null || !DarfStunde(u, folge))
-            return ergebnis with { Meldung = "Gespeichert. Die folgende Stunde konnte nicht mit erfasst werden." };
+            return ergebnis with { Meldung = "Gespeichert. Die folgende Stunde konnte nicht mit übernommen werden." };
 
-        var (fListe, fOffen, _) = await TeilnehmerAsync(db, u, tag, folge);
-        if (fOffen.Count > 0)
-            return ergebnis with { Meldung = $"Gespeichert. Die {folge.Stunde}. Stunde wurde nicht erfasst (Gruppe noch nicht zusammengestellt)." };
-
-        // „Verspätet" gilt nur für die 1. Stunde; die übrigen Status werden übernommen.
-        var fIds = fListe.Select(t => t.Id).ToHashSet();
-        var fNeu = neu
-            .Where(kv => kv.Value.Status != AnwesenheitStatus.Verspaetet && fIds.Contains(kv.Key))
-            .ToDictionary(kv => kv.Key, kv => kv.Value);
-
-        // Version 0 erwartet: Eine schon erfasste 2. Stunde wird nicht überschrieben.
-        var f = await SpeichereLektionAsync(db, u, tag, folge, fListe, fNeu, 0, $"übernommen aus der {st.Stunde}. Stunde");
-        return ergebnis with
+        string? hinweis = null;
+        var fListe = new List<Teilnehmer>();
+        Dictionary<int, (AnwesenheitStatus Status, int? Minuten)>? fNeu = null;
+        if (neu != null)
         {
-            Meldung = f.Status == 200
-                ? $"Anwesenheit für die {st.Stunde}. und {folge.Stunde}. Stunde gespeichert."
-                : $"Gespeichert. Die {folge.Stunde}. Stunde war schon erfasst und wurde nicht überschrieben."
-        };
+            var (fl, fOffen, _) = await TeilnehmerAsync(db, u, tag, folge);
+            fListe = fl;
+            if (fOffen.Count > 0)
+            {
+                hinweis = $"Die Anwesenheit der {folge.Stunde}. Stunde wurde nicht erfasst (Gruppe noch nicht zusammengestellt).";
+            }
+            else
+            {
+                // „Verspätet" gilt nur für die 1. Stunde; die übrigen Status werden übernommen.
+                var fIds = fListe.Select(t => t.Id).ToHashSet();
+                fNeu = neu
+                    .Where(kv => kv.Value.Status != AnwesenheitStatus.Verspaetet && fIds.Contains(kv.Key))
+                    .ToDictionary(kv => kv.Key, kv => kv.Value);
+            }
+        }
+
+        // Phase 3.3 (Entscheidung 21): das Thema – nicht die Hausaufgabe – und nur, wenn dort noch keins steht.
+        UnterrichtInhaltService.InhaltNeu? fInhalt =
+            inhalt?.Thema != null && UnterrichtInhaltService.DarfInhalt(u, folge)
+                ? new UnterrichtInhaltService.InhaltNeu(inhalt.Thema, null, null, NurThemaWennLeer: true)
+                : null;
+
+        if (fNeu == null && fInhalt == null)
+            return ergebnis with { Meldung = hinweis == null ? null : "Gespeichert. " + hinweis };
+
+        // Ohne Versionsprüfung: Eine schon erfasste 2. Stunde bzw. ein vorhandenes Thema wird nie überschrieben.
+        var (f, fAnw, fThema) = await SpeichereLektionAsync(
+            db, u, tag, folge, fListe, fNeu, fInhalt, null, $"übernommen aus der {st.Stunde}. Stunde");
+        string meldung;
+        if (f.Status != 200)
+            meldung = $"Gespeichert. Die {folge.Stunde}. Stunde konnte nicht übernommen werden. {f.Fehler}";
+        else if (fAnw && fThema)
+            meldung = $"Anwesenheit und Thema für die {st.Stunde}. und {folge.Stunde}. Stunde gespeichert.";
+        else if (fAnw)
+            meldung = $"Anwesenheit für die {st.Stunde}. und {folge.Stunde}. Stunde gespeichert.";
+        else if (fThema)
+            meldung = $"Gespeichert – das Thema steht jetzt auch in der {folge.Stunde}. Stunde.";
+        else
+            meldung = $"Gespeichert. Die {folge.Stunde}. Stunde war schon erfasst und wurde nicht überschrieben.";
+        if (hinweis != null) meldung += " " + hinweis;
+        return ergebnis with { Meldung = meldung };
     }
 
     /// <summary>
-    /// Speichert die Abweichungen <paramref name="neu"/> einer Lektion (Transaktion, Historie,
-    /// Versionsprüfung). <paramref name="herkunft"/>: Vermerk in der Historie, z. B. bei Übernahme
-    /// aus der 1. Stunde einer Doppelstunde.
+    /// Speichert in einer Lektion (Transaktion, Historie, Versionsprüfung):
+    /// <paramref name="neu"/> = Abweichungen der Anwesenheit (null: Anwesenheit bleibt),
+    /// <paramref name="inhalt"/> = Thema/Hausaufgabe (null: bleiben).
+    /// <paramref name="version"/> null = Übernahme in die 2. Stunde einer Doppelstunde: keine
+    /// Versionsprüfung, aber eine schon erfasste Anwesenheit bzw. ein vorhandenes Thema bleibt.
+    /// <paramref name="herkunft"/>: Vermerk in der Historie, z. B. „übernommen aus der 3. Stunde".
+    /// Liefert außerdem, ob Anwesenheit bzw. Thema/Hausaufgabe tatsächlich geändert wurden.
     /// </summary>
-    private static async Task<KbErgebnis> SpeichereLektionAsync(
+    private static async Task<(KbErgebnis Ergebnis, bool Anwesenheit, bool Inhalt)> SpeichereLektionAsync(
         AppDbContext db, KbNutzer u, TagKontext tag, PlanStunde st, List<Teilnehmer> liste,
-        Dictionary<int, (AnwesenheitStatus Status, int? Minuten)> neu, int version, string? herkunft)
+        Dictionary<int, (AnwesenheitStatus Status, int? Minuten)>? neu,
+        UnterrichtInhaltService.InhaltNeu? inhalt, int? version, string? herkunft)
     {
         await using var tx = await db.Database.BeginTransactionAsync();
         try
         {
             var lektion = await LektionQuery(db, tag.Datum, st).Include(l => l.Anwesenheiten).FirstOrDefaultAsync();
             int aktuell = lektion?.Version ?? 0;
-            if (version != aktuell)
+            if (version is int erwartet)
             {
-                string text = lektion != null && lektion.GeaendertVon != null
-                    ? $"Die Anwesenheit wurde inzwischen von {lektion.GeaendertVon} gespeichert. Bitte neu laden."
-                    : "Das Stundenblatt hat sich inzwischen geändert. Bitte neu laden.";
-                return new KbErgebnis(409, text, true);
+                if (erwartet != aktuell)
+                {
+                    string text = lektion != null && lektion.GeaendertVon != null
+                        ? $"Das Stundenblatt wurde inzwischen von {lektion.GeaendertVon} gespeichert. Bitte neu laden."
+                        : "Das Stundenblatt hat sich inzwischen geändert. Bitte neu laden.";
+                    return (new KbErgebnis(409, text, true), false, false);
+                }
+            }
+            else
+            {
+                // Doppelstunde: nie überschreiben.
+                if (lektion?.ErfasstAm != null) neu = null;
+                if (inhalt != null && inhalt.NurThemaWennLeer && !string.IsNullOrWhiteSpace(lektion?.Thema)) inhalt = null;
+            }
+            if (neu == null && inhalt == null)
+            {
+                await tx.CommitAsync();
+                return (KbErgebnis.Ok, false, false);
             }
 
-            var erlaubt = liste.Select(t => t.Id).ToHashSet();
-            if (lektion != null) erlaubt.UnionWith(lektion.Anwesenheiten.Select(a => a.SchuelerId));
-            if (neu.Keys.Any(id => !erlaubt.Contains(id)))
-                return new KbErgebnis(400, "Mindestens eine Schülerin bzw. ein Schüler gehört nicht zu dieser Stunde.");
-
-            // Nachtrag 3.2: einzeln festgelegte Fehlstunden ändert nur KL/SK/Admin.
-            if (lektion != null)
+            if (neu != null)
             {
-                foreach (var f in lektion.Anwesenheiten.Where(EinzelnFestgelegt))
+                var erlaubt = liste.Select(t => t.Id).ToHashSet();
+                if (lektion != null) erlaubt.UnionWith(lektion.Anwesenheiten.Select(a => a.SchuelerId));
+                if (neu.Keys.Any(id => !erlaubt.Contains(id)))
+                    return (new KbErgebnis(400, "Mindestens eine Schülerin bzw. ein Schüler gehört nicht zu dieser Stunde."), false, false);
+
+                // Nachtrag 3.2: einzeln festgelegte Fehlstunden ändert nur KL/SK/Admin.
+                if (lektion != null)
                 {
-                    var (sNeuF, mNeuF) = neu.TryGetValue(f.SchuelerId, out var nf) ? nf : (AnwesenheitStatus.Anwesend, (int?)null);
-                    if (sNeuF == f.Status && mNeuF == f.Minuten) continue;
-                    if (await LeitungFuerSchuelerAsync(db, u, f.SchuelerId, liste)) continue;
-                    var name = await db.Schueler.AsNoTracking().Where(x => x.Id == f.SchuelerId)
-                        .Select(x => x.Vorname + " " + x.Nachname).FirstOrDefaultAsync();
-                    return new KbErgebnis(403,
-                        $"Die Fehlstunde von {name ?? "einem Schüler"} wurde von {f.BewertetVon ?? "der Klassenleitung bzw. Stufenkoordination"} " +
-                        "festgelegt. Ändern kann sie nur die Klassenleitung bzw. Stufenkoordination.");
+                    foreach (var f in lektion.Anwesenheiten.Where(EinzelnFestgelegt))
+                    {
+                        var (sNeuF, mNeuF) = neu.TryGetValue(f.SchuelerId, out var nf) ? nf : (AnwesenheitStatus.Anwesend, (int?)null);
+                        if (sNeuF == f.Status && mNeuF == f.Minuten) continue;
+                        if (await LeitungFuerSchuelerAsync(db, u, f.SchuelerId, liste)) continue;
+                        var name = await db.Schueler.AsNoTracking().Where(x => x.Id == f.SchuelerId)
+                            .Select(x => x.Vorname + " " + x.Nachname).FirstOrDefaultAsync();
+                        return (new KbErgebnis(403,
+                            $"Die Fehlstunde von {name ?? "einem Schüler"} wurde von {f.BewertetVon ?? "der Klassenleitung bzw. Stufenkoordination"} " +
+                            "festgelegt. Ändern kann sie nur die Klassenleitung bzw. Stufenkoordination."), false, false);
+                    }
                 }
             }
 
             var jetzt = DateTime.UtcNow;
-            bool pseudo = liste.Any(t => t.IstPseudo);
-            bool neuAngelegt = lektion == null;
+            // Ohne Teilnehmerliste (z. B. nur Thema bei offener Gruppe): Pseudodaten-Betrieb erkennen.
+            bool pseudo = liste.Any(t => t.IstPseudo)
+                          || (liste.Count == 0 && await db.Schueler.AsNoTracking().AnyAsync(s => s.IstPseudo));
             if (lektion == null)
             {
+                // Nichts einzutragen (keine Anwesenheit, leeres Thema, keine Hausaufgabe): keine Lektion anlegen.
+                if (neu == null && inhalt!.IstLeer)
+                {
+                    await tx.CommitAsync();
+                    return (KbErgebnis.Ok, false, false);
+                }
                 lektion = new Lektion
                 {
                     Datum = tag.Datum,
@@ -346,86 +434,98 @@ public static class KlassenbuchService
                     GrundUNr = st.GrundUNr,
                     GrundLehrer = st.GrundLehrer.Trim().ToUpperInvariant(),
                     Schuljahr = tag.Schuljahr,
-                    ErfasstVon = u.Name,
-                    ErfasstAm = jetzt,
                     IstPseudo = pseudo
                 };
                 db.Lektionen.Add(lektion);
                 await db.SaveChangesAsync();   // Id für Anwesenheit und Historie
             }
 
-            var alt = lektion.Anwesenheiten.ToDictionary(a => a.SchuelerId);
             var historie = new List<KlassenbuchProtokoll>();
 
-            // Phase 3.2: Entschuldigungen, die diesen Tag abdecken – neue Fehlstunden und
-            // Verspätungen gelten dann gleich als entschuldigt.
-            var neuIds = neu.Keys.ToList();
-            var abdeckend = neuIds.Count == 0
-                ? new Dictionary<int, Entschuldigung>()
-                : (await db.Entschuldigungen.AsNoTracking()
-                        .Where(e => neuIds.Contains(e.SchuelerId) && e.Von <= tag.Datum && e.Bis >= tag.Datum)
-                        .ToListAsync())
-                    .GroupBy(e => e.SchuelerId)
-                    .ToDictionary(g => g.Key, g => g.OrderByDescending(e => e.ErfasstAm).First());
-            if (neuAngelegt)
+            // ---- Anwesenheit ----
+            if (neu != null)
             {
-                string text = neu.Count == 0 ? "alle anwesend" : $"erfasst, {neu.Count} Abweichung(en)";
-                historie.Add(Protokoll(u, "Erfasst", lektion, null, null,
-                    herkunft == null ? text : $"{herkunft}: {text}"));
-            }
+                bool ersterfassung = lektion.ErfasstAm == null;
+                var alt = lektion.Anwesenheiten.ToDictionary(a => a.SchuelerId);
 
-            foreach (var id in alt.Keys.Union(neu.Keys).ToList())
-            {
-                alt.TryGetValue(id, out var a);
-                var (sAlt, mAlt) = a == null ? (AnwesenheitStatus.Anwesend, (int?)null) : (a.Status, a.Minuten);
-                bool hatNeu = neu.TryGetValue(id, out var n);
-                var (sNeu, mNeu) = hatNeu ? n : (AnwesenheitStatus.Anwesend, (int?)null);
-                if (sAlt == sNeu && mAlt == mNeu) continue;
-
-                historie.Add(Protokoll(u, "Anwesenheit", lektion, id,
-                    neuAngelegt ? null : StatusText(sAlt, mAlt), StatusText(sNeu, mNeu)));
-
-                if (!hatNeu)
+                // Phase 3.2: Entschuldigungen, die diesen Tag abdecken – neue Fehlstunden und
+                // Verspätungen gelten dann gleich als entschuldigt.
+                var neuIds = neu.Keys.ToList();
+                var abdeckend = neuIds.Count == 0
+                    ? new Dictionary<int, Entschuldigung>()
+                    : (await db.Entschuldigungen.AsNoTracking()
+                            .Where(e => neuIds.Contains(e.SchuelerId) && e.Von <= tag.Datum && e.Bis >= tag.Datum)
+                            .ToListAsync())
+                        .GroupBy(e => e.SchuelerId)
+                        .ToDictionary(g => g.Key, g => g.OrderByDescending(e => e.ErfasstAm).First());
+                if (ersterfassung)
                 {
-                    if (a != null) db.Anwesenheiten.Remove(a);
+                    string text = neu.Count == 0 ? "alle anwesend" : $"erfasst, {neu.Count} Abweichung(en)";
+                    historie.Add(Protokoll(u, "Erfasst", lektion, null, null,
+                        herkunft == null ? text : $"{herkunft}: {text}"));
                 }
-                else if (a != null)
+
+                foreach (var id in alt.Keys.Union(neu.Keys).ToList())
                 {
-                    a.Status = sNeu;
-                    a.Minuten = mNeu;
-                    a.GeaendertVon = u.Name;
-                    a.GeaendertAm = jetzt;
-                    if (a.Bewertung == FehlBewertung.Offen && a.EntschuldigungId == null)
-                        ZeitraumAnwenden(a, abdeckend);
-                }
-                else
-                {
-                    var neueA = new Anwesenheit
+                    alt.TryGetValue(id, out var a);
+                    var (sAlt, mAlt) = a == null ? (AnwesenheitStatus.Anwesend, (int?)null) : (a.Status, a.Minuten);
+                    bool hatNeu = neu.TryGetValue(id, out var n);
+                    var (sNeu, mNeu) = hatNeu ? n : (AnwesenheitStatus.Anwesend, (int?)null);
+                    if (sAlt == sNeu && mAlt == mNeu) continue;
+
+                    historie.Add(Protokoll(u, "Anwesenheit", lektion, id,
+                        ersterfassung ? null : StatusText(sAlt, mAlt), StatusText(sNeu, mNeu)));
+
+                    if (!hatNeu)
                     {
-                        LektionId = lektion.Id,
-                        SchuelerId = id,
-                        Status = sNeu,
-                        Minuten = mNeu,
-                        GeaendertVon = u.Name,
-                        GeaendertAm = jetzt
-                    };
-                    ZeitraumAnwenden(neueA, abdeckend);
-                    db.Anwesenheiten.Add(neueA);
+                        if (a != null) db.Anwesenheiten.Remove(a);
+                    }
+                    else if (a != null)
+                    {
+                        a.Status = sNeu;
+                        a.Minuten = mNeu;
+                        a.GeaendertVon = u.Name;
+                        a.GeaendertAm = jetzt;
+                        if (a.Bewertung == FehlBewertung.Offen && a.EntschuldigungId == null)
+                            ZeitraumAnwenden(a, abdeckend);
+                    }
+                    else
+                    {
+                        var neueA = new Anwesenheit
+                        {
+                            LektionId = lektion.Id,
+                            SchuelerId = id,
+                            Status = sNeu,
+                            Minuten = mNeu,
+                            GeaendertVon = u.Name,
+                            GeaendertAm = jetzt
+                        };
+                        ZeitraumAnwenden(neueA, abdeckend);
+                        db.Anwesenheiten.Add(neueA);
+                    }
+                }
+
+                if (ersterfassung)
+                {
+                    lektion.ErfasstVon = u.Name;
+                    lektion.ErfasstAm = jetzt;
                 }
             }
+            int nachAnwesenheit = historie.Count;
+            bool anwesenheitGeaendert = nachAnwesenheit > 0;
+
+            // ---- Phase 3.3: Thema und Hausaufgabe ----
+            if (inhalt != null)
+                UnterrichtInhaltService.Anwenden(u, lektion, inhalt, herkunft, historie);
+            bool inhaltGeaendert = historie.Count > nachAnwesenheit;
 
             // Nichts geändert (erneut „Speichern" ohne Änderung): Version bleibt.
-            if (!neuAngelegt && historie.Count == 0)
+            if (historie.Count == 0)
             {
                 await tx.CommitAsync();
-                return KbErgebnis.Ok;
+                return (KbErgebnis.Ok, false, false);
             }
 
-            if (lektion.ErfasstAm == null)
-            {
-                lektion.ErfasstVon = u.Name;
-                lektion.ErfasstAm = jetzt;
-            }
             // Momentaufnahme der Stunde (für spätere Auswertungen).
             lektion.UNr = st.UNr;
             lektion.Fach = st.Fach;
@@ -442,13 +542,13 @@ public static class KlassenbuchService
             db.KlassenbuchProtokolle.AddRange(historie);
             await db.SaveChangesAsync();
             await tx.CommitAsync();
-            return KbErgebnis.Ok;
+            return (KbErgebnis.Ok, anwesenheitGeaendert, inhaltGeaendert);
         }
         catch (DbUpdateException)
         {
             // Zwei Personen haben dieselbe Lektion gleichzeitig zum ersten Mal gespeichert.
             db.ChangeTracker.Clear();
-            return new KbErgebnis(409, "Das Stundenblatt wurde gerade von jemand anderem gespeichert. Bitte neu laden.", true);
+            return (new KbErgebnis(409, "Das Stundenblatt wurde gerade von jemand anderem gespeichert. Bitte neu laden.", true), false, false);
         }
     }
 

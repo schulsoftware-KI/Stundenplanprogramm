@@ -17,6 +17,9 @@ namespace VertretungApi.Controllers;
 ///   GET api/woche/schueler/{id}?datum=…&amp;wochen=…      (individueller Plan; nur Personal)
 ///   GET api/woche/auswahl?datum=…                     (Auswahllisten für die PWA; PlanLesen)
 ///
+/// Phase 3.3: Stunden tragen Thema/Hausaufgabe, soweit die angemeldete Person sie lesen darf
+/// (siehe InhaltLeser in Services/WochenplanService.cs); ohne Anmeldung nie.
+///
 /// datum fehlt = heute; es wird immer ab dem Montag dieser Woche geliefert. wochen: 1–6.
 /// PlanLesen (Phase 2, Schritt 4) = nur Personal; mit "Woche:OhneLogin": true für alle.
 /// Schüler sehen ausschließlich ihren eigenen Plan über /ich.
@@ -41,19 +44,19 @@ public class WocheController : ControllerBase
     [HttpGet("lehrer/{kuerzel}")]
     public async Task<IActionResult> Lehrer(string kuerzel, [FromQuery] DateOnly? datum, [FromQuery] int wochen = 1)
         => Ok(await WochenplanService.BerechneAsync(
-            _db, WochenZielArt.Lehrer, kuerzel, new[] { kuerzel }, datum ?? Heute(), wochen));
+            _db, WochenZielArt.Lehrer, kuerzel, new[] { kuerzel }, datum ?? Heute(), wochen, null, await PersonalLeserAsync()));
 
     [Authorize(Policy = Rollen.PlanLesen)]
     [HttpGet("klasse/{klasse}")]
     public async Task<IActionResult> Klasse(string klasse, [FromQuery] DateOnly? datum, [FromQuery] int wochen = 1)
         => Ok(await WochenplanService.BerechneAsync(
-            _db, WochenZielArt.Klasse, klasse, new[] { klasse }, datum ?? Heute(), wochen));
+            _db, WochenZielArt.Klasse, klasse, new[] { klasse }, datum ?? Heute(), wochen, null, await PersonalLeserAsync()));
 
     [Authorize(Policy = Rollen.PlanLesen)]
     [HttpGet("gruppe/{schluessel}")]
     public async Task<IActionResult> Gruppe(string schluessel, [FromQuery] DateOnly? datum, [FromQuery] int wochen = 1)
         => Ok(await WochenplanService.BerechneAsync(
-            _db, WochenZielArt.Gruppe, schluessel, new[] { schluessel }, datum ?? Heute(), wochen));
+            _db, WochenZielArt.Gruppe, schluessel, new[] { schluessel }, datum ?? Heute(), wochen, null, await PersonalLeserAsync()));
 
     /// <summary>Individueller Plan eines Schülers aus seinen Lerngruppen (Klasse bzw. Kurse).</summary>
     [Authorize(Roles = Rollen.Personal)]
@@ -62,7 +65,7 @@ public class WocheController : ControllerBase
     {
         var s = await _db.Schueler.FindAsync(id);
         if (s == null) return NotFound(new { fehler = "Schüler nicht gefunden." });
-        return Ok(await SchuelerPlan(s, datum ?? Heute(), wochen));
+        return Ok(await SchuelerPlan(s, datum ?? Heute(), wochen, await PersonalLeserAsync()));
     }
 
     /// <summary>
@@ -82,7 +85,7 @@ public class WocheController : ControllerBase
             var s = konto.SchuelerId is int sid ? await _db.Schueler.FindAsync(sid) : null;
             if (s == null)
                 return NotFound(new { fehler = "Diesem Konto ist kein Schüler zugeordnet." });
-            return Ok(await SchuelerPlan(s, datum ?? Heute(), wochen));
+            return Ok(await SchuelerPlan(s, datum ?? Heute(), wochen, InhaltLeser.FuerSchueler()));
         }
 
         if (string.IsNullOrWhiteSpace(konto.LehrerKuerzel))
@@ -90,11 +93,12 @@ public class WocheController : ControllerBase
 
         var k = konto.LehrerKuerzel.Trim();
         var plan = await WochenplanService.BerechneAsync(
-            _db, WochenZielArt.Lehrer, k, new[] { k }, datum ?? Heute(), wochen);
+            _db, WochenZielArt.Lehrer, k, new[] { k }, datum ?? Heute(), wochen, null,
+            InhaltLeser.FuerPersonal(NutzerAus(konto)));
         return Ok(new { Art = "lehrer", Lehrer = k, Plan = plan });
     }
 
-    private async Task<object> SchuelerPlan(Schueler s, DateOnly datum, int wochen)
+    private async Task<object> SchuelerPlan(Schueler s, DateOnly datum, int wochen, InhaltLeser? leser)
     {
         var gruppen = await _db.Zugehoerigkeiten
             .Where(z => z.SchuelerId == s.Id)
@@ -105,7 +109,7 @@ public class WocheController : ControllerBase
         // Schüler nur, wenn er dazugehört (sonst wie bisher die ganze Klasse).
         var fertig = await WochenplanService.FertigeGruppenAsync(_db);
         var plan = await WochenplanService.BerechneAsync(
-            _db, WochenZielArt.Schueler, $"{s.Vorname} {s.Nachname}", gruppen, datum, wochen, fertig);
+            _db, WochenZielArt.Schueler, $"{s.Vorname} {s.Nachname}", gruppen, datum, wochen, fertig, leser);
 
         return new
         {
@@ -114,4 +118,22 @@ public class WocheController : ControllerBase
             Plan = plan
         };
     }
+
+    /// <summary>
+    /// Phase 3.3: Leserechte für Thema/Hausaufgabe der angemeldeten Person (Personal).
+    /// Ohne Anmeldung bzw. für Schülerkonten in diesen Ansichten: keine.
+    /// </summary>
+    private async Task<InhaltLeser?> PersonalLeserAsync()
+    {
+        var id = Rollen.BenutzerId(User);
+        if (id == null) return null;
+        var b = await _db.Benutzer.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id.Value);
+        if (b == null || b.Rolle == BenutzerRolle.Schueler) return null;
+        return InhaltLeser.FuerPersonal(NutzerAus(b));
+    }
+
+    private static KbNutzer NutzerAus(Benutzer b) => new(
+        b.Benutzername, b.Rolle,
+        string.IsNullOrWhiteSpace(b.LehrerKuerzel) ? null : b.LehrerKuerzel.Trim(),
+        KontenService.Zustaendigkeiten(b.Zustaendig));
 }

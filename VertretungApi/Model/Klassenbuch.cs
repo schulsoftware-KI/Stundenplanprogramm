@@ -28,6 +28,12 @@ namespace VertretungApi.Model;
 //     „Beurlaubt" gilt immer als entschuldigt, „schulische Veranstaltung"
 //     ist keine Fehlzeit.
 //
+//  Phase 3.3 (Unterrichtsinhalt + Hausaufgaben, Entscheidungen 19–30):
+//   - Lektion trägt Thema und Hausaufgabe (mit Fälligkeit). Gespeichert wird
+//     im Stundenblatt zusammen mit der Anwesenheit (eine Version).
+//   - UnterrichtEinstellung: je Unterricht (Schuljahr, UNr, Lehrkraft laut
+//     Plan), ob Schüler die Hausaufgaben sehen (Standard: ja).
+//
 //  Alle Datensätze tragen IstPseudo: in der Entwicklung nur synthetische
 //  Daten; echte SchILD-Daten kommen erst im Produktivsystem (Phase 5).
 // =====================================================================
@@ -108,7 +114,29 @@ public class Lektion
     public int Version { get; set; }                   // erhöht sich bei jedem Speichern (Konflikterkennung)
     public bool IstPseudo { get; set; }
 
+    // Phase 3.3: Unterrichtsinhalt und Hausaufgabe. Schreiben dürfen die haltende und die
+    // ursprüngliche Lehrkraft sowie Admin; jede Änderung kommt in die Historie.
+    public string? Thema { get; set; }                 // bis 300 Zeichen
+    public string? Hausaufgabe { get; set; }           // bis 2000 Zeichen, Zeilenumbrüche erlaubt
+    public DateOnly? HausaufgabeFaellig { get; set; }  // gesetzt, sobald eine Hausaufgabe eingetragen ist
+
     public List<Anwesenheit> Anwesenheiten { get; set; } = new();
+}
+
+/// <summary>
+/// Einstellungen eines Unterrichts (Phase 3.3), Tabelle "UnterrichtEinstellungen".
+/// Unterricht = UNr + Lehrkraft laut Plan im Schuljahr. Ohne Datensatz gelten die Standardwerte.
+/// Keine personenbezogenen Schülerdaten – bleibt bei einem neuen Pseudodaten-Seed erhalten.
+/// </summary>
+public class UnterrichtEinstellung
+{
+    public int Id { get; set; }
+    public string Schuljahr { get; set; } = "";
+    public int UNr { get; set; }
+    public string Lehrer { get; set; } = "";              // GROSS geschrieben
+    public bool HausaufgabenSichtbar { get; set; } = true; // Entscheidung 30: Standard sichtbar
+    public string? GeaendertVon { get; set; }
+    public DateTime? GeaendertAm { get; set; }            // UTC
 }
 
 /// <summary>Status einer Schülerin / eines Schülers in einer Lektion. Anwesend wird nicht gespeichert.</summary>
@@ -173,8 +201,9 @@ public class KlassenbuchProtokoll
     public DateTime Zeit { get; set; } = DateTime.UtcNow;   // UTC
     public string Akteur { get; set; } = "";                // Benutzername
     public string Art { get; set; } = "";                   // Anwesenheit | Erfasst | Gruppe | Bewertung | Entschuldigung
+                                                            // | Thema | Hausaufgabe | Sichtbarkeit (Phase 3.3)
     public int? LektionId { get; set; }
-    public string? Gruppe { get; set; }                     // Schülergruppe bei Art "Gruppe"
+    public string? Gruppe { get; set; }                     // Schülergruppe bei Art "Gruppe"; "UNr|LEHRER" bei "Sichtbarkeit"
     public int? SchuelerId { get; set; }
     public string? Alt { get; set; }
     public string? Neu { get; set; }

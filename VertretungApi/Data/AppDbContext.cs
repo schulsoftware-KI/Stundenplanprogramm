@@ -21,6 +21,7 @@ public class AppDbContext : DbContext
     public DbSet<Anwesenheit> Anwesenheiten => Set<Anwesenheit>();           // Phase 3.1
     public DbSet<KlassenbuchProtokoll> KlassenbuchProtokolle => Set<KlassenbuchProtokoll>(); // Phase 3.1
     public DbSet<Entschuldigung> Entschuldigungen => Set<Entschuldigung>();  // Phase 3.2
+    public DbSet<UnterrichtEinstellung> UnterrichtEinstellungen => Set<UnterrichtEinstellung>(); // Phase 3.3
 
     // Grundplan + Kalender (Phase 2, Schritt 1)
     public DbSet<GrundplanVersion> GrundplanVersionen => Set<GrundplanVersion>();
@@ -98,6 +99,13 @@ public class AppDbContext : DbContext
 
         b.Entity<KlassenbuchProtokoll>().HasIndex(p => p.LektionId);
         b.Entity<KlassenbuchProtokoll>().HasIndex(p => p.Gruppe);
+
+        // Phase 3.3: Einstellungen je Unterricht (Sichtbarkeit der Hausaufgaben). Neue Tabelle –
+        // die Schema-Nachrüstung legt sie samt Index an; Thema/Hausaufgabe sind neue Spalten
+        // der Lektion (alle nullable).
+        b.Entity<UnterrichtEinstellung>().ToTable("UnterrichtEinstellungen");
+        b.Entity<UnterrichtEinstellung>()
+            .HasIndex(e => new { e.Schuljahr, e.UNr, e.Lehrer }).IsUnique();
 
         // --- Grundplan (versioniert) ---
         b.Entity<GrundplanVersion>()

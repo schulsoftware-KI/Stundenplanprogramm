@@ -35,6 +35,10 @@
 //  Stunden tragen ein Häkchen. Kontomenü „Meine Gruppen".
 //  Fehlzeiten (Phase 3.2, Code in fehlzeiten.js): Kontomenü „Fehlzeiten" bzw.
 //  „Meine Fehlzeiten".
+//  Thema/Hausaufgabe (Phase 3.3): Stundenblatt (klassenbuch.js), Themenliste
+//  und „Thema fehlt" (fehlzeiten.js), Schüleransicht „Hausaufgaben" und
+//  Lese-Dialog im Plan (hausaufgaben.js). Für Personal landen Thema und
+//  Hausaufgabe nie im Browser-Speicher (ohneKlassenbuchInhalt).
 // =====================================================================
 
 const MODI = {
@@ -228,6 +232,21 @@ function cacheSchreiben(url, daten) {
 
 const cacheLesen = (url) => nutzerAblage().lesen(praefix() + "antwort:" + url, null);
 
+/**
+ * Phase 3.3: Thema/Hausaufgabe sind Klassenbuchdaten – für Personal nicht im Browser-Speicher
+ * (Entscheidung 5). Schüler dürfen ihre eigenen Hausaufgaben offline lesen (Entscheidung 26).
+ */
+function ohneKlassenbuchInhalt(daten) {
+  if (!istPersonal() || !daten) return daten;
+  const plan = Array.isArray(daten.tage) ? daten : daten.plan;
+  if (!plan || !Array.isArray(plan.tage)) return daten;
+  const kopie = JSON.parse(JSON.stringify(daten));
+  const p = Array.isArray(kopie.tage) ? kopie : kopie.plan;
+  for (const t of p.tage)
+    for (const s of t.stunden || []) { delete s.thema; delete s.hausaufgabe; delete s.hausaufgabeFaellig; }
+  return kopie;
+}
+
 /** Alles löschen, was für die angemeldete Person gespeichert wurde. */
 function nutzerdatenLoeschen() {
   const p = praefix();
@@ -295,7 +314,7 @@ async function holen(url, { merken = true } = {}) {
     }
     if (!resp.ok) throw new Error("Server antwortet mit " + resp.status);
     const daten = await resp.json();
-    if (merken) cacheSchreiben(url, daten);
+    if (merken) cacheSchreiben(url, ohneKlassenbuchInhalt(daten));
     return { daten, offlineStand: null };
   } catch (fehler) {
     if (fehler instanceof HttpFehler) throw fehler;
@@ -494,6 +513,7 @@ async function ladeWoche({ still = false } = {}) {
       render();
     }
     if (!offlineStand && !still) vorladen(plusTage(state.montag, 7));
+    if (!still) haLeisteLaden(); // Phase 3.3: Schüler – offene Hausaufgaben über dem Plan
   } catch (fehler) {
     if (nr !== ladeNr) return;
     state.geladenUm = Date.now(); // nicht im Sekundentakt erneut versuchen
@@ -736,18 +756,23 @@ function eintrag(s, datum) {
   if (fuerMichFrei) klassen.push("fuer-mich-frei");
 
   // Klassenbuch (Phase 3.1): Stunde antippen öffnet das Stundenblatt.
+  // Phase 3.3: Wer kein Stundenblatt öffnen darf, liest Thema/Hausaufgabe in einem Dialog.
   const kbAuf = !!datum && kbDarfOeffnen(s);
+  const inhaltAuf = !!datum && !kbAuf && haInhaltZeigbar(s);
   const props = { class: klassen.join(" ") };
-  if (kbAuf) {
+  if (kbAuf || inhaltAuf) {
     klassen.push("kb-ja");
-    if (s.erfasst) klassen.push("kb-erfasst");
+    if (kbAuf && s.erfasst) klassen.push("kb-erfasst");
+    if (inhaltAuf) klassen.push("inhalt-ja");
     props.class = klassen.join(" ");
     props.role = "button";
     props.tabindex = "0";
-    props.onclick = () => stundenblattOeffnen(s, datum);
+    const oeffnen = kbAuf ? () => stundenblattOeffnen(s, datum) : () => haInhaltZeigen(s, datum);
+    props.onclick = oeffnen;
     props.onkeydown = (e) => {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); stundenblattOeffnen(s, datum); }
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); oeffnen(); }
     };
+    if (inhaltAuf) props["aria-haspopup"] = "dialog";
   }
 
   // Zweite Zeile: Lehrersicht -> Klassen/Kurs (+ Lehrerwechsel), sonst die Lehrkraft.
@@ -765,9 +790,10 @@ function eintrag(s, datum) {
       h("span", { class: "raum" }, korrektur(s.originalRaum, s.raum))),
     h("div", { class: "e-unten" },
       h("span", { class: "wer" }, wer),
-      badge || kbAuf
+      badge || kbAuf || s.hausaufgabe
         ? h("span", { class: "e-rechts" },
             badge ? h("span", { class: "badge" }, badge) : null,
+            s.hausaufgabe ? haMarke() : null,
             kbAuf ? kbSymbol(s.erfasst) : null)
         : null));
 }
@@ -998,10 +1024,12 @@ function zeigeAnmeldung(hinweis) {
   verwaltungLeeren();
   klassenbuchLeeren();
   fehlzeitenLeeren();
+  hausaufgabenLeeren();
   el("inhalt").hidden = true;
   el("verwaltung").hidden = true;
   el("klassenbuch").hidden = true;
   el("fehlzeiten").hidden = true;
+  el("hausaufgaben").hidden = true;
   el("pflicht").hidden = true;
   el("anmeldung").hidden = false;
   el("aktualisieren").hidden = true;
@@ -1024,11 +1052,13 @@ function appStarten() {
   verwaltungLeeren();
   klassenbuchLeeren();
   fehlzeitenLeeren();
+  hausaufgabenLeeren();
   el("anmeldung").hidden = true;
   el("pflicht").hidden = true;
   el("verwaltung").hidden = true;
   el("klassenbuch").hidden = true;
   el("fehlzeiten").hidden = true;
+  el("hausaufgaben").hidden = true;
   el("inhalt").hidden = false;
   el("aktualisieren").hidden = false;
   const k = el("kontoKnopf");
@@ -1049,6 +1079,8 @@ function appStarten() {
 
   zustandLaden();
   fuelleAuswahl();
+  haLeisteRendern();
+  window.scrollTo(0, 0); // nach der Anmeldemaske (Handy quer: Seite war gescrollt) oben beginnen
   render();
   ladeAuswahl();
   ladeWoche();
@@ -1189,6 +1221,7 @@ function kontoOeffnen() {
   kontoMenueAnpassen();
   klassenbuchMenueAnpassen();
   fehlzeitenMenueAnpassen();
+  hausaufgabenMenueAnpassen();
   ueberallZuruecksetzen();
   kontoFehler("");
   if (typeof konto.showModal === "function") { if (!konto.open) konto.showModal(); }
@@ -1297,6 +1330,7 @@ el("aktualisieren").addEventListener("click", () => {
   if (verwaltungOffen()) { verwaltungAktualisieren(); return; }
   if (klassenbuchOffen()) { kbAktualisieren(); return; }
   if (fehlzeitenOffen()) { fzAktualisieren(); return; }
+  if (hausaufgabenOffen()) { haLaden(); return; }
   ladeAuswahl();
   ladeWoche();
 });
@@ -1448,6 +1482,7 @@ async function start() {
   kontenInit();
   klassenbuchInit();
   fehlzeitenInit();
+  hausaufgabenInit();
   altlastenEntfernen();
   state.anmeldung = anmeldungLesen();
   state.anmeldungNoetig = lokal.lesen("optionen", { anmeldungNoetig: true }).anmeldungNoetig !== false;

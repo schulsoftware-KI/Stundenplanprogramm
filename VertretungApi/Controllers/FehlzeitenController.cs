@@ -14,6 +14,7 @@ namespace VertretungApi.Controllers;
 /// Fehlzeiten und Entschuldigungen (Phase 3.2):
 ///   GET    api/fehlzeiten/rechte                              was darf ich sehen? (Personal)
 ///   GET    api/fehlzeiten/nicht-erfasst?ansicht=ich|zustaendig|alle&amp;lehrer=&amp;klasse=&amp;von=&amp;bis=
+///                                                             &amp;art=alle|anwesenheit|thema (Phase 3.3)
 ///   GET    api/fehlzeiten/unterrichte                         „Meine Kurse" (Lehrkraft)
 ///   GET    api/fehlzeiten/unterricht?unr=&amp;lehrer=&amp;von=&amp;bis=   Liste eines Unterrichts (Lehrkraft selbst, Admin)
 ///   GET    api/fehlzeiten/klasse/{klasse}?von=&amp;bis=          Liste einer Klasse/Stufe (KL/SK zuständig, Admin)
@@ -44,6 +45,16 @@ public class FehlzeitenController : ControllerBase
             ? d
             : new DateOnly(2026, 11, 2);
 
+    /// <summary>
+    /// Phase 3.3: Ab diesem Tag gelten erfasste Stunden ohne Thema als offen (Klassenbuch:ThemaAb);
+    /// fehlt die Einstellung, gilt ErfassungAb.
+    /// </summary>
+    private DateOnly ThemaAb()
+        => DateOnly.TryParseExact(_cfg["Klassenbuch:ThemaAb"], "yyyy-MM-dd", CultureInfo.InvariantCulture,
+               DateTimeStyles.None, out var d)
+            ? d
+            : ErfassungAb();
+
     [Authorize(Roles = Rollen.Personal)]
     [HttpGet("rechte")]
     public async Task<IActionResult> Rechte()
@@ -57,7 +68,7 @@ public class FehlzeitenController : ControllerBase
     [HttpGet("nicht-erfasst")]
     public async Task<IActionResult> NichtErfasst(
         [FromQuery] string? ansicht, [FromQuery] string? lehrer, [FromQuery] string? klasse,
-        [FromQuery] DateOnly? von, [FromQuery] DateOnly? bis)
+        [FromQuery] DateOnly? von, [FromQuery] DateOnly? bis, [FromQuery] string? art)
     {
         var u = await NutzerAsync();
         if (u == null) return Unauthorized();
@@ -70,7 +81,9 @@ public class FehlzeitenController : ControllerBase
             _ => false
         };
         if (!erlaubt) return StatusCode(403, new { fehler = "Diese Übersicht steht dir nicht zur Verfügung." });
-        return Ok(await FehlzeitenService.NichtErfasstAsync(_db, u, a, lehrer, klasse, ErfassungAb(), von, bis));
+        string was = (art ?? "alle").Trim().ToLowerInvariant();
+        if (was is not ("alle" or "anwesenheit" or "thema")) was = "alle";
+        return Ok(await FehlzeitenService.NichtErfasstAsync(_db, u, a, lehrer, klasse, ErfassungAb(), ThemaAb(), was, von, bis));
     }
 
     [Authorize(Roles = Rollen.Personal)]

@@ -14,6 +14,7 @@ namespace VertretungApi.Controllers;
 ///   PUT  api/klassenbuch/stunde                                 Anwesenheit speichern (KbSpeichernDto;
 ///                                                               folgestundeUebernehmen = Doppelstunde mit erfassen)
 ///   GET  api/klassenbuch/stunde/historie?datum=&amp;stunde=&amp;unr=&amp;lehrer=  Änderungshistorie
+///                                                               (Phase 3.4: mit den Klassenbucheinträgen, die man lesen darf)
 ///   GET  api/klassenbuch/gruppen                                „Meine Gruppen" (Admin: alle)
 ///   GET  api/klassenbuch/gruppe?schluessel=…                    Gruppe mit Pool (Schüler der Klassen)
 ///   PUT  api/klassenbuch/gruppe?schluessel=…                    Gruppe zusammenstellen ({ mitglieder: [ids] })
@@ -57,9 +58,9 @@ public class KlassenbuchController : ControllerBase
     public async Task<IActionResult> Historie(
         [FromQuery] DateOnly datum, [FromQuery] int stunde, [FromQuery] int unr, [FromQuery] string? lehrer)
     {
-        var (_, tag, st, fehler) = await LadeAsync(datum, stunde, unr, lehrer);
+        var (u, tag, st, fehler) = await LadeAsync(datum, stunde, unr, lehrer);
         if (fehler != null) return fehler;
-        return Ok(await KlassenbuchService.HistorieAsync(_db, tag!, st!));
+        return Ok(await KlassenbuchService.HistorieAsync(_db, u!, tag!, st!));
     }
 
     [HttpGet("gruppen")]

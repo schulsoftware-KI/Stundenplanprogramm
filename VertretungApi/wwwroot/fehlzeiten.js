@@ -18,6 +18,11 @@
 //  umschaltbar: Fehlzeiten | Themen (Themenliste mit Hausaufgaben und dem
 //  Schalter „Hausaufgaben für Schüler sichtbar").
 //
+//  Phase 3.4: Kontomenü heißt jetzt „Klassenbuch" (Schüler weiterhin „Meine
+//  Fehlzeiten"). Neuer Reiter „Einträge" (KL/SK/Admin), Unterricht umschaltbar
+//  Fehlzeiten | Themen | Einträge, Schülerdetail mit Abschnitt „Einträge" –
+//  Code dafür in eintraege.js (ke…).
+//
 //  Datenschutz: nichts davon im Browser-Speicher; beim Verlassen geleert.
 //  Wird nach klassenbuch.js und VOR app.js geladen; Einstieg fehlzeitenInit().
 // =====================================================================
@@ -30,7 +35,8 @@ const FZ_WT = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 const fz = {
   rechte: null,      // Antwort api/fehlzeiten/rechte
   stapel: [],        // Ansichten, oben = sichtbar: { art: "reiter", reiter } | { art: "unterricht", unr, lehrer }
-                     //   | { art: "themen", unr, lehrer } | { art: "schueler", id, unr?, lehrer? } | { art: "ich" }
+                     //   | { art: "themen", unr, lehrer } | { art: "keUnterricht", unr, lehrer } (Phase 3.4)
+                     //   | { art: "schueler", id, unr?, lehrer? } | { art: "ich" }
   ladeNr: 0,
   daten: null,       // Antwort der sichtbaren Ansicht
   neAnsicht: "ich",  // nicht erfasst: ich | zustaendig | alle
@@ -64,7 +70,7 @@ function fehlzeitenMenueAnpassen() {
   if (istSchueler()) { b.hidden = false; b.textContent = "Meine Fehlzeiten"; return; }
   const kl = ["Klassenlehrer", "Stufenkoordination"].includes(a.rolle) && !!a.zustaendig;
   b.hidden = !istPersonal() || !(a.rolle === "Admin" || eigenesKuerzel() || kl);
-  b.textContent = "Fehlzeiten";
+  b.textContent = "Klassenbuch";   // Phase 3.4 (Entscheidung 37)
 }
 
 async function fehlzeitenOeffnen() {
@@ -91,7 +97,7 @@ async function fehlzeitenOeffnen() {
     return;
   }
 
-  fzTitel("Fehlzeiten");
+  fzTitel("Klassenbuch");
   const nr = ++fz.ladeNr;
   document.body.classList.add("laedt");
   try {
@@ -132,6 +138,7 @@ function fehlzeitenLeeren() {
     "fzEintraegeInfo", "fbWas", "feFuer", "fzTWann", "fzTTitel", "fzTInfo", "fzTLeer", "fzTSichtbarInfo"])
     el(id).textContent = "";
   el("fzUWahl").hidden = true;
+  keFzLeeren();   // Phase 3.4
   fehlerIn("fzFehler", "");
   dialogZu(el("fzBewertDialog"));
   dialogZu(el("fzEntschDialog"));
@@ -187,6 +194,7 @@ function fzReiterListe() {
   if (r.klassen.length) {
     const k = r.klassen;
     l.push({ id: "klasse", text: r.admin ? "Klassen" : k.length === 1 ? fzGruppenName(k[0]) : "Meine Klassen" });
+    l.push({ id: "eintraege", text: "Einträge" });   // Phase 3.4
   }
   return l;
 }
@@ -218,10 +226,10 @@ function fzZeigen() {
   const o = fzOben();
   fehlerIn("fzFehler", "");
   fz.daten = null;
-  for (const id of ["fzNe", "fzKurse", "fzKlasseBox", "fzListe", "fzSchueler", "fzThemen"]) el(id).hidden = true;
+  for (const id of ["fzNe", "fzKurse", "fzKlasseBox", "fzListe", "fzSchueler", "fzThemen", "fzKeAnsicht"]) el(id).hidden = true;
   el("fzZurueckText").textContent = fz.stapel.length > 1 ? "Zurück" : "Zum Plan";
-  // Phase 3.3: Unterricht – Fehlzeiten | Themen
-  const uSicht = !!o && (o.art === "unterricht" || o.art === "themen");
+  // Phase 3.3: Unterricht – Fehlzeiten | Themen (Phase 3.4: | Einträge)
+  const uSicht = !!o && (o.art === "unterricht" || o.art === "themen" || o.art === "keUnterricht");
   el("fzUWahl").hidden = !uSicht;
   if (uSicht)
     for (const b of el("fzUWahl").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.u === o.art));
@@ -230,7 +238,8 @@ function fzZeigen() {
   if (reiterSicht) fzRenderReiter();
   if (!o) return;
 
-  fzTitel(o.art === "ich" ? "Meine Fehlzeiten" : o.art === "themen" ? "Themen" : "Fehlzeiten");
+  fzTitel(o.art === "ich" ? "Meine Fehlzeiten" : o.art === "themen" ? "Themen"
+    : o.art === "keUnterricht" || (o.art === "reiter" && o.reiter === "eintraege") ? "Einträge" : "Klassenbuch");
   if (o.art === "reiter" && o.reiter === "ne") {
     el("fzNe").hidden = false;
     fzRenderNeWahl();
@@ -247,6 +256,15 @@ function fzZeigen() {
     el("fzTSichtbarSchalter").hidden = true;
     el("fzTSichtbarInfo").hidden = true;
     el("fzTLeer").textContent = "Wird geladen …";
+  } else if ((o.art === "reiter" && o.reiter === "eintraege") || o.art === "keUnterricht") {
+    // Phase 3.4: Einträge einer Klasse/Stufe bzw. eines Unterrichts
+    if (o.art === "reiter") {
+      el("fzKlasseBox").hidden = fz.rechte.klassen.length < 2;
+      el("fzKlasseWahl").replaceChildren(...fz.rechte.klassen.map((k) =>
+        h("option", { value: k, selected: k === fz.klasse }, fzGruppenName(k))));
+    }
+    el("fzKeAnsicht").hidden = false;
+    keListeLeeren("Wird geladen …");
   } else if (o.art === "reiter" || o.art === "unterricht") {
     if (o.art === "reiter") {
       el("fzKlasseBox").hidden = fz.rechte.klassen.length < 2;
@@ -260,7 +278,8 @@ function fzZeigen() {
     el("fzListeInfo").textContent = "Wird geladen …";
   } else {
     el("fzSchueler").hidden = false;
-    for (const id of ["fzSumme", "fzEntsch", "fzFaecher", "fzEintraege", "fzSInfo"]) el(id).replaceChildren();
+    for (const id of ["fzSumme", "fzEntsch", "fzFaecher", "fzEintraege", "fzSInfo", "fzKe"]) el(id).replaceChildren();
+    el("fzKe").hidden = true;
     el("fzSName").textContent = "";
     el("fzSWann").textContent = "";
     el("fzEintraegeInfo").textContent = "Wird geladen …";
@@ -278,6 +297,8 @@ function fzUrl(o) {
     return url;
   }
   if (o.art === "reiter" && o.reiter === "kurse") return "api/fehlzeiten/unterrichte";
+  if (o.art === "reiter" && o.reiter === "eintraege") return fz.klasse ? `api/eintraege/klasse/${enc(fz.klasse)}` : null;
+  if (o.art === "keUnterricht") return `api/eintraege/unterricht?unr=${o.unr}&lehrer=${enc(o.lehrer)}`;
   if (o.art === "reiter") return fz.klasse ? `api/fehlzeiten/klasse/${enc(fz.klasse)}` : null;
   if (o.art === "unterricht") return `api/fehlzeiten/unterricht?unr=${o.unr}&lehrer=${enc(o.lehrer)}`;
   if (o.art === "themen") return `api/klassenbuch/themen?unr=${o.unr}&lehrer=${enc(o.lehrer)}`;
@@ -290,7 +311,7 @@ async function fzLaden() {
   const o = fzOben();
   if (!o) return;
   const url = fzUrl(o);
-  if (!url) { el("fzListeInfo").textContent = "Keine Klasse gewählt."; return; }
+  if (!url) { el("fzListeInfo").textContent = "Keine Klasse gewählt."; el("fzKeLeer").textContent = "Keine Klasse gewählt."; return; }
   const nr = ++fz.ladeNr;
   document.body.classList.add("laedt");
   try {
@@ -300,13 +321,14 @@ async function fzLaden() {
     if (o.art === "reiter" && o.reiter === "ne") fzRenderNe(d);
     else if (o.art === "reiter" && o.reiter === "kurse") fzRenderKurse(d);
     else if (o.art === "themen") fzRenderThemen(d);
+    else if ((o.art === "reiter" && o.reiter === "eintraege") || o.art === "keUnterricht") keRenderListe(d, o);
     else if (o.art === "reiter" || o.art === "unterricht") fzRenderListe(d);
     else fzRenderSchueler(d);
   } catch (f) {
     if (nr !== fz.ladeNr) return;
     const t = aktionsFehler(f);
     if (t === null) return;
-    for (const id of ["fzNeInfo", "fzKurseInfo", "fzListeInfo", "fzEintraegeInfo", "fzTLeer"]) el(id).textContent = "";
+    for (const id of ["fzNeInfo", "fzKurseInfo", "fzListeInfo", "fzEintraegeInfo", "fzTLeer", "fzKeLeer"]) el(id).textContent = "";
     fehlerIn("fzFehler", t);
   } finally {
     if (nr === fz.ladeNr) document.body.classList.remove("laedt");
@@ -393,7 +415,7 @@ function fzRenderNe(d) {
 
 function fzRenderKurse(liste) {
   el("fzKurseInfo").textContent = liste.length
-    ? "Tippe auf einen Kurs bzw. eine Klasse: Fehlzeiten deiner Schülerinnen und Schüler sowie Themen und Hausaufgaben."
+    ? "Tippe auf einen Kurs bzw. eine Klasse: Fehlzeiten deiner Schülerinnen und Schüler, Themen und Hausaufgaben sowie Einträge."
     : "Im aktuellen Stundenplan hast du keinen Unterricht mit Klassenbuch.";
   el("fzKurseListe").replaceChildren(...liste.map((u) => h("li", null, h("button", {
     class: "k-zeile", type: "button",
@@ -544,6 +566,10 @@ function fzRenderSchueler(d) {
   const n = d.eintraege.length;
   el("fzEintraegeInfo").textContent = n ? "" : "Keine Fehlzeiten in diesem Zeitraum.";
   el("fzEintraege").replaceChildren(...d.eintraege.map((e) => fzEintragZeile(e)));
+
+  // Phase 3.4: Klassenbucheinträge (nur Personal; Schüler sehen keine Einträge).
+  const o = fzOben();
+  if (o && o.art === "schueler" && istPersonal()) keSchuelerLaden(o);
 }
 
 function fzRenderEntschuldigungen(d) {
@@ -733,7 +759,7 @@ function fehlzeitenInit() {
   for (const b of el("fzUWahl").querySelectorAll("button")) {
     b.addEventListener("click", () => {
       const o = fzOben();
-      if (!o || o.art === b.dataset.u || (o.art !== "unterricht" && o.art !== "themen")) return;
+      if (!o || o.art === b.dataset.u || !["unterricht", "themen", "keUnterricht"].includes(o.art)) return;
       fz.stapel[fz.stapel.length - 1] = { art: b.dataset.u, unr: o.unr, lehrer: o.lehrer };
       fzZeigen();
     });

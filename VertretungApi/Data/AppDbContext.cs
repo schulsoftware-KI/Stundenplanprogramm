@@ -22,6 +22,7 @@ public class AppDbContext : DbContext
     public DbSet<KlassenbuchProtokoll> KlassenbuchProtokolle => Set<KlassenbuchProtokoll>(); // Phase 3.1
     public DbSet<Entschuldigung> Entschuldigungen => Set<Entschuldigung>();  // Phase 3.2
     public DbSet<UnterrichtEinstellung> UnterrichtEinstellungen => Set<UnterrichtEinstellung>(); // Phase 3.3
+    public DbSet<KlassenbuchEintrag> KlassenbuchEintraege => Set<KlassenbuchEintrag>();        // Phase 3.4
 
     // Grundplan + Kalender (Phase 2, Schritt 1)
     public DbSet<GrundplanVersion> GrundplanVersionen => Set<GrundplanVersion>();
@@ -106,6 +107,20 @@ public class AppDbContext : DbContext
         b.Entity<UnterrichtEinstellung>().ToTable("UnterrichtEinstellungen");
         b.Entity<UnterrichtEinstellung>()
             .HasIndex(e => new { e.Schuljahr, e.UNr, e.Lehrer }).IsUnique();
+
+        // Phase 3.4: Klassenbucheinträge. Neue Tabelle samt Indizes per Schema-Nachrüstung;
+        // die neue Spalte KlassenbuchProtokolle.EintragId ebenso (ihr Index entsteht nur in
+        // neu angelegten Datenbanken – die Nachrüstung legt auf vorhandenen Tabellen keine an).
+        b.Entity<KlassenbuchEintrag>().ToTable("KlassenbuchEintraege");
+        b.Entity<KlassenbuchEintrag>()
+            .HasOne(e => e.Schueler!)
+            .WithMany()
+            .HasForeignKey(e => e.SchuelerId)
+            .OnDelete(DeleteBehavior.Cascade);
+        b.Entity<KlassenbuchEintrag>().HasIndex(e => new { e.Datum, e.Stunde, e.GrundUNr, e.GrundLehrer });
+        b.Entity<KlassenbuchEintrag>().HasIndex(e => e.SchuelerId);
+        b.Entity<KlassenbuchEintrag>().HasIndex(e => new { e.UNr, e.GrundLehrer });
+        b.Entity<KlassenbuchProtokoll>().HasIndex(p => p.EintragId);
 
         // --- Grundplan (versioniert) ---
         b.Entity<GrundplanVersion>()

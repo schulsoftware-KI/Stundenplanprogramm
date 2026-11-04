@@ -1344,6 +1344,145 @@ main.hausaufgaben { max-width: 720px; }
   .ha-leiste { min-height: 44px; padding: 6px 12px; margin-bottom: 8px; }
 }
 
+/* =====================================================================
+   Klassenbucheinträge (Phase 3.4)
+   Farben je Kategorie: Lob grün, Hinweis blaugrün, Ermahnung rot,
+   „vergessen" orange, Vorkommnis violett (dieselben Töne wie die Planfarben).
+   ===================================================================== */
+
+.marke.ke-marke { flex: none; white-space: nowrap; }
+.marke.ke-marke.k-lob        { background: var(--vertretung); }
+.marke.ke-marke.k-hinweis    { background: var(--betreuung); }
+.marke.ke-marke.k-ermahnung  { background: var(--entfall); }
+.marke.ke-marke.k-vergessen  { background: var(--verlegung); }
+.marke.ke-marke.k-vorkommnis { background: var(--sonst); }
+
+/* Stundenblatt: Karte „Einträge" */
+.ke-karte { padding: 10px 16px 12px 16px; gap: 6px; }
+.ke-karte-kopf { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 10px; }
+.ke-karte-titel { margin: 0; font-size: 1rem; font-weight: 750; }
+.ke-karte-kopf .textknopf { min-height: 44px; padding-left: 2px; padding-right: 2px; }
+.ke-karte .kleingedruckt { margin-top: 0; }
+.ke-kliste { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ke-kliste:empty { display: none; }
+.ke-kzeile {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  min-height: 44px;
+  padding: 7px 10px 8px 10px;
+  border: 1px solid var(--linie);
+  border-left: 4px solid var(--linie);
+  border-radius: 0 10px 10px 0;
+  background: var(--seite);
+  color: var(--tinte);
+  text-align: left;
+}
+.ke-kzeile:hover { background: var(--akzent-hell); }
+.ke-k-oben { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; min-width: 0; }
+.ke-k-wer { font-weight: 650; overflow-wrap: anywhere; }
+.ke-k-text, .ke-z-text {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.ke-k-von { font-size: 0.78rem; color: var(--leise); }
+.ke-kzeile.k-lob, .ke-zeile.k-lob               { border-left-color: var(--vertretung); }
+.ke-kzeile.k-hinweis, .ke-zeile.k-hinweis       { border-left-color: var(--betreuung); }
+.ke-kzeile.k-ermahnung, .ke-zeile.k-ermahnung   { border-left-color: var(--entfall); }
+.ke-kzeile.k-vergessen, .ke-zeile.k-vergessen   { border-left-color: var(--verlegung); }
+.ke-kzeile.k-vorkommnis, .ke-zeile.k-vorkommnis { border-left-color: var(--sonst); }
+
+/* Teilnehmerliste: Kategorien unter dem Namen */
+.ke-mini { display: inline-flex; flex-wrap: wrap; gap: 0 6px; }
+.ke-mini-k { font-weight: 700; }
+.ke-mini-k.k-lob        { color: var(--vertretung); }
+.ke-mini-k.k-hinweis    { color: var(--betreuung); }
+.ke-mini-k.k-ermahnung  { color: var(--entfall); }
+.ke-mini-k.k-vergessen  { color: var(--verlegung); }
+.ke-mini-k.k-vorkommnis { color: var(--sonst); }
+
+/* Statusdialog: Bereich „Einträge" */
+.ks-eintrag { display: grid; gap: 6px; margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--linie); }
+.ks-e-titel { margin: 0; font-size: 1rem; font-weight: 750; }
+.ks-e-neu { justify-self: start; min-height: 44px; padding-left: 0; text-align: left; white-space: normal; }
+
+/* Formular */
+.ke-form { display: grid; }
+.ke-feld { margin: 10px 0 4px 0; }
+.ke-form > .ke-feld:first-child { margin-top: 2px; }
+.ke-kats { display: flex; flex-wrap: wrap; gap: 6px; }
+.ke-chip, .ke-filterchip { min-height: 44px; }
+.ke-chip::before {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--linie);
+  vertical-align: 1px;
+}
+.ke-chip.k-lob::before        { background: var(--vertretung); }
+.ke-chip.k-hinweis::before    { background: var(--betreuung); }
+.ke-chip.k-ermahnung::before  { background: var(--entfall); }
+.ke-chip.k-vergessen::before  { background: var(--verlegung); }
+.ke-chip.k-vorkommnis::before { background: var(--sonst); }
+.ke-chip[aria-pressed="true"], .ke-filterchip[aria-pressed="true"] {
+  border-color: var(--akzent);
+  background: var(--akzent-hell);
+  box-shadow: inset 0 0 0 1px var(--akzent);
+}
+.ke-textkopf { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.ke-pflicht { font-weight: 500; color: var(--leise); }
+.ke-zaehler { font-size: 0.8rem; color: var(--leise); font-variant-numeric: tabular-nums; }
+.ke-text { resize: vertical; min-height: 3.2em; line-height: 1.4; }
+.ke-datum { width: auto; max-width: 12rem; }
+.ke-weitere { display: grid; margin-top: 6px; }
+.ke-weitere-auf { justify-self: start; min-height: 44px; padding-left: 0; }
+.ke-weitere-liste {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0 8px;
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--linie);
+  border-radius: 10px;
+}
+.ke-knoepfe { margin-top: 12px; }
+.ke-knoepfe .hauptknopf, .ke-knoepfe .textknopf, .ke-aktionen .hauptknopf { min-height: 44px; }
+.ke-form .fehler { margin-top: 10px; }
+
+/* Dialog „Eintrag" */
+.ke-info { display: grid; gap: 1px; margin: 2px 0 0 0; font-size: 0.85rem; color: var(--leise); }
+.ke-info:empty { display: none; }
+.ke-inhalt { display: grid; justify-items: start; gap: 6px; margin-top: 12px; }
+.ke-volltext { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
+.ke-aktionen { margin-top: 14px; }
+.ke-aktionen .textknopf { min-height: 44px; }
+.ke-aktionen .textknopf.warnung { color: var(--rot); font-weight: 700; }
+.ke-dialog .kh-liste { margin-top: 12px; }
+#keForm { margin-top: 8px; }
+
+/* Listen: Schülerdetail, Klasse/Stufe, Unterricht */
+.ke-bereich { display: grid; gap: 6px; }
+.ke-bereich .fz-kopfzeile { margin-bottom: 0; }
+.ke-zaehlzeile { margin: 0 2px; font-weight: 650; }
+.ke-zeile { gap: 3px; }
+.ke-z-wer { font-weight: 650; overflow-wrap: anywhere; }
+.ke-filter { display: flex; flex-wrap: wrap; gap: 6px; }
+#fzKeLeer, #fzKeWeitereInfo { margin: 0 2px; }
+#fzKeWeitereTitel { margin-top: 10px; }
+
+/* Klassenbuch-Reiter: vier Reiter passen auf schmalen Handys in zwei Reihen */
+@media (max-width: 440px) {
+  #fzReiter:has(> :nth-child(4)) { grid-auto-flow: row; grid-template-columns: 1fr 1fr; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .laedt .symbol svg { animation: none; }
 }

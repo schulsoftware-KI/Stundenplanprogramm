@@ -24,6 +24,10 @@
 //    Thema wird mit übernommen, die Hausaufgabe nicht. Schalter „Hausaufgaben
 //    für Schüler sichtbar" gilt für den ganzen Kurs (Lehrkraft laut Plan).
 //
+//  - Klassenbucheinträge (Phase 3.4, Code in eintraege.js): Karte „Einträge"
+//    im Stundenblatt, Bereich „Einträge" im Statusdialog („⋯"), Marken unter
+//    den Namen. Ist dort ein Eintrag offen, schließt die Statuswahl den Dialog nicht.
+//
 //  Datenschutz: Namen und Anwesenheiten stehen nur im Arbeitsspeicher –
 //  nie im Browser-Speicher – und werden beim Verlassen gelöscht.
 //
@@ -247,6 +251,7 @@ function klassenbuchLeeren() {
   kb.gruppeZurueck = null;
   kb.gruppen = null;
   kb.sichtbarLaeuft = false;
+  keStundeLeeren();   // Phase 3.4
   for (const id of ["kbListe", "kbOffen", "kbHinweise", "kgKlassen", "kgsListe", "khListe", "ksWahl",
     "kbVorige", "kbInhaltLesen", "kbFaelligSchnell"])
     el(id).replaceChildren();
@@ -326,6 +331,7 @@ function stundenblattOeffnen(s, datum, herkunft = "plan") {
   kb.stand = new Map();
   kb.geaendert = false;
   kb.gruppeZurueck = null;
+  keStundeLeeren();   // Phase 3.4: Einträge der vorigen Stunde weg
   zeigeKlassenbuch("stunde");
   renderStunde();
   stundeLaden();
@@ -348,6 +354,7 @@ async function stundeLaden() {
     const d = await senden("GET", kbStundeUrl("stunde"));
     if (nr !== kb.ladeNr) return;
     blattUebernehmen(d);
+    keStundeLaden();   // Phase 3.4: Einträge der Stunde
   } catch (f) {
     if (nr !== kb.ladeNr) return;
     const text = aktionsFehler(f);
@@ -461,6 +468,7 @@ function renderStunde() {
     el("kbListeKopf").hidden = true;
     el("kbLeiste").hidden = true;
     el("kbInhalt").hidden = true;
+    el("kbEintraege").hidden = true;
     return;
   }
 
@@ -478,6 +486,7 @@ function renderStunde() {
   el("kbHinweise").replaceChildren(...(d.hinweise || []).map((t) => h("p", { class: "hinweis" }, t)));
   el("kbOffen").replaceChildren(...(d.offeneGruppen || []).map(offeneGruppeKarte));
   renderInhalt();
+  keKarteRendern();   // Phase 3.4
 
   const liste = d.teilnehmer || [];
   const keineListe = liste.length === 0;
@@ -645,6 +654,7 @@ function teilnehmerZeile(t) {
     t.nichtInListe ? h("span", { class: "kb-ausser" }, "nicht mehr in der Liste") : null,
     bewertet ? h("span", { class: "kb-bew b-" + t.bewertung.toLowerCase() },
       (t.bewertung === "Entschuldigt" ? "entschuldigt" : "unentschuldigt") + (t.festgelegt ? " · festgelegt" : "")) : null,
+    keMarken(t.id),   // Phase 3.4: Einträge dieser Stunde
   ].filter(Boolean);
   const inhalt = [
     h("span", { class: "kb-namezeile" },
@@ -732,7 +742,7 @@ function renderLeiste() {
   if (!d) { leiste.hidden = true; return; }
   const darfAnw = !!d.darfSchreiben;
   const darfInh = !!(d.inhalt && d.inhalt.darfSchreiben);
-  el("kbHistorieKnopf").hidden = !(d.erfasstAm || d.version > 0);
+  el("kbHistorieKnopf").hidden = !(d.erfasstAm || d.version > 0 || keHatEintraege());
   knopf.hidden = !darfAnw && !darfInh;
   leiste.hidden = knopf.hidden && el("kbHistorieKnopf").hidden;
   const aenderung = kb.geaendert || kbInhaltGeaendert();
@@ -874,6 +884,8 @@ function statusDialogOeffnen(t) {
   el("ksMinuten").value = v.status === "Verspaetet" && v.minuten ? v.minuten : "";
   el("ksMinutenFeld").hidden = v.status !== "Verspaetet";
   fehlerIn("ksFehler", "");
+  keStatusFormZu();
+  keStatusBereich(t);   // Phase 3.4: Einträge dieser Person
   dialogAuf(el("kbStatusDialog"));
   const aktiv = el("ksWahl").querySelector('[aria-pressed="true"]');
   if (aktiv) aktiv.focus();
@@ -890,7 +902,16 @@ function statusGewaehlt(status) {
     return;
   }
   statusSetzen(t.id, status, null);
+  if (keStatusFormOffen()) { ksWahlMarkieren(status); return; }   // Eintrag offen: Dialog bleibt
   statusDialogSchliessen();
+}
+
+/** Gewählten Status im Dialog markieren (wenn er offen bleibt). */
+function ksWahlMarkieren(status) {
+  const art = (KB_STATUS[status] || KB_STATUS.Anwesend).art;
+  for (const b of el("ksWahl").querySelectorAll("button"))
+    b.setAttribute("aria-pressed", String(b.classList.contains("s-" + art)));
+  el("ksMinutenFeld").hidden = status !== "Verspaetet";
 }
 
 function minutenUebernehmen() {
@@ -903,10 +924,12 @@ function minutenUebernehmen() {
     return;
   }
   statusSetzen(t.id, "Verspaetet", m);
+  if (keStatusFormOffen()) { ksWahlMarkieren("Verspaetet"); toast(`Verspätet ${m} Min. übernommen.`); return; }
   statusDialogSchliessen();
 }
 
 function statusDialogSchliessen() {
+  if (!keStatusVerwerfenErlaubt()) return;
   const t = kb.statusFuer;
   dialogZu(el("kbStatusDialog"));
   if (t) {
@@ -929,16 +952,24 @@ async function historieOeffnen() {
     el("khInfo").textContent = liste.length ? "" : "Noch keine Änderungen.";
     el("khListe").replaceChildren(...liste.map((p) => h("li", { class: "p-eintrag" },
       h("span", { class: "p-zeit" }, `${datumZeit(p.zeit)} · ${p.akteur}`),
-      h("span", { class: "p-text" + (p.art === "Thema" || p.art === "Hausaufgabe" ? " kh-inhalt" : "") }, p.art === "Erfasst"
-        ? `Anwesenheit ${p.neu || "erfasst"}`
-        : [h("strong", null, p.art === "Thema" || p.art === "Hausaufgabe" ? p.art : p.schueler || ""), ": ",
-           p.alt ? korrektur(p.alt, p.neu) : p.neu]))));
+      h("span", { class: "p-text" + (["Thema", "Hausaufgabe", "Eintrag"].includes(p.art) ? " kh-inhalt" : "") },
+        kbHistorieText(p)))));
   } catch (f) {
     if (nr !== kb.ladeNr) return;
     const text = aktionsFehler(f);
     if (text === null) return;
     el("khInfo").textContent = text;
   }
+}
+
+/** Eine Zeile der Historie als Text (Phase 3.4: auch Klassenbucheinträge). */
+function kbHistorieText(p) {
+  if (p.art === "Erfasst") return `Anwesenheit ${p.neu || "erfasst"}`;
+  if (p.art === "EintragGeloescht") return [h("strong", null, p.alt || "Eintrag"), ": ", p.neu];
+  const wer = p.art === "Thema" || p.art === "Hausaufgabe" ? p.art
+    : p.art === "Eintrag" ? (p.schueler ? `Eintrag ${p.schueler}` : "Klasseneintrag")
+    : p.schueler || "";
+  return [h("strong", null, wer), ": ", p.alt ? korrektur(p.alt, p.neu) : p.neu];
 }
 
 // ---------------------------------------------------------------------
@@ -1217,7 +1248,7 @@ function klassenbuchInit() {
   for (const b of document.querySelectorAll("#ksSchnell button"))
     b.addEventListener("click", () => { el("ksMinuten").value = b.dataset.min; minutenUebernehmen(); });
   el("kbStatusDialog").addEventListener("close", () => { kb.statusFuer = null; });
-  hintergrundSchliesst(el("kbStatusDialog"), () => dialogZu(el("kbStatusDialog")));
+  hintergrundSchliesst(el("kbStatusDialog"), () => { if (keStatusVerwerfenErlaubt()) dialogZu(el("kbStatusDialog")); });
 
   // Historie
   el("khZu").addEventListener("click", () => dialogZu(el("kbHistorieDialog")));

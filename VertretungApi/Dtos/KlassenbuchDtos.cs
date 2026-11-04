@@ -156,6 +156,7 @@ public record KbHistorieDto(
     DateTime Zeit,
     string Akteur,
     string Art,                            // Erfasst | Anwesenheit | Bewertung | Thema | Hausaufgabe
+                                           // | Eintrag | EintragGeloescht (Phase 3.4)
     string? Schueler,
     string? Alt,
     string? Neu);

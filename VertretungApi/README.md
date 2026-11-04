@@ -360,6 +360,44 @@ Schüler: Leiste „Hausaufgaben“ über dem Plan und Kontomenü „Hausaufgabe
 Gerät, offline lesbar); im Plan „HA“-Marke, Antippen zeigt Thema und Hausaufgabe. Personal:
 Thema/Hausaufgabe landen nie im Browser-Speicher. Service-Worker v9.
 
+## Klassenbucheinträge (Phase 3.4)
+
+| Methode | Pfad | Zweck | Auth |
+|---|---|---|---|
+| GET | `/api/eintraege/stunde?datum=&stunde=&unr=&lehrer=` | Einträge einer Stunde (nur, was man lesen darf), Schreibrecht, `schuelerErlaubt` | wer das Stundenblatt öffnen darf |
+| POST | `/api/eintraege/stunde` | `{ datum, stunde, grundUNr, grundLehrer, art: Klasse\|Schueler, schuelerIds, kategorie, text }` – je Schüler ein Datensatz | haltende/ursprüngliche Lehrkraft, KL/SK (Schüler nur der eigenen Klasse/Stufe), Admin |
+| POST | `/api/eintraege/schueler/{id}` | Schülereintrag **ohne Stunde** `{ datum, kategorie, text }` (z. B. Pause, Ausflug) | KL/SK des Schülers, Admin |
+| PUT | `/api/eintraege/{id}` | ändern `{ kategorie, text, version }` (409 bei veralteter Version) | Verfasser, Admin |
+| DELETE | `/api/eintraege/{id}` | löschen | Verfasser, Admin |
+| GET | `/api/eintraege/{id}/historie` | Änderungen eines Eintrags | wer den Eintrag lesen darf |
+| GET | `/api/eintraege/schueler/{id}?von=&bis=&unr=&lehrer=` | Einträge eines Schülers mit Zählern je Kategorie | Personal (Lehrkräfte: nur eigene) |
+| GET | `/api/eintraege/klasse/{klasse}?von=&bis=` | alle Einträge einer Klasse/Stufe | KL/SK zuständig, Admin |
+| GET | `/api/eintraege/unterricht?unr=&lehrer=&von=&bis=` | Einträge eines Unterrichts + Klasseneinträge seiner Sek-I-Klassen aus anderen Stunden (`weitere`) | die Lehrkraft selbst, Admin |
+
+- **Arten/Kategorien:** Schülereintrag – `Lob`, `Hinweis`, `Ermahnung`, `HausaufgabeVergessen`,
+  `MaterialVergessen`; Klasseneintrag – `Vorkommnis`, `Hinweis`, `Lob`. Text bis 500 Zeichen (Pflicht
+  bei Hinweis, Ermahnung, Vorkommnis). Keine formalen Ordnungsmaßnahmen.
+- **Lesen:** Klasseneinträge – Lehrkräfte der Klasse bzw. des Kurses laut Grundplan, die Lehrkräfte
+  der Stunde, KL/SK, Admin. Schülereinträge – Verfasser, KL/SK des Schülers, Admin. **Schüler sehen
+  keine Einträge** (alle Endpunkte nur Personal).
+- **Speichern** sofort (eigene Tabelle, nicht über die Version der Lektion). Nicht für künftige Stunden.
+- **Historie:** Art `Eintrag` (angelegt, alt → neu) mit `EintragId`, bei Stunden zusätzlich mit dem
+  Stundenschlüssel in `Gruppe` – erscheint in der Änderungshistorie des Stundenblatts. Beim Löschen
+  werden die bisherigen Zeilen des Eintrags entfernt; es bleibt `EintragGeloescht` „gelöscht
+  (Kategorie, Datum)“ ohne Text und ohne Schüler.
+- **Löschfrist:** `Klassenbuch:EintraegeLoeschenNachTagen` (Standard `0` = aus); beim Start werden
+  ältere Einträge samt Historie gelöscht. Festlegung in Phase 5 mit der/dem DSB.
+- **Schema:** neue Tabelle `KlassenbuchEintraege`, neue Spalte `KlassenbuchProtokolle.EintragId`.
+  Die Schema-Nachrüstung ergänzt beides; die DB muss nicht gelöscht werden. Ein neuer
+  Pseudodaten-Seed löscht die Einträge mit.
+
+In der PWA (`wwwroot/eintraege.js`, Präfix `ke…`, dazu klassenbuch.js/fehlzeiten.js): Karte
+„Einträge“ im Stundenblatt mit „+ Eintrag für die Klasse“; Schülereinträge über „⋯“ beim Namen
+(Statusdialog, auch für mehrere Schüler); Marken unter den Namen. Kontomenü „Fehlzeiten“ heißt jetzt
+„Klassenbuch“: neuer Reiter „Einträge“ (KL/SK/Admin, Filter nach Kategorie), „Meine Kurse“ mit
+Fehlzeiten | Themen | Einträge, Schülerdetail mit Abschnitt „Einträge“ und „Eintrag ohne Stunde“.
+Einträge landen nie im Browser-Speicher. Service-Worker v10.
+
 ## Produktiv: Migrations statt EnsureCreated
 
 `EnsureCreated` ist nur für die Entwicklung gedacht und verträgt sich **nicht** mit Migrations.
@@ -377,7 +415,7 @@ ersetzen und `Database:SchemaNachruesten` auf `false` setzen.
 ## Nächste Schritte
 
 1. **Schülerkonten aus SchILD** (Phase 5): Import statt Pseudodaten, Zuordnung über `ExtId`.
-2. **Klassenbuch (Phase 3):** 3.3b Arbeitsauftrag für die Vertretung, 3.4 Klassenbucheinträge.
+2. **Auswertungen (Phase 4):** Fehlzeiten-Reports, ausdruckbares Klassenbuch/Kursheft (PDF).
 3. **Web-Push:** Benachrichtigung der Apps bei Änderung.
 4. **Produktiv:** Schlüssel aus Umgebungsvariablen, EF-Migrations, PostgreSQL, CORS auf die
    App-Adresse einschränken, Login-Bremse hinter dem Reverse-Proxy je echter Adresse.

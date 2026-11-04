@@ -251,6 +251,15 @@
         </label>
         <p id="kbSichtbarInfo" class="kleingedruckt ohne-einzug" hidden></p>
       </div>
+      <!-- Phase 3.4: Klassenbucheinträge der Stunde (sofort gespeichert, nicht über die Leiste) -->
+      <div id="kbEintraege" class="karte ke-karte" hidden>
+        <div class="ke-karte-kopf">
+          <h3 id="keKarteTitel" class="ke-karte-titel">Einträge</h3>
+          <button id="keKlasseKnopf" class="textknopf klein" type="button" aria-haspopup="dialog" hidden>+ Eintrag für die Klasse</button>
+        </div>
+        <ul id="keKarteListe" class="ke-kliste" aria-labelledby="keKarteTitel"></ul>
+        <p id="keKarteInfo" class="kleingedruckt ohne-einzug" hidden></p>
+      </div>
       <div id="kbListeKopf" class="kb-listekopf" hidden>
         <p id="kbZahlen" class="kb-zahlen" role="status"></p>
         <button id="kbAlleDa" class="textknopf klein" type="button" hidden>Alle anwesend</button>
@@ -305,7 +314,8 @@
   </main>
 
   <!-- Fehlzeiten (Phase 3.2): nicht erfasste Stunden, Kurse, Klassen/Stufen, Schülerdetail
-       mit Entschuldigungen. Personenbezogenes nur im Arbeitsspeicher; beim Verlassen geleert. -->
+       mit Entschuldigungen; Phase 3.4: Einträge (Menü „Klassenbuch").
+       Personenbezogenes nur im Arbeitsspeicher; beim Verlassen geleert. -->
   <main id="fehlzeiten" class="verwaltung fehlzeiten" hidden>
     <div class="verw-kopf">
       <button id="fzZurueck" class="textknopf" type="button">
@@ -346,6 +356,7 @@
     <div id="fzUWahl" class="modi fz-wahl" role="group" aria-label="Ansicht des Unterrichts" hidden>
       <button type="button" data-u="unterricht" aria-pressed="true">Fehlzeiten</button>
       <button type="button" data-u="themen" aria-pressed="false">Themen</button>
+      <button type="button" data-u="keUnterricht" aria-pressed="false">Einträge</button>
     </div>
 
     <!-- Liste: Klasse/Stufe oder Unterricht -->
@@ -385,6 +396,21 @@
       <ul id="fzTListe" class="k-liste fz-themen" aria-label="Stunden mit Thema und Hausaufgabe"></ul>
     </section>
 
+    <!-- Einträge einer Klasse/Stufe bzw. eines Unterrichts (Phase 3.4) -->
+    <section id="fzKeAnsicht" class="fz-bereich" aria-labelledby="fzKeTitel" hidden>
+      <div class="karte kb-kopf">
+        <p id="fzKeWann" class="kb-wann"></p>
+        <h2 id="fzKeTitel" class="kb-fach"></h2>
+        <p id="fzKeInfo" class="kb-wer"></p>
+      </div>
+      <div id="fzKeFilter" class="ke-filter" role="group" aria-label="Nach Kategorie filtern" hidden></div>
+      <p id="fzKeLeer" class="such-info" role="status"></p>
+      <ul id="fzKeListe" class="k-liste ke-liste" aria-label="Einträge"></ul>
+      <h3 id="fzKeWeitereTitel" class="fz-titel" hidden></h3>
+      <p id="fzKeWeitereInfo" class="such-info" hidden></p>
+      <ul id="fzKeWeitere" class="k-liste ke-liste" aria-labelledby="fzKeWeitereTitel"></ul>
+    </section>
+
     <!-- Schüler -->
     <section id="fzSchueler" class="fz-bereich" aria-labelledby="fzSName" hidden>
       <div class="karte kb-kopf">
@@ -395,7 +421,8 @@
       <div id="fzSumme" class="fz-summe"></div>
       <div id="fzEntsch" class="fz-entsch"></div>
       <div id="fzFaecher"></div>
-      <h3 id="fzEintraegeTitel" class="fz-titel">Einträge</h3>
+      <div id="fzKe" class="ke-bereich" hidden></div>
+      <h3 id="fzEintraegeTitel" class="fz-titel">Fehlstunden und Verspätungen</h3>
       <p id="fzEintraegeInfo" class="such-info"></p>
       <ul id="fzEintraege" class="k-liste fz-eintraege" aria-labelledby="fzEintraegeTitel"></ul>
     </section>
@@ -485,7 +512,7 @@
     <button id="meinPlan" class="menuepunkt" type="button">Mein Plan</button>
     <button id="kbGruppenKnopf" class="menuepunkt" type="button" hidden>Meine Gruppen</button>
     <button id="haKnopf" class="menuepunkt" type="button" hidden>Hausaufgaben</button>
-    <button id="fzKnopf" class="menuepunkt" type="button" hidden>Fehlzeiten</button>
+    <button id="fzKnopf" class="menuepunkt" type="button" hidden>Klassenbuch</button>
     <button id="kontenKnopf" class="menuepunkt" type="button" hidden>Konten verwalten</button>
     <button id="pwAendernKnopf" class="menuepunkt" type="button">Passwort ändern</button>
     <button id="abmelden" class="menuepunkt" type="button">Abmelden</button>
@@ -597,16 +624,36 @@
       <p id="ksFehler" class="fehler klein" role="alert" hidden></p>
       <button id="ksOk" class="hauptknopf" type="button">Übernehmen</button>
     </div>
-    <button id="ksZu" class="menuepunkt schliessen" type="button">Abbrechen</button>
+    <!-- Phase 3.4: Einträge dieser Person in dieser Stunde -->
+    <div id="ksEintrag" class="ks-eintrag" hidden>
+      <h3 class="ks-e-titel">Einträge</h3>
+      <ul id="ksEListe" class="ke-kliste" aria-label="Einträge in dieser Stunde"></ul>
+      <button id="ksENeu" class="textknopf ks-e-neu" type="button" hidden>+ Eintrag schreiben (Lob, Ermahnung …)</button>
+      <div id="ksEForm" hidden></div>
+    </div>
+    <button id="ksZu" class="menuepunkt schliessen" type="button">Schließen</button>
   </dialog>
 
   <!-- Klassenbuch: Änderungshistorie einer Stunde -->
   <dialog id="kbHistorieDialog" class="fenster" aria-labelledby="khTitel">
     <h2 id="khTitel" class="karte-titel">Änderungen</h2>
-    <p class="kleingedruckt ohne-einzug">Wer hat wann was an Anwesenheit, Thema und Hausaufgabe dieser Stunde geändert.</p>
+    <p class="kleingedruckt ohne-einzug">Wer hat wann was an Anwesenheit, Thema, Hausaufgabe und Einträgen dieser Stunde geändert.</p>
     <p id="khInfo" class="such-info" role="status"></p>
     <ul id="khListe" class="p-liste kh-liste"></ul>
     <button id="khZu" class="menuepunkt schliessen" type="button">Schließen</button>
+  </dialog>
+
+  <!-- Klassenbuch (Phase 3.4): ein Eintrag – anzeigen, ändern, löschen bzw. neu -->
+  <dialog id="keDialog" class="fenster ke-dialog" aria-labelledby="keTitel">
+    <p id="keWann" class="kb-wann"></p>
+    <h2 id="keTitel" class="karte-titel"></h2>
+    <p id="keInfo" class="ke-info"></p>
+    <div id="keInhalt" class="ke-inhalt"></div>
+    <div id="keForm" hidden></div>
+    <div id="keAktionen" class="knopfreihe ke-aktionen"></div>
+    <p id="keFehler" class="fehler klein" role="alert" hidden></p>
+    <ul id="keHistorie" class="p-liste kh-liste" aria-label="Änderungen" hidden></ul>
+    <button id="keZu" class="menuepunkt schliessen" type="button">Schließen</button>
   </dialog>
 
   <!-- Fehlzeiten: eine Fehlstunde bewerten -->
@@ -684,6 +731,7 @@
   <script src="klassenbuch.js"></script>
   <script src="fehlzeiten.js"></script>
   <script src="hausaufgaben.js"></script>
+  <script src="eintraege.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -34,6 +34,15 @@ namespace VertretungApi.Model;
 //   - UnterrichtEinstellung: je Unterricht (Schuljahr, UNr, Lehrkraft laut
 //     Plan), ob Schüler die Hausaufgaben sehen (Standard: ja).
 //
+//  Phase 3.4 (Klassenbucheinträge, Entscheidungen 31–39, Nutzer 04.11.2026):
+//   - KlassenbuchEintrag: Klasseneintrag (betrifft die Lerngruppe der Stunde)
+//     oder Schülereintrag (je Person ein eigener Datensatz). Gehört zu einer
+//     Stunde (Schlüssel wie die Lektion) – Klassenleitung/Stufenkoordination/
+//     Admin können Schülereinträge auch ohne Stunde (nur mit Datum) anlegen.
+//   - Ändern/Löschen nur Verfasser und Admin; Änderungen in der Historie
+//     (KlassenbuchProtokoll mit EintragId). Beim Löschen bleibt nur
+//     „… gelöscht (Kategorie, Datum)“ – ohne Text und ohne Schüler.
+//
 //  Alle Datensätze tragen IstPseudo: in der Entwicklung nur synthetische
 //  Daten; echte SchILD-Daten kommen erst im Produktivsystem (Phase 5).
 // =====================================================================
@@ -202,10 +211,63 @@ public class KlassenbuchProtokoll
     public string Akteur { get; set; } = "";                // Benutzername
     public string Art { get; set; } = "";                   // Anwesenheit | Erfasst | Gruppe | Bewertung | Entschuldigung
                                                             // | Thema | Hausaufgabe | Sichtbarkeit (Phase 3.3)
+                                                            // | Eintrag | EintragGeloescht (Phase 3.4)
     public int? LektionId { get; set; }
-    public string? Gruppe { get; set; }                     // Schülergruppe bei Art "Gruppe"; "UNr|LEHRER" bei "Sichtbarkeit"
+    public string? Gruppe { get; set; }                     // Schülergruppe bei Art "Gruppe"; "UNr|LEHRER" bei "Sichtbarkeit";
+                                                            // Schlüssel der Stunde ("Datum|Stunde|UNr|LEHRER") bei "Eintrag…"
     public int? SchuelerId { get; set; }
     public string? Alt { get; set; }
     public string? Neu { get; set; }
+    public bool IstPseudo { get; set; }
+
+    // Phase 3.4: Klassenbucheintrag, zu dem die Zeile gehört (neue Spalte, per Nachrüstung).
+    public int? EintragId { get; set; }
+}
+
+/// <summary>Klasseneintrag (Lerngruppe der Stunde) oder Schülereintrag (eine Person) – Phase 3.4.</summary>
+public enum KbEintragArt { Schueler = 0, Klasse = 1 }
+
+/// <summary>
+/// Kategorie eines Klassenbucheintrags (Entscheidung 32). Schülereintrag: Lob, Hinweis, Ermahnung,
+/// HausaufgabeVergessen, MaterialVergessen. Klasseneintrag: Vorkommnis, Hinweis, Lob.
+/// Formale Ordnungsmaßnahmen (§ 53 SchulG NRW) gehören nicht hierher.
+/// </summary>
+public enum KbEintragKategorie
+{
+    Lob = 0, Hinweis = 1, Ermahnung = 2, HausaufgabeVergessen = 3, MaterialVergessen = 4, Vorkommnis = 5
+}
+
+/// <summary>
+/// Klassenbucheintrag (Phase 3.4), Tabelle "KlassenbuchEintraege". Gehört zu einer Stunde
+/// (Datum, Stunde, GrundUNr, GrundLehrer – wie die Lektion, aber ohne Fremdschlüssel: ein Eintrag
+/// braucht keine gespeicherte Anwesenheit) oder – nur Schülereinträge von Klassenleitung/
+/// Stufenkoordination/Admin – nur zu einem Datum (Stunde = null). Fach/Klassen/Lerngruppen sind
+/// eine Momentaufnahme der Stunde (für Rechte und Listen).
+/// </summary>
+public class KlassenbuchEintrag
+{
+    public int Id { get; set; }
+    public KbEintragArt Art { get; set; }
+    public KbEintragKategorie Kategorie { get; set; }
+    public string? Text { get; set; }                  // bis 500 Zeichen; Pflicht bei Hinweis, Ermahnung, Vorkommnis
+    public int? SchuelerId { get; set; }               // nur Schülereintrag
+    public Schueler? Schueler { get; set; }
+
+    public DateOnly Datum { get; set; }
+    public int? Stunde { get; set; }                   // null = ohne Stunde
+    public int? GrundUNr { get; set; }                 // } Schlüssel der Stunde (wie Lektion)
+    public string? GrundLehrer { get; set; }           // }   GROSS geschrieben
+    public int? UNr { get; set; }                      // gehaltene UNr (wie Lektion.UNr)
+    public string? Lehrer { get; set; }                // haltende Lehrkraft
+    public string Fach { get; set; } = "";
+    public string Klassen { get; set; } = "";          // komma-separiert (Rohwerte, bei Kursen EF/Q1/Q2)
+    public string Lerngruppen { get; set; } = "";      // komma-separiert (Schlüssel aus dem Grundplan)
+    public string Schuljahr { get; set; } = "";
+
+    public string VerfasstVon { get; set; } = "";      // Benutzername
+    public DateTime VerfasstAm { get; set; } = DateTime.UtcNow;   // UTC
+    public string? GeaendertVon { get; set; }
+    public DateTime? GeaendertAm { get; set; }         // UTC
+    public int Version { get; set; } = 1;              // Konflikterkennung beim Ändern
     public bool IstPseudo { get; set; }
 }

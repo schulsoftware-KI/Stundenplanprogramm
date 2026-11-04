@@ -39,6 +39,9 @@
 //  und „Thema fehlt" (fehlzeiten.js), Schüleransicht „Hausaufgaben" und
 //  Lese-Dialog im Plan (hausaufgaben.js). Für Personal landen Thema und
 //  Hausaufgabe nie im Browser-Speicher (ohneKlassenbuchInhalt).
+//  Klassenbucheinträge (Phase 3.4, Code in eintraege.js): Stundenblatt,
+//  Schülerdetail und Listen; das Kontomenü „Fehlzeiten" heißt jetzt
+//  „Klassenbuch". Einträge landen nie im Browser-Speicher.
 // =====================================================================
 
 const MODI = {
@@ -1483,6 +1486,7 @@ async function start() {
   klassenbuchInit();
   fehlzeitenInit();
   hausaufgabenInit();
+  eintraegeInit();
   altlastenEntfernen();
   state.anmeldung = anmeldungLesen();
   state.anmeldungNoetig = lokal.lesen("optionen", { anmeldungNoetig: true }).anmeldungNoetig !== false;

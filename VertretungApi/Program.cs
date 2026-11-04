@@ -130,6 +130,19 @@ using (var scope = app.Services.CreateScope())
     {
         log.LogWarning(ex, "Kontenprotokoll konnte nicht aufgeräumt werden.");
     }
+
+    // Phase 3.4: Löschfrist für Klassenbucheinträge – vorbereitet, Standard aus (0).
+    // Die Frist legt die Schule in Phase 5 mit der/dem Datenschutzbeauftragten fest.
+    try
+    {
+        int tage = app.Configuration.GetValue("Klassenbuch:EintraegeLoeschenNachTagen", 0);
+        int geloescht = KlassenbuchEintragService.Aufraeumen(db, tage);
+        if (geloescht > 0) log.LogInformation("{Anzahl} Klassenbucheinträge nach Ablauf der Frist gelöscht.", geloescht);
+    }
+    catch (Exception ex)
+    {
+        log.LogWarning(ex, "Alte Klassenbucheinträge konnten nicht gelöscht werden.");
+    }
 }
 
 if (app.Environment.IsDevelopment())

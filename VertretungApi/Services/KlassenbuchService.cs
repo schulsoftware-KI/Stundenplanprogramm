@@ -45,6 +45,10 @@ namespace VertretungApi.Services;
 //  auch ohne Anwesenheit existieren (nur Thema, z. B. bei offener Gruppe) –
 //  „erfasst" heißt deshalb immer ErfasstAm != null. Doppelstunde: das Thema
 //  wird mit übernommen, wenn dort noch keins steht; die Hausaufgabe nicht.
+//
+//  Phase 3.4 (Klassenbucheinträge): eigene Speicherung, eigener Dienst
+//  (Services/KlassenbuchEintragService.cs). Die Änderungshistorie der Stunde
+//  zeigt auch die Einträge – nur, was die Person lesen darf.
 // =====================================================================
 
 /// <summary>Angemeldete Person (aus der Datenbank, nicht nur aus dem Token).</summary>
@@ -552,17 +556,29 @@ public static class KlassenbuchService
         }
     }
 
-    /// <summary>Änderungshistorie einer Lektion, neueste zuerst.</summary>
-    public static async Task<List<KbHistorieDto>> HistorieAsync(AppDbContext db, TagKontext tag, PlanStunde st)
+    /// <summary>
+    /// Änderungshistorie einer Lektion, neueste zuerst. Phase 3.4: dazu die Klassenbucheinträge
+    /// dieser Stunde – nur die, die die angemeldete Person lesen darf.
+    /// </summary>
+    public static async Task<List<KbHistorieDto>> HistorieAsync(AppDbContext db, KbNutzer u, TagKontext tag, PlanStunde st)
     {
         var lektion = await LektionQuery(db, tag.Datum, st).AsNoTracking().FirstOrDefaultAsync();
-        if (lektion == null) return new List<KbHistorieDto>();
-
-        var eintraege = await db.KlassenbuchProtokolle.AsNoTracking()
-            .Where(p => p.LektionId == lektion.Id)
+        var eintraege = new List<KlassenbuchProtokoll>();
+        if (lektion != null)
+        {
+            int lektionId = lektion.Id;
+            eintraege = await db.KlassenbuchProtokolle.AsNoTracking()
+                .Where(p => p.LektionId == lektionId)
+                .OrderByDescending(p => p.Zeit).ThenByDescending(p => p.Id)
+                .Take(500)
+                .ToListAsync();
+        }
+        eintraege.AddRange(await KlassenbuchEintragService.HistorieDerStundeAsync(db, u, tag, st));
+        eintraege = eintraege
             .OrderByDescending(p => p.Zeit).ThenByDescending(p => p.Id)
             .Take(500)
-            .ToListAsync();
+            .ToList();
+        if (eintraege.Count == 0) return new List<KbHistorieDto>();
         var ids = eintraege.Where(p => p.SchuelerId != null).Select(p => p.SchuelerId!.Value).Distinct().ToList();
         var namen = await db.Schueler.AsNoTracking()
             .Where(s => ids.Contains(s.Id))

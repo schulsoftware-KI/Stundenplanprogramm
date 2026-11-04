@@ -375,6 +375,7 @@ public static class PseudoDatenGenerator
         // die Fachlehrkräfte stellen sie mit den neuen Schülern neu zusammen.
         db.Anwesenheiten.RemoveRange(db.Anwesenheiten.Where(a => a.Schueler!.IstPseudo));
         db.Entschuldigungen.RemoveRange(db.Entschuldigungen.Where(e => e.IstPseudo));   // Phase 3.2
+        db.KlassenbuchEintraege.RemoveRange(db.KlassenbuchEintraege.Where(e => e.IstPseudo)); // Phase 3.4
         db.Lektionen.RemoveRange(db.Lektionen.Where(l => l.IstPseudo));
         db.KlassenbuchProtokolle.RemoveRange(db.KlassenbuchProtokolle.Where(p => p.IstPseudo));
         db.Zugehoerigkeiten.RemoveRange(db.Zugehoerigkeiten.Where(z => true));

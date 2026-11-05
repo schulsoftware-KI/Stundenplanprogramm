@@ -28,6 +28,19 @@ namespace VertretungApi.Services;
 //  Klasse/Stufe, Admin = alle (Filter Lehrkraft/Klasse).
 //  Phase 3.3: dazu Stunden ohne Thema (ab „Klassenbuch:ThemaAb", ohne
 //  Betreuung) – Marke „Thema fehlt", Filter alle | anwesenheit | thema.
+//
+//  Phase 4.1 (Auswertungen am Bildschirm, Entscheidungen 40–43, Nutzer
+//  04.11.2026):
+//   - Zeiträume: 1. Halbjahr, 2. Halbjahr, Schuljahr (+ eigener Zeitraum in
+//     der PWA). Das 2. Halbjahr beginnt laut „Klassenbuch:HalbjahrAb"
+//     (2027-02-01); liegt die Einstellung nicht im Schuljahr, gilt der
+//     1. Februar. Standard ist das laufende Halbjahr.
+//   - Soll = erfasste Stunden im Zeitraum, in denen der Schüler laut Liste
+//     dabei sein sollte (Klasse/Kurs, bei Sek-I-Gruppen nur die Mitglieder),
+//     dazu jede erfasste Stunde, in der er einen Eintrag hat. Fehlquote =
+//     Fehlstunden ÷ Soll – nur Anzeige, keine Schwellen (Entscheidung 42).
+//   - Listen tragen eine Gesamtzeile; offene Fälle je Klasse/Stufe über das
+//     ganze Schuljahr, älteste zuerst (Entscheidung 43, ohne Frist/Automatik).
 // =====================================================================
 
 public static class FehlzeitenService
@@ -57,6 +70,41 @@ public static class FehlzeitenService
         var v = von ?? kal?.Start ?? heute.AddDays(-365);
         var b = bis ?? kal?.Ende ?? heute;
         return b < v ? (b, v) : (v, b);
+    }
+
+    /// <summary>
+    /// Phase 4.1 (Entscheidung 40): wählbare Zeiträume des laufenden Schuljahres.
+    /// Ohne Kalender: nur die letzten 12 Monate.
+    /// </summary>
+    public static async Task<FzZeitraeumeDto> ZeitraeumeAsync(AppDbContext db, DateOnly? halbjahrAb)
+    {
+        var heute = KlassenbuchService.Heute();
+        var kal = await WochenplanService.KalenderAsync(db, heute);
+        if (kal == null)
+            return new FzZeitraeumeDto(null, heute, "sj",
+                new List<FzZeitraumDto> { new("sj", "Letzte 12 Monate", heute.AddDays(-365), heute) });
+
+        var liste = new List<FzZeitraumDto>();
+        var hj = HalbjahrAb(kal.Start, kal.Ende, halbjahrAb);
+        if (hj is DateOnly h)
+        {
+            liste.Add(new FzZeitraumDto("hj1", "1. Halbjahr", kal.Start, h.AddDays(-1)));
+            liste.Add(new FzZeitraumDto("hj2", "2. Halbjahr", h, kal.Ende));
+        }
+        liste.Add(new FzZeitraumDto("sj", "Schuljahr", kal.Start, kal.Ende));
+        string standard = hj is DateOnly h2 ? (heute < h2 ? "hj1" : "hj2") : "sj";
+        return new FzZeitraeumeDto(kal.Schuljahr, heute, standard, liste);
+    }
+
+    /// <summary>
+    /// Erster Tag des 2. Halbjahres: die Einstellung, wenn sie im Schuljahr liegt, sonst der
+    /// 1. Februar des Schuljahres; null, wenn auch der nicht hineinfällt.
+    /// </summary>
+    public static DateOnly? HalbjahrAb(DateOnly start, DateOnly ende, DateOnly? einstellung)
+    {
+        if (einstellung is DateOnly e && e > start && e <= ende) return e;
+        var februar = new DateOnly(start.Year + 1, 2, 1);
+        return februar > start && februar <= ende ? februar : null;
     }
 
     public static bool IstOberstufe(string? klassen)
@@ -146,7 +194,7 @@ public static class FehlzeitenService
     //  Rechte / Auswahl
     // =================================================================
 
-    public static async Task<FzRechteDto> RechteAsync(AppDbContext db, KbNutzer u, DateOnly erfassungAb)
+    public static async Task<FzRechteDto> RechteAsync(AppDbContext db, KbNutzer u, DateOnly erfassungAb, bool berichteNurAdmin = false)
     {
         List<string> klassen;
         if (u.IstAdmin)
@@ -172,7 +220,7 @@ public static class FehlzeitenService
         {
             klassen = u.IstKlassenleitungOderKoordination ? u.Zustaendig.ToList() : new List<string>();
         }
-        return new FzRechteDto(u.Kuerzel != null, u.IstAdmin, klassen, erfassungAb);
+        return new FzRechteDto(u.Kuerzel != null, u.IstAdmin, klassen, erfassungAb, u.IstAdmin || !berichteNurAdmin);
     }
 
     /// <summary>„Meine Kurse": Unterrichte der Lehrkraft im heute gültigen Grundplan (mit Klassenbuch).</summary>
@@ -205,37 +253,40 @@ public static class FehlzeitenService
     //  Listen
     // =================================================================
 
-    /// <summary>Alle Schüler einer Klasse bzw. Stufe mit ihren Summen.</summary>
-    public static async Task<FzListeDto> KlasseAsync(AppDbContext db, string klasse, DateOnly von, DateOnly bis)
+    /// <summary>Schüler einer Klasse (Sek I) bzw. – ohne Klasse dieses Namens – einer Stufe (Sek II).</summary>
+    private static async Task<(List<int> Ids, bool IstStufe)> KlassenSchuelerAsync(AppDbContext db, string klasse)
     {
         string k = klasse.Trim();
         var lgIds = (await db.Lerngruppen.AsNoTracking().Where(l => l.Typ == LerngruppeTyp.Klasse).ToListAsync())
             .Where(l => KlassenbuchService.Gleich(l.Bezeichnung, k))
             .Select(l => l.Id)
             .ToList();
-
-        List<int> ids;
-        bool istStufe = lgIds.Count == 0;
-        if (!istStufe)
-        {
-            ids = await db.Zugehoerigkeiten.AsNoTracking()
+        if (lgIds.Count > 0)
+            return (await db.Zugehoerigkeiten.AsNoTracking()
                 .Where(z => lgIds.Contains(z.LerngruppeId))
-                .Select(z => z.SchuelerId).Distinct().ToListAsync();
-        }
-        else
-        {
-            string gross = k.ToUpperInvariant();
-            ids = await db.Schueler.AsNoTracking()
-                .Where(x => x.Stufe.ToUpper() == gross)
-                .Select(x => x.Id).ToListAsync();
-        }
+                .Select(z => z.SchuelerId).Distinct().ToListAsync(), false);
+
+        string gross = k.ToUpperInvariant();
+        return (await db.Schueler.AsNoTracking()
+            .Where(x => x.Stufe.ToUpper() == gross)
+            .Select(x => x.Id).ToListAsync(), true);
+    }
+
+    private static string GruppenTitel(string klasse, bool istStufe)
+        => istStufe ? $"Stufe {klasse.Trim().ToUpperInvariant()}" : $"Klasse {klasse.Trim().ToUpperInvariant()}";
+
+    /// <summary>Alle Schüler einer Klasse bzw. Stufe mit ihren Summen und Soll-Stunden.</summary>
+    public static async Task<FzListeDto> KlasseAsync(AppDbContext db, string klasse, DateOnly von, DateOnly bis)
+    {
+        string k = klasse.Trim();
+        var (ids, istStufe) = await KlassenSchuelerAsync(db, k);
 
         var zeilen = ids.Count == 0
             ? new List<Zeile>()
             : await LadeAsync(ImZeitraum(db, von, bis).Where(a => ids.Contains(a.SchuelerId)));
-        var liste = await ZeilenJeSchuelerAsync(db, ids, zeilen, istStufe ? null : k.ToUpperInvariant());
-        return new FzListeDto(istStufe ? $"Stufe {k.ToUpperInvariant()}" : $"Klasse {k.ToUpperInvariant()}",
-            von, bis, null, liste);
+        var soll = await SollAsync(db, ids, von, bis, klasse: k);
+        var liste = await ZeilenJeSchuelerAsync(db, ids, zeilen, istStufe ? null : k.ToUpperInvariant(), soll);
+        return new FzListeDto(GruppenTitel(k, istStufe), von, bis, null, liste, Summe(zeilen), liste.Sum(x => x.Soll));
     }
 
     /// <summary>
@@ -255,13 +306,14 @@ public static class FehlzeitenService
         if (titel == null && zeilen.Count == 0 && erfasst == 0) return null;
 
         var ids = mitglieder.Concat(zeilen.Select(z => z.SchuelerId)).Distinct().ToList();
-        var liste = await ZeilenJeSchuelerAsync(db, ids, zeilen, null);
+        var soll = await SollAsync(db, ids, von, bis, unr: unr, grundLehrer: l);
+        var liste = await ZeilenJeSchuelerAsync(db, ids, zeilen, null, soll);
         if (titel == null)
         {
             var z0 = zeilen.OrderByDescending(z => z.Datum).FirstOrDefault();
             titel = z0 == null ? $"Unterricht {unr}" : $"{z0.Fach} · {z0.Klassen.Replace(",", ", ")}";
         }
-        return new FzListeDto(titel, von, bis, erfasst, liste);
+        return new FzListeDto(titel, von, bis, erfasst, liste, Summe(zeilen), liste.Sum(x => x.Soll));
     }
 
     /// <summary>Titel („M L1 · Q1") und aktuelle Teilnehmer eines Unterrichts laut heute gültigem Grundplan.</summary>
@@ -292,7 +344,7 @@ public static class FehlzeitenService
     }
 
     private static async Task<List<FzZeileDto>> ZeilenJeSchuelerAsync(
-        AppDbContext db, List<int> ids, List<Zeile> zeilen, string? klasseFest)
+        AppDbContext db, List<int> ids, List<Zeile> zeilen, string? klasseFest, Dictionary<int, SollInfo> soll)
     {
         if (ids.Count == 0) return new List<FzZeileDto>();
         var personen = await db.Schueler.AsNoTracking()
@@ -306,7 +358,8 @@ public static class FehlzeitenService
         return personen
             .Select(p => new FzZeileDto(p.Id, p.Vorname, p.Nachname,
                 klasseFest ?? (klassen.TryGetValue(p.Id, out var k) ? k : p.Stufe),
-                Summe(jeSchueler.TryGetValue(p.Id, out var z) ? z : new List<Zeile>())))
+                Summe(jeSchueler.TryGetValue(p.Id, out var z) ? z : new List<Zeile>()),
+                soll.TryGetValue(p.Id, out var si) ? si.Gesamt : 0))
             .OrderBy(x => x.Nachname, KlassenbuchService.NamenCmp)
             .ThenBy(x => x.Vorname, KlassenbuchService.NamenCmp)
             .ThenBy(x => x.Id)
@@ -355,10 +408,19 @@ public static class FehlzeitenService
             .Select(z => EintragDto(z, u, leitung))
             .ToList();
 
+        // Phase 4.1: Soll-Stunden (Fehlquote) – mit denselben Filtern wie die Fehlzeiten.
+        bool nurUnterricht = unr != null && !string.IsNullOrWhiteSpace(unterrichtLehrer);
+        var sollJe = await SollAsync(db, new[] { id }, von, bis,
+            klasse: nurUnterricht ? null : (klasse ?? s.Stufe),
+            unr: unr, grundLehrer: unterrichtLehrer,
+            nurLehrer: nurEigene ? (u!.Kuerzel ?? "") : null);
+        var soll = sollJe.TryGetValue(id, out var si) ? si : new SollInfo();
+
         var faecher = zeilen
             .GroupBy(z => (z.UNr, Lehrer: z.GrundLehrer.ToUpperInvariant()))
             .Select(g => new FzFachDto(
-                g.OrderByDescending(z => z.Datum).First().Fach, g.Key.Lehrer, Summe(g)))
+                g.OrderByDescending(z => z.Datum).First().Fach, g.Key.Lehrer, Summe(g),
+                soll.JeUnterricht.TryGetValue((g.Key.UNr, g.Key.Lehrer), out var n) ? n : 0))
             .OrderBy(f => f.Fach, Cmp).ThenBy(f => f.Lehrer, Cmp)
             .ToList();
 
@@ -376,7 +438,7 @@ public static class FehlzeitenService
         }
 
         return new FzSchuelerDto(s.Id, s.Vorname, s.Nachname, klasse ?? s.Stufe, von, bis, nurEigene, unterricht,
-            leitung, Summe(zeilen), faecher, eintraege, entschuldigungen);
+            leitung, Summe(zeilen), faecher, eintraege, entschuldigungen, soll.Gesamt);
     }
 
     private static FzEintragDto EintragDto(Zeile z, KbNutzer? u, bool leitung)
@@ -560,6 +622,208 @@ public static class FehlzeitenService
         });
         await db.SaveChangesAsync();
         return new KbErgebnis(200, Meldung: $"Als {neu} gespeichert.");
+    }
+
+    // =================================================================
+    //  Phase 4.1: Soll-Stunden (Fehlquote) und offene Fälle
+    // =================================================================
+
+    /// <summary>Soll-Stunden eines Schülers: gesamt und je Unterricht (gehaltene UNr, Lehrkraft laut Plan).</summary>
+    internal sealed class SollInfo
+    {
+        public int Gesamt;
+        public readonly Dictionary<(int UNr, string Lehrer), int> JeUnterricht = new();
+    }
+
+    private sealed record LektionKurz(int Id, int UNr, int GrundUNr, string Lehrer, string GrundLehrer, string Lerngruppen);
+
+    private static IEnumerable<string> Teile(string? liste)
+        => (liste ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    /// <summary>
+    /// Soll-Stunden (Entscheidung 42): erfasste Lektionen im Zeitraum, in denen der Schüler laut
+    /// Teilnehmerliste dabei sein sollte – Klasse bzw. Kurs; bei Sek-I-Gruppen (Schülergruppe laut
+    /// Grundplan, z. B. Religion, WP) nur die Mitglieder der Gruppe – und jede erfasste Lektion, in
+    /// der er einen Eintrag hat (auch wenn er nicht mehr zur Liste gehört). Die Teilnahme wird wie im
+    /// Stundenblatt aus den heutigen Zuordnungen bestimmt.
+    /// Filter: <paramref name="klasse"/> (Lektionen dieser Klasse/Stufe), <paramref name="unr"/> +
+    /// <paramref name="grundLehrer"/> (ein Unterricht), <paramref name="nurLehrer"/> (nur Stunden,
+    /// die diese Lehrkraft gehalten hat bzw. laut Plan hätte halten sollen).
+    /// </summary>
+    internal static async Task<Dictionary<int, SollInfo>> SollAsync(
+        AppDbContext db, IEnumerable<int> ids, DateOnly von, DateOnly bis,
+        string? klasse = null, int? unr = null, string? grundLehrer = null, string? nurLehrer = null)
+    {
+        var ergebnis = ids.Distinct().ToDictionary(i => i, _ => new SollInfo());
+        if (ergebnis.Count == 0) return ergebnis;
+        var idListe = ergebnis.Keys.ToList();
+
+        var lq = db.Lektionen.AsNoTracking()
+            .Where(l => l.ErfasstAm != null && l.Datum >= von && l.Datum <= bis);
+        var aq = db.Anwesenheiten.AsNoTracking()
+            .Where(a => idListe.Contains(a.SchuelerId)
+                        && a.Lektion!.ErfasstAm != null && a.Lektion.Datum >= von && a.Lektion.Datum <= bis);
+        if (unr is int un && !string.IsNullOrWhiteSpace(grundLehrer))
+        {
+            string gl = grundLehrer.Trim().ToUpperInvariant();
+            lq = lq.Where(l => l.UNr == un && l.GrundLehrer == gl);
+            aq = aq.Where(a => a.Lektion!.UNr == un && a.Lektion.GrundLehrer == gl);
+        }
+        if (!string.IsNullOrWhiteSpace(klasse))
+        {
+            string kl = klasse.Trim().ToUpperInvariant();
+            lq = lq.Where(l => l.Klassen.ToUpper().Contains(kl));
+        }
+
+        var lektionen = await lq
+            .Select(l => new LektionKurz(l.Id, l.UNr, l.GrundUNr, l.Lehrer, l.GrundLehrer, l.Lerngruppen))
+            .ToListAsync();
+        var mitEintrag = await aq
+            .Select(a => new
+            {
+                a.SchuelerId,
+                L = new LektionKurz(a.LektionId, a.Lektion!.UNr, a.Lektion.GrundUNr, a.Lektion.Lehrer,
+                    a.Lektion.GrundLehrer, a.Lektion.Lerngruppen)
+            })
+            .ToListAsync();
+
+        if (nurLehrer != null)
+        {
+            bool Eigene(LektionKurz l) => KlassenbuchService.Gleich(l.GrundLehrer, nurLehrer) || KlassenbuchService.Gleich(l.Lehrer, nurLehrer);
+            lektionen = lektionen.Where(Eigene).ToList();
+            mitEintrag = mitEintrag.Where(e => Eigene(e.L)).ToList();
+        }
+
+        // Mitgliedschaften: Klasse/Kurs (Schlüssel = Bezeichnung) und Sek-I-Gruppen (Bezeichnung = Schülergruppe).
+        var mitglied = await db.Zugehoerigkeiten.AsNoTracking()
+            .Where(z => idListe.Contains(z.SchuelerId))
+            .Select(z => new { z.SchuelerId, z.Lerngruppe!.Typ, z.Lerngruppe.Bezeichnung })
+            .ToListAsync();
+        var jeSchluessel = new Dictionary<string, List<int>>(Cmp);
+        var jeGruppe = new Dictionary<string, List<int>>(Cmp);
+        foreach (var m in mitglied)
+        {
+            var ziel = m.Typ == LerngruppeTyp.Gruppe ? jeGruppe : jeSchluessel;
+            string key = (m.Bezeichnung ?? "").Trim();
+            if (key.Length == 0) continue;
+            if (!ziel.TryGetValue(key, out var l)) ziel[key] = l = new List<int>();
+            l.Add(m.SchuelerId);
+        }
+
+        // Schülergruppen laut Grundplan je (UNr, Lehrkraft, Klasse) – Sek-I-Teilgruppen.
+        var gruppenSlots = (await db.GrundplanSlots.AsNoTracking()
+                .Where(x => x.Schuelergruppe != null && x.Schuelergruppe != "")
+                .Select(x => new { x.UNr, x.Lehrer, x.LerngruppeTyp, x.LerngruppeKey, x.Schuelergruppe })
+                .ToListAsync())
+            .Where(x => string.IsNullOrWhiteSpace(x.LerngruppeTyp)
+                        || string.Equals(x.LerngruppeTyp.Trim(), "Klasse", StringComparison.OrdinalIgnoreCase));
+        var gruppenJe = new Dictionary<string, HashSet<string>>(Cmp);
+        foreach (var x in gruppenSlots)
+        {
+            string key = $"{x.UNr}|{(x.Lehrer ?? "").Trim()}|{(x.LerngruppeKey ?? "").Trim()}";
+            if (!gruppenJe.TryGetValue(key, out var set)) gruppenJe[key] = set = new HashSet<string>(Cmp);
+            set.Add(x.Schuelergruppe!.Trim());
+        }
+        HashSet<string> GruppenVon(LektionKurz l, string key)
+        {
+            var erg = new HashSet<string>(Cmp);
+            foreach (var k in new[] { $"{l.UNr}|{l.GrundLehrer.Trim()}|{key}", $"{l.GrundUNr}|{l.GrundLehrer.Trim()}|{key}",
+                                      $"{l.UNr}|{l.Lehrer.Trim()}|{key}" })
+                if (gruppenJe.TryGetValue(k, out var set)) erg.UnionWith(set);
+            return erg;
+        }
+
+        var teilJe = new Dictionary<int, (LektionKurz L, HashSet<int> Teil)>();
+        foreach (var l in lektionen)
+        {
+            var teil = new HashSet<int>();
+            foreach (var key in Teile(l.Lerngruppen))
+            {
+                var gruppen = GruppenVon(l, key);
+                if (gruppen.Count > 0)
+                {
+                    foreach (var g in gruppen)
+                        if (jeGruppe.TryGetValue(g, out var mg)) teil.UnionWith(mg);
+                }
+                else if (jeSchluessel.TryGetValue(key, out var mk))
+                {
+                    teil.UnionWith(mk);
+                }
+            }
+            teilJe[l.Id] = (l, teil);
+        }
+        foreach (var e in mitEintrag)
+        {
+            if (!teilJe.TryGetValue(e.L.Id, out var x))
+            {
+                x = (e.L, new HashSet<int>());
+                teilJe[e.L.Id] = x;
+            }
+            x.Teil.Add(e.SchuelerId);
+        }
+
+        foreach (var (l, teil) in teilJe.Values)
+        {
+            var u = (l.UNr, l.GrundLehrer.Trim().ToUpperInvariant());
+            foreach (var id in teil)
+            {
+                if (!ergebnis.TryGetValue(id, out var info)) continue;
+                info.Gesamt++;
+                info.JeUnterricht[u] = (info.JeUnterricht.TryGetValue(u, out var n) ? n : 0) + 1;
+            }
+        }
+        return ergebnis;
+    }
+
+    /// <summary>
+    /// Offene Fälle (Entscheidung 43): Schüler einer Klasse/Stufe mit offenen Fehlstunden oder
+    /// Verspätungen – über das ganze Schuljahr bis heute, die ältesten zuerst. Keine Frist,
+    /// nichts wird automatisch unentschuldigt.
+    /// </summary>
+    public static async Task<FzOffenDto> OffeneFaelleAsync(AppDbContext db, string klasse)
+    {
+        var heute = KlassenbuchService.Heute();
+        var kal = await WochenplanService.KalenderAsync(db, heute);
+        var von = kal?.Start ?? heute.AddDays(-365);
+        string k = klasse.Trim();
+        var (ids, istStufe) = await KlassenSchuelerAsync(db, k);
+        var offen = ids.Count == 0
+            ? new List<Zeile>()
+            : await LadeAsync(ImZeitraum(db, von, heute)
+                .Where(a => ids.Contains(a.SchuelerId)
+                            && (a.Status == AnwesenheitStatus.Fehlt || a.Status == AnwesenheitStatus.Verspaetet)
+                            && a.Bewertung == FehlBewertung.Offen));
+
+        var jeSchueler = offen.GroupBy(z => z.SchuelerId).ToDictionary(g => g.Key, g => g.ToList());
+        var betroffen = jeSchueler.Keys.ToList();
+        var personen = betroffen.Count == 0
+            ? new List<(int Id, string Vorname, string Nachname, string Stufe)>()
+            : (await db.Schueler.AsNoTracking()
+                    .Where(x => betroffen.Contains(x.Id))
+                    .Select(x => new { x.Id, x.Vorname, x.Nachname, x.Stufe })
+                    .ToListAsync())
+                .Select(x => (x.Id, x.Vorname, x.Nachname, x.Stufe))
+                .ToList();
+        var klassen = istStufe ? await KlassenbuchService.KlassenAsync(db, betroffen, kal?.Schuljahr ?? "")
+            : new Dictionary<int, string>();
+
+        var liste = personen
+            .Select(p =>
+            {
+                var z = jeSchueler[p.Id];
+                var aelteste = z.Min(x => x.Datum);
+                return new FzOffenZeileDto(p.Id, p.Vorname, p.Nachname,
+                    istStufe ? (klassen.TryGetValue(p.Id, out var kl) ? kl : p.Stufe) : k.ToUpperInvariant(),
+                    z.Count(x => x.Status == AnwesenheitStatus.Fehlt),
+                    z.Count(x => x.Status == AnwesenheitStatus.Verspaetet),
+                    aelteste, z.Max(x => x.Datum), heute.DayNumber - aelteste.DayNumber);
+            })
+            .OrderBy(x => x.Aelteste)
+            .ThenBy(x => x.Nachname, KlassenbuchService.NamenCmp)
+            .ThenBy(x => x.Vorname, KlassenbuchService.NamenCmp)
+            .ThenBy(x => x.Id)
+            .ToList();
+        return new FzOffenDto(GruppenTitel(k, istStufe), von, heute, liste);
     }
 
     // =================================================================

@@ -266,6 +266,7 @@ function keStundeLeeren() {
   el("kbEintraege").hidden = true;
   el("keKarteListe").replaceChildren();
   el("keKarteInfo").textContent = "";
+  el("keKarteSofort").textContent = "";
   el("ksEListe").replaceChildren();
   el("ksEintrag").hidden = true;
   if (ke.dialog) dialogZu(el("keDialog"));
@@ -311,6 +312,7 @@ function keKarteRendern() {
     el("keKarteListe").replaceChildren();
     el("keKarteInfo").textContent = ke.stundeFehler;
     el("keKarteInfo").hidden = false;
+    el("keKarteSofort").hidden = true;
     return;
   }
   const n = d.eintraege.length;
@@ -323,6 +325,21 @@ function keKarteRendern() {
     : (d.sperrgrund || "");
   el("keKarteInfo").textContent = info;
   el("keKarteInfo").hidden = !info;
+  // Nachtrag 3.4: Einträge sind keine Anwesenheit – sie werden sofort gespeichert.
+  const sofort = d.darfSchreiben ? keSofortText() : "";
+  el("keKarteSofort").textContent = sofort;
+  el("keKarteSofort").hidden = !sofort;
+}
+
+/** Hinweis, dass Einträge sofort gespeichert werden und wofür „Speichern“ unten gilt. */
+function keSofortText() {
+  const b = kb.blatt;
+  const anw = !!(b && b.darfSchreiben);
+  const inh = !!(b && b.inhalt && b.inhalt.darfSchreiben);
+  const wofuer = anw && inh ? "Anwesenheit, Thema und Hausaufgabe"
+    : anw ? "die Anwesenheit"
+    : inh ? "Thema und Hausaufgabe" : "";
+  return "Einträge werden sofort gespeichert." + (wofuer ? ` „Speichern“ unten gilt für ${wofuer}.` : "");
 }
 
 function keKartenZeile(e) {
@@ -652,6 +669,7 @@ async function keSchuelerLaden(o) {
   box.replaceChildren(h("h3", { class: "fz-titel" }, "Einträge"), h("p", { class: "such-info" }, "Wird geladen …"));
   let url = `api/eintraege/schueler/${o.id}`;
   if (o.unr) url += `?unr=${o.unr}&lehrer=${encodeURIComponent(o.lehrer)}`;
+  url = fzMitZr(url);   // Phase 4.1: gewählter Zeitraum
   try {
     const d = await senden("GET", url);
     if (nr !== ke.schuelerLadeNr || fzOben() !== o) return;
@@ -741,7 +759,7 @@ function keListeLeeren(text) {
 function keRenderListe(d, o) {
   ke.liste = d;
   if (ke.filter && !d.zaehler.some((z) => z.kategorie === ke.filter)) ke.filter = "";
-  el("fzKeWann").textContent = `${fzDatumLang(d.von)} – ${fzDatumLang(fzBis(d.bis))}`;
+  el("fzKeWann").textContent = fzZeitraumText(d.von, d.bis);
   el("fzKeTitel").textContent = d.titel;
   const n = d.eintraege.length;
   const info = [`${n} ${n === 1 ? "Eintrag" : "Einträge"}`];

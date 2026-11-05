@@ -28,6 +28,10 @@
 //    im Stundenblatt, Bereich „Einträge" im Statusdialog („⋯"), Marken unter
 //    den Namen. Ist dort ein Eintrag offen, schließt die Statuswahl den Dialog nicht.
 //
+//  - Speichern-Leiste (Nachtrag 3.4): ein Knopf „Speichern"; links daneben
+//    „Noch nicht gespeichert", solange die Anwesenheit nicht erfasst ist oder
+//    Anwesenheit/Thema/Hausaufgabe geändert sind. Einträge speichern sofort.
+//
 //  Datenschutz: Namen und Anwesenheiten stehen nur im Arbeitsspeicher –
 //  nie im Browser-Speicher – und werden beim Verlassen gelöscht.
 //
@@ -735,18 +739,34 @@ function renderZahlen() {
   el("kbZahlen").textContent = teile.join(" · ");
 }
 
+/**
+ * Nachtrag 3.4: Ist im Stundenblatt etwas nicht gespeichert? Ja, wenn die Anwesenheit noch nicht
+ * erfasst ist (auch „alle anwesend" gilt erst nach dem Speichern als erfasst) oder Anwesenheit,
+ * Thema, Hausaufgabe bzw. Fälligkeit geändert wurden. Einträge zählen nicht – sie werden sofort
+ * gespeichert. (Die Rückfrage beim Verlassen kommt weiterhin nur bei echten Änderungen.)
+ */
+function kbNichtGespeichert() {
+  const d = kb.blatt;
+  if (!d) return false;
+  return (!!d.darfSchreiben && !d.erfasstAm) || kb.geaendert || kbInhaltGeaendert();
+}
+
 function renderLeiste() {
   const d = kb.blatt;
   const knopf = el("kbSpeichern");
   const leiste = el("kbLeiste");
-  if (!d) { leiste.hidden = true; return; }
+  const hinweis = el("kbUngespeichert");
+  if (!d) { leiste.hidden = true; hinweis.hidden = true; return; }
   const darfAnw = !!d.darfSchreiben;
   const darfInh = !!(d.inhalt && d.inhalt.darfSchreiben);
   el("kbHistorieKnopf").hidden = !(d.erfasstAm || d.version > 0 || keHatEintraege());
   knopf.hidden = !darfAnw && !darfInh;
   leiste.hidden = knopf.hidden && el("kbHistorieKnopf").hidden;
-  const aenderung = kb.geaendert || kbInhaltGeaendert();
-  leiste.classList.toggle("ungespeichert", aenderung);
+  const offen = !knopf.hidden && kbNichtGespeichert();
+  leiste.classList.toggle("ungespeichert", offen);
+  hinweis.hidden = !offen;
+  if (offen) knopf.setAttribute("aria-describedby", "kbUngespeichert");
+  else knopf.removeAttribute("aria-describedby");
   for (const id of ["kbThema", "kbHa", "kbFaellig"]) el(id).readOnly = kb.speichert;
   renderFolge();
   knopf.classList.remove("gespeichert");
@@ -755,14 +775,15 @@ function renderLeiste() {
     knopf.textContent = "Speichern …";
     return;
   }
-  const e = darfInh ? kbInhaltEingaben() : {};
-  if (darfAnw && !d.erfasstAm) {
+  if (kb.konflikt) {
+    // Inzwischen hat jemand anderes gespeichert: nur noch neu laden (Eingaben gehen verloren).
     knopf.disabled = false;
-    knopf.textContent = kbAbweichungen().length === 0 ? "Alle anwesend – speichern"
-      : e.thema || e.hausaufgabe ? "Speichern" : "Anwesenheit speichern";
-  } else if (aenderung) {
+    knopf.textContent = "Neu laden";
+    return;
+  }
+  if (offen) {
     knopf.disabled = false;
-    knopf.textContent = "Änderungen speichern";
+    knopf.textContent = "Speichern";
   } else if (kbMitFolge()) {
     // 1. Stunde schon gespeichert, in der 2. fehlt noch Anwesenheit bzw. Thema: nur übernehmen.
     knopf.disabled = false;
@@ -838,17 +859,15 @@ async function stundeSpeichern() {
     blattUebernehmen(antwort);
     kb.folgeAn = folgeAn;
     renderLeiste();
-    toast(antwort.meldung || (darfInh ? "Gespeichert." : "Anwesenheit gespeichert."));
+    toast(antwort.meldung || "Gespeichert.");
   } catch (f) {
     kb.speichert = false;
     if (nr !== kb.ladeNr) return;
     const text = aktionsFehler(f);
-    if (text === null) return;
+    if (text === null) { renderLeiste(); return; }
     kb.konflikt = f instanceof HttpFehler && f.status === 409 && !!(f.daten && f.daten.konflikt);
-    renderLeiste();
+    renderLeiste();   // bei Konflikt: Knopf „Neu laden"
     if (kb.konflikt) {
-      el("kbSpeichern").disabled = false;
-      el("kbSpeichern").textContent = "Neu laden";
       fehlerIn("kbFehler", text + " Deine Eingaben in dieser Ansicht gehen dabei verloren.");
     } else {
       fehlerIn("kbFehler", text);

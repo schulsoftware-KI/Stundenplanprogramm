@@ -23,6 +23,7 @@ public class AppDbContext : DbContext
     public DbSet<Entschuldigung> Entschuldigungen => Set<Entschuldigung>();  // Phase 3.2
     public DbSet<UnterrichtEinstellung> UnterrichtEinstellungen => Set<UnterrichtEinstellung>(); // Phase 3.3
     public DbSet<KlassenbuchEintrag> KlassenbuchEintraege => Set<KlassenbuchEintrag>();        // Phase 3.4
+    public DbSet<DownloadProtokoll> DownloadProtokolle => Set<DownloadProtokoll>();           // Phase 4.2
 
     // Grundplan + Kalender (Phase 2, Schritt 1)
     public DbSet<GrundplanVersion> GrundplanVersionen => Set<GrundplanVersion>();
@@ -121,6 +122,10 @@ public class AppDbContext : DbContext
         b.Entity<KlassenbuchEintrag>().HasIndex(e => e.SchuelerId);
         b.Entity<KlassenbuchEintrag>().HasIndex(e => new { e.UNr, e.GrundLehrer });
         b.Entity<KlassenbuchProtokoll>().HasIndex(p => p.EintragId);
+
+        // Phase 4.2: Download-Protokoll (neue Tabelle per Schema-Nachrüstung).
+        b.Entity<DownloadProtokoll>().ToTable("DownloadProtokolle");
+        b.Entity<DownloadProtokoll>().HasIndex(p => p.Zeit);
 
         // --- Grundplan (versioniert) ---
         b.Entity<GrundplanVersion>()

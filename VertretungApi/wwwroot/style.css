@@ -944,6 +944,42 @@ button.kb-person:hover { background: var(--akzent-hell); }
   box-shadow: inset 0 0 0 1px var(--vertretung);
 }
 .kb-leiste.ungespeichert .hauptknopf:not(:disabled) { box-shadow: 0 0 0 3px var(--akzent-hell); }
+/* Nachtrag 3.4: „Noch nicht gespeichert" links neben dem Knopf (Rotstift); bricht auf
+   schmalen Handys zweizeilig um, der Knopf bleibt in derselben Zeile. */
+.kb-ungespeichert {
+  flex: 0 1 auto;
+  max-width: 15em;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--rot);
+  font-weight: 750;
+  font-size: 0.92rem;
+  line-height: 1.2;
+}
+.kb-ungespeichert::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--rot);
+}
+.kb-leiste.ungespeichert .hauptknopf { flex-basis: 140px; }
+@media (max-width: 380px) {
+  .kb-ungespeichert { max-width: 7.2em; font-size: 0.88rem; }
+}
+/* Einträge-Karte: Einträge werden sofort gespeichert (nicht über die Leiste) */
+.ke-sofort {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--akzent-hell);
+  color: var(--tinte);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
 #kbFehler, #kgFehler { margin: 0; }
 /* Doppelstunde: Schalter und Hinweis über dem Speichern-Knopf */
 .kb-folge { flex: 1 1 100%; color: var(--tinte); font-weight: 600; white-space: normal; min-height: 32px; }
@@ -1020,6 +1056,7 @@ main.fehlzeiten:not([hidden]) ~ .toast { bottom: auto; top: calc(74px + env(safe
 main.fehlzeiten { max-width: 760px; }
 .fz-bereich { display: grid; gap: 10px; margin-bottom: 12px; }
 .fz-wahl { margin: 0; }
+.fz-wahl button { min-height: 44px; }   /* Phase 4.1: Tippflächen ≥ 44 px */
 .fz-wahl button[aria-pressed="true"] { background: var(--akzent); color: var(--auf-akzent); }
 #fzNeFilter { margin: 0; }
 #fzNeInfo, #fzKurseInfo, #fzEintraegeInfo { margin: 0 2px; }
@@ -1065,7 +1102,7 @@ main.fehlzeiten { max-width: 760px; }
 /* Handy quer (wenig Höhe): Speichern-Leiste und Kopf des Stundenblatts flacher */
 @media (orientation: landscape) and (max-height: 500px) {
   .kb-leiste { padding-top: 6px; padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px)); gap: 4px 12px; }
-  .kb-leiste .hauptknopf { padding: 8px 14px; font-size: 0.98rem; }
+  .kb-leiste .hauptknopf { padding: 8px 14px; font-size: 0.98rem; min-height: 44px; }
   .kb-folge { min-height: 26px; }
   .kb-folge-info { margin-top: -2px; }
   .kb-kopf { padding: 10px 14px; }
@@ -1087,6 +1124,84 @@ main.fehlzeiten { max-width: 760px; }
 }
 .fz-name:hover { text-decoration: underline; }
 .fz-klasse { display: block; font-size: 0.78rem; font-weight: 500; color: var(--leise); }
+
+/* ---- Phase 4.1: Zeitraum, Konferenzübersicht, offene Fälle ---- */
+.fz-zeitraum { display: grid; gap: 8px; margin-bottom: 12px; }
+.fz-zr-wahl button { min-height: 44px; }
+.fz-zr-wahl .zr-kurz { display: none; }
+.fz-zr-frei { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+.fz-zr-frei > div { min-width: 0; }
+.fz-zr-frei input { width: 100%; min-width: 0; }
+.fz-zr-frei .feld { margin-top: 0; }
+.fz-zr-frei .hauptknopf { min-height: 44px; }
+#fzZrFehler { margin: 0 2px; }
+@media (max-width: 480px) {
+  .fz-zr-wahl .zr-lang { display: none; }
+  .fz-zr-wahl .zr-kurz { display: inline; }
+  .fz-zr-frei { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .fz-zr-frei .hauptknopf { grid-column: 1 / -1; }
+}
+.fz-offen-hinweis {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px;
+  margin: 4px 0 0 0; color: var(--verlegung); font-weight: 700; font-size: 0.92rem;
+}
+.fz-offen-hinweis .textknopf { min-height: 44px; padding-left: 0; padding-right: 0; }
+.fz-nur-offen { margin: 0 2px; min-height: 44px; color: var(--tinte); white-space: normal; }
+.fz-legende { margin: 0 2px; }
+/* Sortierbare Spaltenköpfe */
+.fz-konferenz thead th { padding-top: 2px; padding-bottom: 2px; vertical-align: bottom; }
+/* Pfeil über dem Text: kostet keine Breite, der Kopf springt beim Sortieren nicht */
+.fz-sort {
+  display: inline-flex; flex-direction: column; align-items: flex-start; justify-content: flex-end;
+  min-height: 44px; padding: 0; border: none; background: none;
+  color: inherit; font: inherit; font-weight: 700; cursor: pointer; white-space: nowrap;
+}
+.fz-konferenz th.zahl .fz-sort { align-items: flex-end; }
+.fz-sort:hover abbr, .fz-sort:hover { color: var(--akzent); }
+.fz-pfeil { order: -1; height: 0.9em; line-height: 0.9em; font-size: 0.68em; color: var(--akzent); }
+.fz-tabelle .zahl.fz-quote { width: 3.9rem; }
+.fz-unter { display: block; font-size: 0.72rem; font-weight: 650; color: var(--leise); white-space: nowrap; }
+.fz-tabelle td .fz-unter.offen { color: var(--verlegung); }
+.fz-konferenz .fz-min-kurz { display: none; }
+.fz-konferenz tfoot th, .fz-konferenz tfoot td {
+  border-top: 2px solid var(--linie); background: var(--akzent-hell); font-weight: 750;
+}
+.fz-konferenz tfoot th { padding-top: 8px; padding-bottom: 8px; }
+/* Schmal: „entsch." und „Min." ausblenden (Minuten stehen dann unter den Verspätungen) */
+@media (max-width: 560px) {
+  .fz-konferenz .fz-schmal { display: none; }
+  .fz-konferenz .fz-min-kurz { display: block; }
+  .fz-tabelle .zahl.fz-quote { width: 3.3rem; }
+}
+@media (max-width: 360px) {
+  .fz-zr-frei { grid-template-columns: minmax(0, 1fr); }
+  .fz-tabelle .zahl.fz-quote { width: 2.55rem; }
+  .fz-unter { font-size: 0.66rem; white-space: normal; }
+}
+/* Offene Fälle */
+.fz-of-zeile { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.fz-of-person.alt { border-left-color: var(--verlegung); }
+.fz-of-seit { font-size: 0.82rem; font-weight: 650; color: var(--verlegung); }
+.fz-of-ent { min-height: 44px; margin-right: 8px; padding: 6px 8px; white-space: normal; text-align: right; max-width: 9.5em; }
+@media (max-width: 400px) {
+  .fz-of-zeile { grid-template-columns: 1fr; }
+  .fz-of-ent { justify-self: start; margin: -6px 0 6px 12px; text-align: left; max-width: none; }
+}
+
+/* ---- Phase 4.2: Klassenbuch/Kursheft als PDF ---- */
+.fz-pdf-leiste { display: flex; justify-content: flex-end; margin: -4px 0 8px 0; }
+.fz-pdf-knopf { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 6px 4px; }
+.pd-was { margin: 0 0 4px 0; font-weight: 700; font-size: 1.02rem; }
+#fzPdfDialog .feld { margin-top: 4px; }
+#fzPdfDialog select { width: 100%; }
+.pd-schueler { margin-top: 6px; min-height: 44px; }
+.pd-warnung {
+  margin: 10px 0 0 0; padding: 8px 10px; border-left: 4px solid var(--verlegung); border-radius: 0 8px 8px 0;
+  background: var(--verlegung-t); color: var(--tinte); font-size: 0.86rem; line-height: 1.4;
+}
+#pdStatus { margin: 8px 0 0 0; }
+#pdStatus:empty { display: none; }
+#fzPdfDialog .knopfreihe .hauptknopf, #fzPdfDialog .knopfreihe .textknopf { min-height: 44px; }
 
 /* Entschuldigungen */
 .fz-ent { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; }

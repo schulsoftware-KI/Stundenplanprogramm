@@ -23,6 +23,9 @@ namespace VertretungApi.Controllers;
 ///   POST   api/fehlzeiten/schueler/{id}/entschuldigung        Zeitraum entschuldigen { von, bis, grund }
 ///   DELETE api/fehlzeiten/entschuldigung/{id}                  Entschuldigung löschen
 ///   PUT    api/fehlzeiten/eintrag/{id}                        Fehlstunde bewerten { bewertung, grund? }
+/// Phase 4.1:
+///   GET    api/fehlzeiten/zeitraeume                          1./2. Halbjahr, Schuljahr (alle Angemeldeten)
+///   GET    api/fehlzeiten/offen/{klasse}                      offene Fälle im Schuljahr (KL/SK zuständig, Admin)
 /// Zeitraum ohne von/bis: das laufende Schuljahr. Rechte siehe Services/FehlzeitenService.cs.
 /// </summary>
 [ApiController]
@@ -55,13 +58,29 @@ public class FehlzeitenController : ControllerBase
             ? d
             : ErfassungAb();
 
+    /// <summary>
+    /// Phase 4.1: erster Tag des 2. Halbjahres (Klassenbuch:HalbjahrAb); fehlt die Einstellung oder
+    /// liegt sie nicht im Schuljahr, gilt der 1. Februar.
+    /// </summary>
+    private DateOnly? HalbjahrAb()
+        => DateOnly.TryParseExact(_cfg["Klassenbuch:HalbjahrAb"], "yyyy-MM-dd", CultureInfo.InvariantCulture,
+               DateTimeStyles.None, out var d)
+            ? d
+            : null;
+
+    /// <summary>Phase 4.1 (Entscheidung 40): wählbare Zeiträume – auch für Schülerkonten.</summary>
+    [Authorize]
+    [HttpGet("zeitraeume")]
+    public async Task<IActionResult> Zeitraeume()
+        => Ok(await FehlzeitenService.ZeitraeumeAsync(_db, HalbjahrAb()));
+
     [Authorize(Roles = Rollen.Personal)]
     [HttpGet("rechte")]
     public async Task<IActionResult> Rechte()
     {
         var u = await NutzerAsync();
         if (u == null) return Unauthorized();
-        return Ok(await FehlzeitenService.RechteAsync(_db, u, ErfassungAb()));
+        return Ok(await FehlzeitenService.RechteAsync(_db, u, ErfassungAb(), _cfg.GetValue("Berichte:NurAdmin", false)));
     }
 
     [Authorize(Roles = Rollen.Personal)]
@@ -124,6 +143,19 @@ public class FehlzeitenController : ControllerBase
 
         var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
         return Ok(await FehlzeitenService.KlasseAsync(_db, klasse, v, b));
+    }
+
+    /// <summary>Phase 4.1 (Entscheidung 43): offene Fälle einer Klasse/Stufe im ganzen Schuljahr.</summary>
+    [Authorize(Roles = Rollen.Personal)]
+    [HttpGet("offen/{klasse}")]
+    public async Task<IActionResult> Offen(string klasse)
+    {
+        var u = await NutzerAsync();
+        if (u == null) return Unauthorized();
+        if (!u.IstAdmin && !(u.IstKlassenleitungOderKoordination
+                             && KlassenbuchService.ZustaendigFuer(u.Zustaendig, new[] { klasse })))
+            return StatusCode(403, new { fehler = "Offene Fälle sehen nur die Klassenleitung bzw. Stufenkoordination und die Verwaltung." });
+        return Ok(await FehlzeitenService.OffeneFaelleAsync(_db, klasse));
     }
 
     [Authorize(Roles = Rollen.Personal)]

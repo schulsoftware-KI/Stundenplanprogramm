@@ -259,6 +259,7 @@
         </div>
         <ul id="keKarteListe" class="ke-kliste" aria-labelledby="keKarteTitel"></ul>
         <p id="keKarteInfo" class="kleingedruckt ohne-einzug" hidden></p>
+        <p id="keKarteSofort" class="ke-sofort" hidden></p>
       </div>
       <div id="kbListeKopf" class="kb-listekopf" hidden>
         <p id="kbZahlen" class="kb-zahlen" role="status"></p>
@@ -272,6 +273,8 @@
           <span id="kbFolgeText"></span>
         </label>
         <p id="kbFolgeInfo" class="kb-folge-info" hidden></p>
+        <!-- Nachtrag 3.4: deutlicher Hinweis, solange etwas ungespeichert ist -->
+        <p id="kbUngespeichert" class="kb-ungespeichert" hidden>Noch nicht gespeichert</p>
         <button id="kbSpeichern" class="hauptknopf" type="button">Speichern</button>
         <button id="kbHistorieKnopf" class="textknopf" type="button" aria-haspopup="dialog">Änderungen</button>
       </div>
@@ -359,25 +362,69 @@
       <button type="button" data-u="keUnterricht" aria-pressed="false">Einträge</button>
     </div>
 
-    <!-- Liste: Klasse/Stufe oder Unterricht -->
+    <!-- Phase 4.1: Klasse/Stufe – Übersicht | Offene Fälle -->
+    <div id="fzKWahl" class="modi fz-wahl" role="group" aria-label="Ansicht der Klasse" hidden>
+      <button type="button" data-k="uebersicht" aria-pressed="true">Übersicht</button>
+      <button type="button" data-k="offen" aria-pressed="false">Offene Fälle</button>
+    </div>
+
+    <!-- Phase 4.1: Zeitraum (1./2. Halbjahr, Schuljahr, eigener Zeitraum) -->
+    <div id="fzZeitraum" class="fz-zeitraum" hidden>
+      <div id="fzZrWahl" class="modi fz-wahl fz-zr-wahl" role="group" aria-label="Zeitraum"></div>
+      <div id="fzZrFrei" class="fz-zr-frei" hidden>
+        <div>
+          <label class="feld" for="fzZrVon">Von</label>
+          <input id="fzZrVon" class="eingabe" type="date" />
+        </div>
+        <div>
+          <label class="feld" for="fzZrBis">Bis</label>
+          <input id="fzZrBis" class="eingabe" type="date" />
+        </div>
+        <button id="fzZrAnwenden" class="hauptknopf klein" type="button">Anzeigen</button>
+      </div>
+      <p id="fzZrFehler" class="fehler klein" role="alert" hidden></p>
+    </div>
+
+    <!-- Phase 4.2: Klassenbuch bzw. Kursheft als PDF -->
+    <div id="fzPdfLeiste" class="fz-pdf-leiste" hidden>
+      <button id="fzPdfKnopf" class="textknopf klein fz-pdf-knopf" type="button" aria-haspopup="dialog">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M7 3h7l5 5v13H7z M14 3v5h5 M10 13h6 M10 17h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+        <span id="fzPdfKnopfText">Als PDF …</span>
+      </button>
+    </div>
+
+    <!-- Liste: Klasse/Stufe oder Unterricht (Phase 4.1: Konferenzübersicht) -->
     <section id="fzListe" class="fz-bereich" aria-labelledby="fzListeTitel" hidden>
       <div class="karte kb-kopf">
         <p id="fzListeWann" class="kb-wann"></p>
         <h2 id="fzListeTitel" class="kb-fach"></h2>
         <p id="fzListeInfo" class="kb-wer"></p>
+        <p id="fzListeOffen" class="fz-offen-hinweis" hidden></p>
       </div>
+      <label id="fzNurOffenSchalter" class="schalter fz-nur-offen" hidden>
+        <input id="fzNurOffen" type="checkbox" />
+        <span>Nur Schüler mit offenen Stunden</span>
+      </label>
       <div class="tabelle-huelle fz-huelle">
-        <table class="tabelle fz-tabelle">
-          <thead><tr>
-            <th scope="col">Name</th>
-            <th scope="col" class="zahl"><abbr title="Fehlstunden">Fehlst.</abbr></th>
-            <th scope="col" class="zahl">offen</th>
-            <th scope="col" class="zahl"><abbr title="unentschuldigt">unent.</abbr></th>
-            <th scope="col" class="zahl"><abbr title="Verspätungen">Versp.</abbr></th>
-          </tr></thead>
+        <table class="tabelle fz-tabelle fz-konferenz">
+          <thead id="fzListeKopf"></thead>
           <tbody id="fzListeZeilen"></tbody>
+          <tfoot id="fzListeFuss"></tfoot>
         </table>
       </div>
+      <p class="kleingedruckt ohne-einzug fz-legende">Fehlquote = Fehlstunden ÷ Stunden, in denen die Anwesenheit
+        erfasst ist und die Schülerin bzw. der Schüler dabei sein sollte. Beurlaubt zählt als entschuldigte
+        Fehlstunde, schulische Veranstaltungen zählen nicht.</p>
+    </section>
+
+    <!-- Phase 4.1: offene Fälle einer Klasse/Stufe (ganzes Schuljahr, älteste zuerst) -->
+    <section id="fzOffen" class="fz-bereich" aria-labelledby="fzOTitel" hidden>
+      <div class="karte kb-kopf">
+        <p id="fzOWann" class="kb-wann"></p>
+        <h2 id="fzOTitel" class="kb-fach"></h2>
+        <p id="fzOInfo" class="kb-wer"></p>
+      </div>
+      <ul id="fzOListe" class="k-liste fz-offen-liste" aria-labelledby="fzOTitel"></ul>
     </section>
 
     <!-- Themenliste eines Unterrichts (Phase 3.3) -->
@@ -710,6 +757,29 @@
     <div class="knopfreihe">
       <button id="feSpeichern" class="hauptknopf" type="button">Eintragen</button>
       <button id="feAbbrechen" class="textknopf" type="button">Abbrechen</button>
+    </div>
+  </dialog>
+
+  <!-- Phase 4.2: Klassenbuch/Kursheft als PDF (Entscheidungen 44–47, 50) -->
+  <dialog id="fzPdfDialog" class="fenster" aria-labelledby="pdTitel">
+    <h2 id="pdTitel" class="karte-titel">Als PDF</h2>
+    <p id="pdWas" class="pd-was"></p>
+    <div id="pdUmfangBox" hidden>
+      <label class="feld" for="pdUmfang">Was soll ins PDF?</label>
+      <select id="pdUmfang" class="eingabe"></select>
+    </div>
+    <p id="pdZeitraum" class="kleingedruckt ohne-einzug"></p>
+    <label id="pdSchuelerSchalter" class="schalter gross pd-schueler" hidden>
+      <input id="pdSchueler" type="checkbox" />
+      <span>Schülereinträge aufnehmen <span class="kb-sichtbar-zusatz">(nur Schüler, für die du zuständig bist)</span></span>
+    </label>
+    <p class="pd-warnung" role="note"><strong>Die Datei enthält Schülerdaten.</strong> Bitte nur auf dienstlichen bzw.
+      freigegebenen Geräten speichern und nicht weitergeben. Der Download wird protokolliert.</p>
+    <p id="pdStatus" class="such-info" role="status"></p>
+    <p id="pdFehler" class="fehler klein" role="alert" hidden></p>
+    <div class="knopfreihe">
+      <button id="pdErstellen" class="hauptknopf" type="button">PDF erstellen</button>
+      <button id="pdAbbrechen" class="textknopf" type="button">Abbrechen</button>
     </div>
   </dialog>
 

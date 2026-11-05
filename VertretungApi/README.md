@@ -398,6 +398,62 @@ In der PWA (`wwwroot/eintraege.js`, Präfix `ke…`, dazu klassenbuch.js/fehlzei
 Fehlzeiten | Themen | Einträge, Schülerdetail mit Abschnitt „Einträge“ und „Eintrag ohne Stunde“.
 Einträge landen nie im Browser-Speicher. Service-Worker v10.
 
+## Auswertungen am Bildschirm (Phase 4.1)
+
+Entscheidungen 40–43 (Nutzer 04.11.2026). Keine Schemaänderung – nur neue Einstellung und Endpunkte.
+
+| Methode | Pfad | Zweck | Wer |
+|---|---|---|---|
+| GET | `/api/fehlzeiten/zeitraeume` | 1. Halbjahr, 2. Halbjahr, Schuljahr + `standard` (laufendes Halbjahr) | alle Angemeldeten |
+| GET | `/api/fehlzeiten/offen/{klasse}` | offene Fälle der Klasse/Stufe im ganzen Schuljahr bis heute, älteste zuerst (`aelteste`, `neueste`, `tage`) | KL/SK zuständig, Admin |
+
+- **Zeitraum:** Alle Listen nehmen weiterhin `von`/`bis`; die PWA schickt den gewählten Zeitraum
+  überall mit (Klasse/Stufe, Unterricht, Themen, Einträge, Schüler, „Meine Fehlzeiten“). Das
+  2. Halbjahr beginnt laut `Klassenbuch:HalbjahrAb` (`2027-02-01`); fehlt die Einstellung oder liegt
+  sie nicht im Schuljahr, gilt der 1. Februar.
+- **Soll und Fehlquote:** `FzZeileDto.soll`, `FzFachDto.soll`, `FzSchuelerDto.soll` = erfasste Stunden
+  im Zeitraum, in denen der Schüler laut Liste dabei sein sollte (Klasse/Kurs; bei Sek-I-Gruppen nur
+  die Mitglieder) plus jede erfasste Stunde, in der er einen Eintrag hat. Teilnahme nach den heutigen
+  Zuordnungen (wie im Stundenblatt). Fehlquote = Fehlstunden ÷ Soll – nur Anzeige, keine Schwellen.
+- **Listen** (`klasse/{k}`, `unterricht`) tragen zusätzlich `gesamt` (Summe aller Zeilen) und `soll`.
+
+In der PWA (`fehlzeiten.js`): Zeitraumleiste „1. Halbjahr · 2. Halbjahr · Schuljahr · Eigener“,
+Konferenzübersicht (Fehlstunden, davon entschuldigt/offen/unentschuldigt, Quote, Verspätungen,
+Minuten; sortierbar, Gesamtzeile, „Nur Schüler mit offenen Stunden“, Hinweis „Noch offen: …“),
+bei Klasse/Stufe Umschalter „Übersicht | Offene Fälle“ mit „Entschuldigung eintragen“ je Schüler,
+Fehlquote im Schülerdetail und je Fach. Service-Worker v12.
+
+## Klassenbuch und Kursheft als PDF (Phase 4.2)
+
+Entscheidungen 44–47 und 50 (Nutzer 04.11.2026). Neues Paket **QuestPDF 2026.9.1** (wie im Desktop,
+Community-Lizenz). Neue Tabelle `DownloadProtokolle` – **Schemaänderung per Nachrüstung, DB muss NICHT
+gelöscht werden.** Neue Einstellung `Berichte:NurAdmin` (Standard `false`).
+
+| Methode | Pfad | Zweck | Wer |
+|---|---|---|---|
+| GET | `/api/berichte/unterrichte?klasse=05A` | Unterrichte der Klasse/Stufe (Auswahl „Kursheft“) | KL/SK zuständig, Admin |
+| GET | `/api/berichte/klassenbuch?klasse=&von=&bis=&schuelerEintraege=` | Klassenbuch als PDF | KL/SK zuständig, Admin |
+| GET | `/api/berichte/kursheft?unr=&lehrer=&von=&bis=&schuelerEintraege=` | Kursheft als PDF | Lehrkraft laut Plan, KL/SK der Klassen/Stufe, Admin |
+| GET | `/api/berichte/protokoll?limit=` | Download-Protokoll (wer, wann, was, Zeitraum) | Admin |
+
+- **Inhalt** (`Services/BerichtService.cs` → `Services/KlassenbuchPdf.cs`): A4 hoch, je Unterrichtstag eine
+  Tabelle (Std · Fach/Lehrkraft/Status · Thema/Hausaufgabe/Klasseneinträge · Anwesenheit mit Namen, „erfasst
+  von/am“, „geändert von/am“). Entfall/Verlegung und nicht erfasste Stunden bleiben als Zeile sichtbar.
+  Anhang: Fehlzeiten je Schüler (wie die Konferenzübersicht, mit Fehlquote und Gesamtzeile). Kopf/Fuß jeder
+  Seite: Art, Klasse/Kurs, Zeitraum, Schuljahr, „Enthält personenbezogene Daten“, erstellt am/von, „Seite x
+  von y“. Zeitraum ohne `von`/`bis` = Schuljahr; er endet spätestens heute.
+- **Schülereinträge** nur mit `schuelerEintraege=true` und nur, wenn KL/SK/Admin druckt – und nur für Schüler,
+  für die die Person zuständig ist (im Kursheft nur Einträge aus diesem Unterricht).
+- **Protokoll:** jeder Download (ohne Inhalt), Frist wie das Kontenprotokoll (`Konten:ProtokollTage`).
+  `Berichte:NurAdmin = true` erlaubt Downloads nur noch der Verwaltung (`/api/fehlzeiten/rechte` meldet
+  `berichte`).
+
+In der PWA (`fehlzeiten.js`): Knopf „Klassenbuch als PDF …“ (Klasse/Stufe, Übersicht) bzw. „Kursheft als
+PDF …“ (Unterricht: Fehlzeiten/Themen/Einträge). Dialog mit Auswahl ganzes Klassenbuch bzw. Kursheft eines
+Unterrichts der Klasse, gewähltem Zeitraum, Schalter „Schülereinträge aufnehmen“ (Standard aus) und Hinweis
+„Die Datei enthält Schülerdaten …“. Das PDF wird nur heruntergeladen, nichts im Browser-Speicher.
+Service-Worker v13.
+
 ## Produktiv: Migrations statt EnsureCreated
 
 `EnsureCreated` ist nur für die Entwicklung gedacht und verträgt sich **nicht** mit Migrations.
@@ -415,7 +471,8 @@ ersetzen und `Database:SchemaNachruesten` auf `false` setzen.
 ## Nächste Schritte
 
 1. **Schülerkonten aus SchILD** (Phase 5): Import statt Pseudodaten, Zuordnung über `ExtId`.
-2. **Auswertungen (Phase 4):** Fehlzeiten-Reports, ausdruckbares Klassenbuch/Kursheft (PDF).
+2. **Auswertungen (Phase 4):** ~~4.1 am Bildschirm~~, ~~4.2 Klassenbuch/Kursheft als PDF~~;
+   4.3 CSV-Export für die Verwaltung, Jahresarchiv und Ansicht des Download-Protokolls.
 3. **Web-Push:** Benachrichtigung der Apps bei Änderung.
 4. **Produktiv:** Schlüssel aus Umgebungsvariablen, EF-Migrations, PostgreSQL, CORS auf die
    App-Adresse einschränken, Login-Bremse hinter dem Reverse-Proxy je echter Adresse.

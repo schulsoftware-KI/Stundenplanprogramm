@@ -33,6 +33,8 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
+    <!-- Phase 4.2: Klassenbuch/Kursheft als PDF – dieselbe Version wie im Desktop (src/Stundenplan V4.csproj). -->
+    <PackageReference Include="QuestPDF" Version="2026.9.1" />
   </ItemGroup>
 
 </Project>

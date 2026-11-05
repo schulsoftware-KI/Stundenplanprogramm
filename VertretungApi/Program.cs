@@ -125,6 +125,9 @@ using (var scope = app.Services.CreateScope())
     {
         int geloescht = KontenService.ProtokollAufraeumen(db, app.Configuration.GetValue("Konten:ProtokollTage", 365));
         if (geloescht > 0) log.LogInformation("{Anzahl} alte Protokolleinträge gelöscht.", geloescht);
+        // Phase 4.2: Download-Protokoll mit derselben Frist.
+        int downloads = BerichtService.ProtokollAufraeumen(db, app.Configuration.GetValue("Konten:ProtokollTage", 365));
+        if (downloads > 0) log.LogInformation("{Anzahl} alte Einträge im Download-Protokoll gelöscht.", downloads);
     }
     catch (Exception ex)
     {

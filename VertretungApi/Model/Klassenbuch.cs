@@ -271,3 +271,20 @@ public class KlassenbuchEintrag
     public int Version { get; set; } = 1;              // Konflikterkennung beim Ändern
     public bool IstPseudo { get; set; }
 }
+
+/// <summary>
+/// Phase 4.2 (Entscheidung 50): Protokoll der Downloads mit Schülerdaten (PDF, später CSV/Archiv).
+/// Gespeichert wird nur wer, wann, was und welcher Zeitraum – nie der Inhalt. Tabelle
+/// "DownloadProtokolle", aufgeräumt nach „Konten:ProtokollTage" (wie das Kontenprotokoll).
+/// </summary>
+public class DownloadProtokoll
+{
+    public int Id { get; set; }
+    public DateTime Zeit { get; set; } = DateTime.UtcNow;   // UTC
+    public string Akteur { get; set; } = "";                // Benutzername
+    public string Art { get; set; } = "";                   // KlassenbuchPdf | KursheftPdf (4.3: Csv, Archiv)
+    public string Was { get; set; } = "";                   // z. B. "Klasse 05A" bzw. "M · Q1 (UNr 20, L1)"
+    public DateOnly Von { get; set; }
+    public DateOnly Bis { get; set; }
+    public bool MitSchuelerEintraegen { get; set; }
+}

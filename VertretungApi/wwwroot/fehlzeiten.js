@@ -23,6 +23,22 @@
 //  Fehlzeiten | Themen | Einträge, Schülerdetail mit Abschnitt „Einträge" –
 //  Code dafür in eintraege.js (ke…).
 //
+//  Phase 4.1 (Auswertungen, Entscheidungen 40–43): Zeitraum überall wählbar
+//  (1. Halbjahr · 2. Halbjahr · Schuljahr · eigener Zeitraum; Standard: das
+//  laufende Halbjahr, auch für „Meine Fehlzeiten"). Klasse/Stufe bzw.
+//  Unterricht als Konferenzübersicht: Fehlstunden, davon entschuldigt/offen/
+//  unentschuldigt, Fehlquote, Verspätungen + Minuten; sortierbar, Gesamtzeile,
+//  „nur mit offenen". Klasse/Stufe zusätzlich „Offene Fälle" (ganzes
+//  Schuljahr, älteste zuerst, direkt „Entschuldigung eintragen"). Fehlquote
+//  = Fehlstunden ÷ erfasste Stunden, in denen der Schüler dabei sein sollte –
+//  nur Anzeige, keine Schwellen.
+//
+//  Phase 4.2 (Entscheidungen 44–47, 50): „Klassenbuch als PDF …" (Klasse/
+//  Stufe; wahlweise ein Kursheft der Klasse) bzw. „Kursheft als PDF …"
+//  (Unterricht) – im gewählten Zeitraum, Schülereinträge nur auf Wunsch (KL/SK/
+//  Admin). Hinweis „enthält Schülerdaten" im Dialog; der Server protokolliert.
+//  Das PDF wird nur im Arbeitsspeicher gehalten und als Datei angeboten.
+//
 //  Datenschutz: nichts davon im Browser-Speicher; beim Verlassen geleert.
 //  Wird nach klassenbuch.js und VOR app.js geladen; Einstieg fehlzeitenInit().
 // =====================================================================
@@ -46,6 +62,18 @@ const fz = {
   neLehrerListe: [], // Admin: Lehrkräfte mit offenen Stunden (für den Filter)
   klasse: "",        // Reiter Klasse/Stufe
   eintrag: null,     // im Bewertungsdialog
+  // Phase 4.1
+  zeitraeume: null,  // Antwort api/fehlzeiten/zeitraeume
+  zr: null,          // gewählter Zeitraum { id, von, bis } (id "frei" = eigener Zeitraum)
+  zrFreiOffen: false,
+  kAnsicht: "uebersicht",               // Klasse/Stufe: uebersicht | offen
+  sort: { feld: "name", ab: false },    // Konferenzübersicht (ab = absteigend)
+  nurOffen: false,
+  entschFuer: null,  // Schüler-Id im Dialog „Entschuldigung eintragen"
+  // Phase 4.2
+  pdf: null,         // im PDF-Dialog: { art: "klasse", klasse } | { art: "kurs", unr, lehrer, titel }
+  pdfLaeuft: false,
+  pdfNr: 0,
 };
 
 const fehlzeitenOffen = () => !el("fehlzeiten").hidden;
@@ -53,6 +81,9 @@ const fzOben = () => fz.stapel[fz.stapel.length - 1] || null;
 const fzDatum = (iso) => { const d = ausIso(iso); return `${FZ_WT[d.getDay()]} ${pad(d.getDate())}.${pad(d.getMonth() + 1)}.`; };
 const fzDatumLang = (iso) => { const d = ausIso(iso); return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`; };
 const fzBis = (iso) => (iso > heuteIso() ? heuteIso() : iso);
+/** „01.09.2026 – 05.11.2026": ein laufender Zeitraum endet heute; ein künftiger (2. Halbjahr) bleibt ganz. */
+const fzZeitraumText = (von, bis) =>
+  `${fzDatumLang(von)} – ${fzDatumLang(von > heuteIso() ? bis : fzBis(bis))}`;
 
 function fzTitel(text) {
   el("titel").textContent = text;
@@ -91,18 +122,22 @@ async function fehlzeitenOeffnen() {
   el("grundplan").textContent = "";
   window.scrollTo(0, 0);
 
-  if (istSchueler()) {
-    fz.stapel = [{ art: "ich" }];
-    fzZeigen();
-    return;
-  }
-
-  fzTitel("Klassenbuch");
+  fzTitel(istSchueler() ? "Meine Fehlzeiten" : "Klassenbuch");
   const nr = ++fz.ladeNr;
   document.body.classList.add("laedt");
   try {
-    const r = await senden("GET", "api/fehlzeiten/rechte");
+    // Phase 4.1: Zeiträume (Standard: laufendes Halbjahr) gleich mit laden.
+    const [z, r] = await Promise.all([
+      senden("GET", "api/fehlzeiten/zeitraeume"),
+      istSchueler() ? Promise.resolve(null) : senden("GET", "api/fehlzeiten/rechte"),
+    ]);
     if (nr !== fz.ladeNr) return;
+    fzZeitraeumeUebernehmen(z);
+    if (istSchueler()) {
+      fz.stapel = [{ art: "ich" }];
+      fzZeigen();
+      return;
+    }
     fz.rechte = r;
     const reiter = fzReiterListe();
     if (!reiter.length) { fehlerIn("fzFehler", "Hier gibt es für dich nichts zu sehen."); return; }
@@ -131,12 +166,32 @@ function fehlzeitenLeeren() {
   fz.klasse = "";
   fz.eintrag = null;
   fz.neArt = "alle";
+  fz.zeitraeume = null;
+  fz.zr = null;
+  fz.zrFreiOffen = false;
+  fz.kAnsicht = "uebersicht";
+  fz.sort = { feld: "name", ab: false };
+  fz.nurOffen = false;
+  fz.entschFuer = null;
+  fz.pdf = null;
+  fz.pdfLaeuft = false;
+  fz.pdfNr++;
+  el("fzPdfLeiste").hidden = true;
+  el("pdUmfang").replaceChildren();
+  for (const id of ["pdWas", "pdZeitraum", "pdStatus"]) el(id).textContent = "";
+  dialogZu(el("fzPdfDialog"));
   for (const id of ["fzReiter", "fzNeWahl", "fzNeArt", "fzNeLehrer", "fzNeKlasse", "fzNeListe", "fzKurseListe", "fzKlasseWahl",
-    "fzListeZeilen", "fzSumme", "fzEntsch", "fzFaecher", "fzEintraege", "fzSInfo", "fzTListe"])
+    "fzListeZeilen", "fzSumme", "fzEntsch", "fzFaecher", "fzEintraege", "fzSInfo", "fzTListe",
+    "fzListeKopf", "fzListeFuss", "fzListeOffen", "fzOListe", "fzZrWahl"])
     el(id).replaceChildren();
   for (const id of ["fzNeInfo", "fzKurseInfo", "fzListeWann", "fzListeTitel", "fzListeInfo", "fzSWann", "fzSName",
-    "fzEintraegeInfo", "fbWas", "feFuer", "fzTWann", "fzTTitel", "fzTInfo", "fzTLeer", "fzTSichtbarInfo"])
+    "fzEintraegeInfo", "fbWas", "feFuer", "fzTWann", "fzTTitel", "fzTInfo", "fzTLeer", "fzTSichtbarInfo",
+    "fzOWann", "fzOTitel", "fzOInfo"])
     el(id).textContent = "";
+  el("fzZeitraum").hidden = true;
+  el("fzKWahl").hidden = true;
+  el("fzNurOffen").checked = false;
+  fehlerIn("fzZrFehler", "");
   el("fzUWahl").hidden = true;
   keFzLeeren();   // Phase 3.4
   fehlerIn("fzFehler", "");
@@ -226,7 +281,7 @@ function fzZeigen() {
   const o = fzOben();
   fehlerIn("fzFehler", "");
   fz.daten = null;
-  for (const id of ["fzNe", "fzKurse", "fzKlasseBox", "fzListe", "fzSchueler", "fzThemen", "fzKeAnsicht"]) el(id).hidden = true;
+  for (const id of ["fzNe", "fzKurse", "fzKlasseBox", "fzListe", "fzSchueler", "fzThemen", "fzKeAnsicht", "fzOffen"]) el(id).hidden = true;
   el("fzZurueckText").textContent = fz.stapel.length > 1 ? "Zurück" : "Zum Plan";
   // Phase 3.3: Unterricht – Fehlzeiten | Themen (Phase 3.4: | Einträge)
   const uSicht = !!o && (o.art === "unterricht" || o.art === "themen" || o.art === "keUnterricht");
@@ -236,6 +291,14 @@ function fzZeigen() {
   const reiterSicht = !!o && o.art === "reiter";
   el("fzReiter").hidden = !reiterSicht || fzReiterListe().length < 2;
   if (reiterSicht) fzRenderReiter();
+  // Phase 4.1: Klasse/Stufe – Übersicht | Offene Fälle; Zeitraum (nicht bei „nicht erfasst", „Meine Kurse", offene Fälle)
+  const klasseSicht = reiterSicht && o.reiter === "klasse";
+  el("fzKWahl").hidden = !klasseSicht;
+  if (klasseSicht)
+    for (const b of el("fzKWahl").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.k === fz.kAnsicht));
+  el("fzZeitraum").hidden = !fzMitZeitraum(o);
+  if (!el("fzZeitraum").hidden) fzRenderZeitraum();
+  fzPdfLeisteRendern(o);   // Phase 4.2
   if (!o) return;
 
   fzTitel(o.art === "ich" ? "Meine Fehlzeiten" : o.art === "themen" ? "Themen"
@@ -265,6 +328,16 @@ function fzZeigen() {
     }
     el("fzKeAnsicht").hidden = false;
     keListeLeeren("Wird geladen …");
+  } else if (o.art === "reiter" && o.reiter === "klasse" && fz.kAnsicht === "offen") {
+    // Phase 4.1: offene Fälle der Klasse/Stufe
+    el("fzKlasseBox").hidden = fz.rechte.klassen.length < 2;
+    el("fzKlasseWahl").replaceChildren(...fz.rechte.klassen.map((k) =>
+      h("option", { value: k, selected: k === fz.klasse }, fzGruppenName(k))));
+    el("fzOffen").hidden = false;
+    el("fzOListe").replaceChildren();
+    el("fzOWann").textContent = "";
+    el("fzOTitel").textContent = "";
+    el("fzOInfo").textContent = "Wird geladen …";
   } else if (o.art === "reiter" || o.art === "unterricht") {
     if (o.art === "reiter") {
       el("fzKlasseBox").hidden = fz.rechte.klassen.length < 2;
@@ -272,7 +345,9 @@ function fzZeigen() {
         h("option", { value: k, selected: k === fz.klasse }, fzGruppenName(k))));
     }
     el("fzListe").hidden = false;
-    el("fzListeZeilen").replaceChildren();
+    for (const id of ["fzListeKopf", "fzListeZeilen", "fzListeFuss", "fzListeOffen"]) el(id).replaceChildren();
+    el("fzListeOffen").hidden = true;
+    el("fzNurOffenSchalter").hidden = true;
     el("fzListeTitel").textContent = "";
     el("fzListeWann").textContent = "";
     el("fzListeInfo").textContent = "Wird geladen …";
@@ -290,6 +365,7 @@ function fzZeigen() {
 
 function fzUrl(o) {
   const enc = encodeURIComponent;
+  const zr = fzMitZr;
   if (o.art === "reiter" && o.reiter === "ne") {
     let url = `api/fehlzeiten/nicht-erfasst?ansicht=${fz.neAnsicht}&art=${fz.neArt}`;
     if (fz.neAnsicht === "alle" && fz.neLehrer) url += `&lehrer=${enc(fz.neLehrer)}`;
@@ -297,21 +373,25 @@ function fzUrl(o) {
     return url;
   }
   if (o.art === "reiter" && o.reiter === "kurse") return "api/fehlzeiten/unterrichte";
-  if (o.art === "reiter" && o.reiter === "eintraege") return fz.klasse ? `api/eintraege/klasse/${enc(fz.klasse)}` : null;
-  if (o.art === "keUnterricht") return `api/eintraege/unterricht?unr=${o.unr}&lehrer=${enc(o.lehrer)}`;
-  if (o.art === "reiter") return fz.klasse ? `api/fehlzeiten/klasse/${enc(fz.klasse)}` : null;
-  if (o.art === "unterricht") return `api/fehlzeiten/unterricht?unr=${o.unr}&lehrer=${enc(o.lehrer)}`;
-  if (o.art === "themen") return `api/klassenbuch/themen?unr=${o.unr}&lehrer=${enc(o.lehrer)}`;
+  if (o.art === "reiter" && o.reiter === "eintraege") return fz.klasse ? zr(`api/eintraege/klasse/${enc(fz.klasse)}`) : null;
+  if (o.art === "keUnterricht") return zr(`api/eintraege/unterricht?unr=${o.unr}&lehrer=${enc(o.lehrer)}`);
+  if (o.art === "reiter" && fz.kAnsicht === "offen") return fz.klasse ? `api/fehlzeiten/offen/${enc(fz.klasse)}` : null;
+  if (o.art === "reiter") return fz.klasse ? zr(`api/fehlzeiten/klasse/${enc(fz.klasse)}`) : null;
+  if (o.art === "unterricht") return zr(`api/fehlzeiten/unterricht?unr=${o.unr}&lehrer=${enc(o.lehrer)}`);
+  if (o.art === "themen") return zr(`api/klassenbuch/themen?unr=${o.unr}&lehrer=${enc(o.lehrer)}`);
   if (o.art === "schueler")
-    return `api/fehlzeiten/schueler/${o.id}` + (o.unr ? `?unr=${o.unr}&lehrer=${enc(o.lehrer)}` : "");
-  return "api/fehlzeiten/ich";
+    return zr(`api/fehlzeiten/schueler/${o.id}` + (o.unr ? `?unr=${o.unr}&lehrer=${enc(o.lehrer)}` : ""));
+  return zr("api/fehlzeiten/ich");
 }
 
 async function fzLaden() {
   const o = fzOben();
   if (!o) return;
   const url = fzUrl(o);
-  if (!url) { el("fzListeInfo").textContent = "Keine Klasse gewählt."; el("fzKeLeer").textContent = "Keine Klasse gewählt."; return; }
+  if (!url) {
+    for (const id of ["fzListeInfo", "fzKeLeer", "fzOInfo"]) el(id).textContent = "Keine Klasse gewählt.";
+    return;
+  }
   const nr = ++fz.ladeNr;
   document.body.classList.add("laedt");
   try {
@@ -322,16 +402,230 @@ async function fzLaden() {
     else if (o.art === "reiter" && o.reiter === "kurse") fzRenderKurse(d);
     else if (o.art === "themen") fzRenderThemen(d);
     else if ((o.art === "reiter" && o.reiter === "eintraege") || o.art === "keUnterricht") keRenderListe(d, o);
+    else if (o.art === "reiter" && fz.kAnsicht === "offen") fzRenderOffen(d);
     else if (o.art === "reiter" || o.art === "unterricht") fzRenderListe(d);
     else fzRenderSchueler(d);
   } catch (f) {
     if (nr !== fz.ladeNr) return;
     const t = aktionsFehler(f);
     if (t === null) return;
-    for (const id of ["fzNeInfo", "fzKurseInfo", "fzListeInfo", "fzEintraegeInfo", "fzTLeer", "fzKeLeer"]) el(id).textContent = "";
+    for (const id of ["fzNeInfo", "fzKurseInfo", "fzListeInfo", "fzEintraegeInfo", "fzTLeer", "fzKeLeer", "fzOInfo"]) el(id).textContent = "";
     fehlerIn("fzFehler", t);
   } finally {
     if (nr === fz.ladeNr) document.body.classList.remove("laedt");
+  }
+}
+
+// ---------------------------------------------------------------------
+//  Zeitraum (Phase 4.1, Entscheidung 40)
+// ---------------------------------------------------------------------
+
+/** Antwort api/fehlzeiten/zeitraeume übernehmen; gewählt wird der Standard (laufendes Halbjahr). */
+function fzZeitraeumeUebernehmen(z) {
+  fz.zeitraeume = z && Array.isArray(z.zeitraeume) ? z : null;
+  const liste = fz.zeitraeume ? fz.zeitraeume.zeitraeume : [];
+  const std = liste.find((x) => x.id === fz.zeitraeume.standard) || liste[0];
+  fz.zr = std ? { id: std.id, von: std.von, bis: std.bis } : null;
+  fz.zrFreiOffen = false;
+}
+
+/** Adresse mit dem gewählten Zeitraum (ohne Auswahl: Standard des Servers = Schuljahr). */
+function fzMitZr(url) {
+  if (!fz.zr) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}von=${fz.zr.von}&bis=${fz.zr.bis}`;
+}
+
+/** Ansichten mit Zeitraum: Listen, Themen, Einträge, Schüler – nicht „nicht erfasst", „Meine Kurse", offene Fälle. */
+function fzMitZeitraum(o) {
+  if (!o || !fz.zeitraeume) return false;
+  if (o.art === "reiter") return o.reiter === "eintraege" || (o.reiter === "klasse" && fz.kAnsicht === "uebersicht");
+  return ["unterricht", "themen", "keUnterricht", "schueler", "ich"].includes(o.art);
+}
+
+const FZ_ZR_KURZ = { hj1: "1. Hj.", hj2: "2. Hj.", sj: "Schuljahr", frei: "Eigener" };
+
+function fzRenderZeitraum() {
+  const knopf = (id, lang, gewaehlt, onclick) => h("button", {
+    type: "button", "aria-pressed": String(gewaehlt), "aria-label": lang, "data-zr": id, onclick,
+  },
+  h("span", { class: "zr-lang", "aria-hidden": "true" }, lang),
+  h("span", { class: "zr-kurz", "aria-hidden": "true" }, lang.startsWith("Letzte") ? "12 Monate" : FZ_ZR_KURZ[id] || lang));
+  const frei = !!fz.zr && fz.zr.id === "frei";
+  el("fzZrWahl").replaceChildren(
+    ...fz.zeitraeume.zeitraeume.map((x) => knopf(x.id, x.text, !!fz.zr && fz.zr.id === x.id && !fz.zrFreiOffen,
+      () => fzZrWaehlen({ id: x.id, von: x.von, bis: x.bis }))),
+    knopf("frei", "Eigener Zeitraum", frei || fz.zrFreiOffen, () => {
+      fz.zrFreiOffen = !fz.zrFreiOffen || !frei;
+      fzRenderZeitraum();
+      if (fz.zrFreiOffen) el("fzZrVon").focus();
+    }));
+  el("fzZrFrei").hidden = !fz.zrFreiOffen;
+  if (fz.zrFreiOffen && fz.zr) {
+    el("fzZrVon").value = fz.zr.von;
+    el("fzZrBis").value = fz.zr.bis > heuteIso() && fz.zr.von <= heuteIso() ? heuteIso() : fz.zr.bis;
+  }
+}
+
+function fzZrWaehlen(zr) {
+  fehlerIn("fzZrFehler", "");
+  fz.zrFreiOffen = false;
+  if (fz.zr && fz.zr.id === zr.id && fz.zr.von === zr.von && fz.zr.bis === zr.bis) { fzRenderZeitraum(); return; }
+  fz.zr = zr;
+  fzZeigen();
+}
+
+/** „Anzeigen" beim eigenen Zeitraum. */
+function fzZrFreiAnwenden() {
+  const von = el("fzZrVon").value;
+  const bis = el("fzZrBis").value;
+  if (!istIso(von) || !istIso(bis)) { fehlerIn("fzZrFehler", "Bitte „von“ und „bis“ angeben."); return; }
+  if (bis < von) { fehlerIn("fzZrFehler", "„Bis“ liegt vor „von“."); return; }
+  fzZrWaehlen({ id: "frei", von, bis });
+}
+
+/** Fehlquote: Fehlstunden ÷ Soll-Stunden; null, wenn keine Stunde erfasst ist. */
+const fzQuote = (fehl, soll) => (soll > 0 ? fehl / soll : null);
+const fzProzent = (q) => (q === null ? "–"
+  : `${(q * 100).toLocaleString("de-DE", { maximumFractionDigits: 1 })}\u202f%`);
+
+// ---------------------------------------------------------------------
+//  Klassenbuch / Kursheft als PDF (Phase 4.2)
+// ---------------------------------------------------------------------
+
+/** Wer was drucken darf (Entscheidung 46) – der Server prüft dasselbe. */
+function fzPdfZiel(o) {
+  const r = fz.rechte;
+  if (!o || !r || r.berichte === false) return null;
+  if (o.art === "reiter" && o.reiter === "klasse" && fz.kAnsicht === "uebersicht" && fz.klasse)
+    return { art: "klasse", klasse: fz.klasse };
+  if (["unterricht", "themen", "keUnterricht"].includes(o.art) && (r.admin || gleich(eigenesKuerzel(), o.lehrer)))
+    return { art: "kurs", unr: o.unr, lehrer: o.lehrer };
+  return null;
+}
+
+function fzPdfLeisteRendern(o) {
+  const ziel = fzPdfZiel(o);
+  el("fzPdfLeiste").hidden = !ziel;
+  if (ziel) el("fzPdfKnopfText").textContent = ziel.art === "klasse" ? "Klassenbuch als PDF …" : "Kursheft als PDF …";
+}
+
+const fzDarfSchuelerEintraege = () =>
+  !!state.anmeldung && ["Admin", "Klassenlehrer", "Stufenkoordination"].includes(state.anmeldung.rolle);
+
+async function fzPdfOeffnen() {
+  const ziel = fzPdfZiel(fzOben());
+  if (!ziel) return;
+  fz.pdf = ziel;
+  const nr = ++fz.pdfNr;
+  const klasse = ziel.art === "klasse";
+  el("pdTitel").textContent = klasse ? "Klassenbuch als PDF" : "Kursheft als PDF";
+  el("pdWas").textContent = klasse ? fzGruppenName(ziel.klasse) : (el("fzListeTitel").textContent || el("fzTTitel").textContent
+    || el("fzKeTitel").textContent || "Unterricht");
+  el("pdUmfangBox").hidden = !klasse;
+  el("pdUmfang").replaceChildren(h("option", { value: "klasse" }, "Ganzes Klassenbuch"));
+  el("pdSchuelerSchalter").hidden = !fzDarfSchuelerEintraege();
+  el("pdSchueler").checked = false;   // Entscheidung 45: Standard aus
+  fehlerIn("pdFehler", "");
+  el("pdStatus").textContent = "";
+
+  // Zeitraum (wie oben gewählt; endet spätestens heute)
+  const zr = fz.zr;
+  const name = !zr ? "Schuljahr" : zr.id === "frei" ? "Eigener Zeitraum"
+    : ((fz.zeitraeume && fz.zeitraeume.zeitraeume.find((x) => x.id === zr.id)) || { text: "" }).text;
+  const zukunft = !!zr && zr.von > heuteIso();
+  el("pdZeitraum").textContent = zukunft
+    ? `${name} (${fzZeitraumText(zr.von, zr.bis)}) liegt noch in der Zukunft – es gibt noch nichts zu drucken. Wähle oben einen anderen Zeitraum.`
+    : `Zeitraum: ${name}${zr ? ` · ${fzZeitraumText(zr.von, zr.bis)}` : ""} – ändern über die Zeitraumleiste.`;
+  el("pdErstellen").disabled = zukunft;
+  dialogAuf(el("fzPdfDialog"));
+  (klasse ? el("pdUmfang") : el("pdErstellen")).focus();
+
+  if (klasse) {
+    // Kurshefte der Klasse/Stufe zur Auswahl
+    try {
+      const liste = await senden("GET", `api/berichte/unterrichte?klasse=${encodeURIComponent(ziel.klasse)}`);
+      if (nr !== fz.pdfNr) return;
+      if (liste.length) {
+        el("pdUmfang").append(h("optgroup", { label: "Kursheft eines Unterrichts" },
+          liste.map((u) => h("option", { value: `${u.uNr}|${u.lehrer}` }, `${u.fach} · ${u.lehrer}` +
+            (u.klassen.length > 1 ? ` (${u.klassen.join(", ")})` : "")))));
+      }
+    } catch (f) {
+      if (nr !== fz.pdfNr) return;
+      const t = aktionsFehler(f);
+      if (t !== null) fehlerIn("pdFehler", t);
+    }
+  }
+}
+
+/** Dateiname aus Content-Disposition (filename* bevorzugt). */
+function fzPdfDateiname(kopf, ersatz) {
+  const k = kopf || "";
+  const stern = k.match(/filename\*=UTF-8''([^;]+)/i);
+  if (stern) { try { return decodeURIComponent(stern[1].trim()); } catch { /* weiter */ } }
+  const einfach = k.match(/filename="?([^";]+)"?/i);
+  return einfach ? einfach[1].trim() : ersatz;
+}
+
+async function fzPdfErstellen() {
+  const p = fz.pdf;
+  if (!p || fz.pdfLaeuft) return;
+  const enc = encodeURIComponent;
+  let url;
+  const wahl = p.art === "klasse" ? el("pdUmfang").value : "";
+  if (p.art === "kurs") url = `api/berichte/kursheft?unr=${p.unr}&lehrer=${enc(p.lehrer)}`;
+  else if (wahl && wahl !== "klasse") {
+    const [unr, lehrer] = wahl.split("|");
+    url = `api/berichte/kursheft?unr=${enc(unr)}&lehrer=${enc(lehrer)}`;
+  } else url = `api/berichte/klassenbuch?klasse=${enc(p.klasse)}`;
+  const mitEintraegen = !el("pdSchuelerSchalter").hidden && el("pdSchueler").checked;
+  url = fzMitZr(url) + `&schuelerEintraege=${mitEintraegen}`;
+
+  const nr = fz.pdfNr;
+  fz.pdfLaeuft = true;
+  el("pdErstellen").disabled = true;
+  el("pdErstellen").textContent = "PDF wird erstellt …";
+  el("pdStatus").textContent = "Das kann bei einem ganzen Halbjahr einige Sekunden dauern.";
+  fehlerIn("pdFehler", "");
+  const abbruch = new AbortController();
+  const timer = setTimeout(() => abbruch.abort(), 180000);
+  try {
+    let resp;
+    try {
+      resp = await fetch(url, { cache: "no-store", headers: authKopf(), signal: abbruch.signal });
+    } catch {
+      throw new Error("Keine Verbindung zum Schulserver – bitte später erneut versuchen.");
+    }
+    if (!resp.ok) {
+      let daten = null;
+      try { daten = await resp.json(); } catch { /* kein JSON */ }
+      const f = new HttpFehler(resp.status, (daten && daten.fehler) || "");
+      f.daten = daten;
+      throw f;
+    }
+    const blob = await resp.blob();
+    if (nr !== fz.pdfNr) return;
+    const name = fzPdfDateiname(resp.headers.get("Content-Disposition"), "Klassenbuch.pdf");
+    const adresse = URL.createObjectURL(blob);
+    const a = h("a", { href: adresse, download: name, hidden: true });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(adresse), 60000);
+    dialogZu(el("fzPdfDialog"));
+    toast(`PDF erstellt: ${name}`);
+  } catch (f) {
+    if (nr !== fz.pdfNr) return;
+    const t = aktionsFehler(f);
+    if (t !== null) fehlerIn("pdFehler", t);
+  } finally {
+    clearTimeout(timer);
+    if (nr === fz.pdfNr) {
+      fz.pdfLaeuft = false;
+      el("pdErstellen").disabled = !!fz.zr && fz.zr.von > heuteIso();
+      el("pdErstellen").textContent = "PDF erstellen";
+      el("pdStatus").textContent = "";
+    }
   }
 }
 
@@ -431,19 +725,104 @@ function fzRenderKurse(liste) {
 //  Liste (Klasse/Stufe oder Unterricht)
 // ---------------------------------------------------------------------
 
+// Phase 4.1: Konferenzübersicht – Spalten (Fehlstunden, davon entschuldigt/offen/unentschuldigt,
+// Fehlquote, Verspätungen, Minuten). „schmal": auf kleinen Handys ausgeblendet.
+const FZ_SPALTEN = [
+  { id: "name", text: "Name" },
+  { id: "fehl", text: "Fehlst.", lang: "Fehlstunden", wert: (s) => s.summe.fehlstunden },
+  { id: "ent", text: "entsch.", lang: "davon entschuldigt", wert: (s) => s.summe.entschuldigt, schmal: true },
+  { id: "offen", text: "offen", lang: "davon offen", wert: (s) => s.summe.offen, art: "offen" },
+  { id: "unent", text: "unent.", lang: "davon unentschuldigt", wert: (s) => s.summe.unentschuldigt, art: "unent" },
+  { id: "quote", text: "Quote", lang: "Fehlquote", wert: (s) => fzQuote(s.summe.fehlstunden, s.soll) },
+  { id: "versp", text: "Versp.", lang: "Verspätungen", wert: (s) => s.summe.verspaetungen },
+  { id: "min", text: "Min.", lang: "Minuten Verspätung", wert: (s) => s.summe.verspaetungMinuten, schmal: true },
+];
+
+const fzHatOffene = (s) => s.summe.offen + s.summe.verspaetungenOffen > 0;
+
+function fzSortiert(liste) {
+  const { feld, ab } = fz.sort;
+  const sp = FZ_SPALTEN.find((x) => x.id === feld);
+  const nachName = (a, b) => sortierer.compare(a.nachname, b.nachname) || sortierer.compare(a.vorname, b.vorname) || a.id - b.id;
+  return [...liste].sort((a, b) => {
+    if (!sp || !sp.wert) return ab ? nachName(b, a) : nachName(a, b);
+    const wa = sp.wert(a);
+    const wb = sp.wert(b);
+    if (wa === null && wb === null) return nachName(a, b);
+    if (wa === null) return 1;   // ohne Quote immer unten
+    if (wb === null) return -1;
+    return (ab ? wb - wa : wa - wb) || nachName(a, b);
+  });
+}
+
+function fzSortieren(feld) {
+  fz.sort = fz.sort.feld === feld ? { feld, ab: !fz.sort.ab } : { feld, ab: feld !== "name" };
+  if (fz.daten) fzRenderListe(fz.daten);
+  const b = el("fzListeKopf").querySelector(`button[data-feld="${feld}"]`);
+  if (b) b.focus();
+}
+
 function fzRenderListe(d) {
   const o = fzOben();
-  el("fzListeWann").textContent = `${fzDatumLang(d.von)} – ${fzDatumLang(fzBis(d.bis))}`;
+  el("fzListeWann").textContent = fzZeitraumText(d.von, d.bis);
   el("fzListeTitel").textContent = d.titel;
   const n = d.schueler.length;
   el("fzListeInfo").textContent = (d.erfassteStunden !== null && d.erfassteStunden !== undefined
     ? `${d.erfassteStunden} ${d.erfassteStunden === 1 ? "Stunde" : "Stunden"} erfasst · ` : "") + `${n} Schüler`;
-  const zelle = (wert, art) => h("td", { class: "zahl" + (wert > 0 && art ? " " + art : "") }, wert || "–");
+
+  // „x Stunden noch offen" (Entscheidung 41) – bei Klasse/Stufe mit Sprung zu den offenen Fällen.
+  const g = d.gesamt;
+  const of = g.offen;
+  const ov = g.verspaetungenOffen;
+  const offenText = [of ? `${of} ${of === 1 ? "Fehlstunde" : "Fehlstunden"}` : "",
+    ov ? `${ov} ${ov === 1 ? "Verspätung" : "Verspätungen"}` : ""].filter(Boolean).join(" und ");
+  el("fzListeOffen").hidden = !offenText;
+  el("fzListeOffen").replaceChildren(...(offenText ? [
+    h("span", null, `Noch offen: ${offenText}.`),
+    o.art === "reiter" ? h("button", {
+      class: "textknopf klein", type: "button",
+      onclick: () => { fz.kAnsicht = "offen"; fzZeigen(); },
+    }, "Offene Fälle ansehen") : null,
+  ] : []));
+  el("fzNurOffenSchalter").hidden = !offenText && !fz.nurOffen;
+  el("fzNurOffen").checked = fz.nurOffen;
+
+  // Kopf mit Sortierknöpfen
+  el("fzListeKopf").replaceChildren(h("tr", null, FZ_SPALTEN.map((sp) => {
+    const aktiv = fz.sort.feld === sp.id;
+    return h("th", {
+      scope: "col",
+      class: (sp.id === "name" ? "" : "zahl") + (sp.schmal ? " fz-schmal" : "") + (sp.id === "quote" ? " fz-quote" : ""),
+      "aria-sort": aktiv ? (fz.sort.ab ? "descending" : "ascending") : null,
+    }, h("button", {
+      class: "fz-sort", type: "button", "data-feld": sp.id, title: `Sortieren nach ${sp.lang || "Name"}`,
+      onclick: () => fzSortieren(sp.id),
+    },
+    sp.lang ? h("abbr", { title: sp.lang }, sp.text) : sp.text,
+    h("span", { class: "fz-pfeil", "aria-hidden": "true" }, aktiv ? (fz.sort.ab ? "▼" : "▲") : "")));
+  })));
+
+  const zahl = (wert, art, extra) => h("td", { class: "zahl" + (wert > 0 && art ? " " + art : "") + (extra || "") }, wert || "–");
+  const zellen = (summe, soll) => [
+    zahl(summe.fehlstunden),
+    zahl(summe.entschuldigt, null, " fz-schmal"),
+    zahl(summe.offen, "offen"),
+    zahl(summe.unentschuldigt, "unent"),
+    h("td", { class: "zahl fz-quote" }, fzProzent(fzQuote(summe.fehlstunden, soll))),
+    h("td", { class: "zahl" + (summe.verspaetungenUnentschuldigt ? " unent" : "") },
+      summe.verspaetungen || "–",
+      summe.verspaetungMinuten ? h("span", { class: "fz-unter fz-min-kurz" }, `${summe.verspaetungMinuten} Min.`) : null,
+      summe.verspaetungenOffen ? h("span", { class: "fz-unter offen" }, `${summe.verspaetungenOffen} offen`) : null),
+    zahl(summe.verspaetungMinuten, null, " fz-schmal"),
+  ];
+
   // Klasse unter dem Namen nur, wenn die Liste mehrere Klassen mischt (z. B. Religion 05A–05D).
   const mehrereKlassen = new Set(d.schueler.map((x) => x.klasse)).size > 1;
-  el("fzListeZeilen").replaceChildren(...(n === 0
-    ? [h("tr", null, h("td", { colspan: "5", class: "leer" }, "Keine Schülerinnen und Schüler hinterlegt."))]
-    : d.schueler.map((s) => h("tr", null,
+  const sichtbar = fzSortiert(fz.nurOffen ? d.schueler.filter(fzHatOffene) : d.schueler);
+  const leerText = n === 0 ? "Keine Schülerinnen und Schüler hinterlegt." : "Niemand hat offene Stunden.";
+  el("fzListeZeilen").replaceChildren(...(sichtbar.length === 0
+    ? [h("tr", null, h("td", { colspan: String(FZ_SPALTEN.length), class: "leer" }, leerText))]
+    : sichtbar.map((s) => h("tr", null,
       h("th", { scope: "row" }, h("button", {
         class: "fz-name", type: "button",
         onclick: () => {
@@ -454,10 +833,58 @@ function fzRenderListe(d) {
         },
       }, `${s.nachname}, ${s.vorname}`,
       o.art === "unterricht" && mehrereKlassen && s.klasse ? h("span", { class: "fz-klasse" }, s.klasse) : null)),
-      zelle(s.summe.fehlstunden),
-      zelle(s.summe.offen + s.summe.verspaetungenOffen, "offen"),
-      zelle(s.summe.unentschuldigt + s.summe.verspaetungenUnentschuldigt, "unent"),
-      zelle(s.summe.verspaetungen)))));
+      ...zellen(s.summe, s.soll)))));
+
+  // Gesamtzeile (immer über alle, auch wenn gefiltert)
+  el("fzListeFuss").replaceChildren(...(n === 0 ? [] : [h("tr", null,
+    h("th", { scope: "row" }, "Gesamt", h("span", { class: "fz-klasse" }, fz.nurOffen ? `alle ${n} Schüler` : `${n} Schüler`)),
+    ...zellen(g, d.soll))]));
+}
+
+// ---------------------------------------------------------------------
+//  Offene Fälle einer Klasse/Stufe (Phase 4.1, Entscheidung 43)
+// ---------------------------------------------------------------------
+
+function fzRenderOffen(d) {
+  el("fzOWann").textContent = `Schuljahr bis heute · ${fzDatumLang(d.von)} – ${fzDatumLang(d.bis)}`;
+  el("fzOTitel").textContent = `Offene Fälle · ${d.titel}`;
+  const n = d.schueler.length;
+  el("fzOInfo").textContent = n
+    ? `${n} ${n === 1 ? "Schülerin bzw. Schüler" : "Schülerinnen und Schüler"} mit offenen Fehlstunden oder Verspätungen – die ältesten zuerst.`
+    : "Keine offenen Fehlstunden oder Verspätungen.";
+  const mehrereKlassen = new Set(d.schueler.map((x) => x.klasse)).size > 1;
+  el("fzOListe").replaceChildren(...d.schueler.map((s) => {
+    const was = [s.fehlstunden ? `${s.fehlstunden} ${s.fehlstunden === 1 ? "Fehlstunde" : "Fehlstunden"}` : "",
+      s.verspaetungen ? `${s.verspaetungen} ${s.verspaetungen === 1 ? "Verspätung" : "Verspätungen"}` : ""]
+      .filter(Boolean).join(" · ");
+    const seit = s.tage <= 0 ? "offen seit heute"
+      : `offen seit ${s.tage} ${s.tage === 1 ? "Tag" : "Tagen"} (${fzDatum(s.aelteste)})`;
+    return h("li", { class: "fz-of-zeile" },
+      h("button", {
+        class: "k-zeile fz-of-person" + (s.tage >= 14 ? " alt" : ""), type: "button",
+        onclick: () => fzOffenZumSchueler(s),
+      },
+      h("span", { class: "k-oben" },
+        h("span", { class: "k-name" }, `${s.nachname}, ${s.vorname}`),
+        mehrereKlassen && s.klasse ? h("span", { class: "k-rechts" }, s.klasse) : null),
+      h("span", { class: "k-unten" }, `${was} offen`),
+      h("span", { class: "fz-of-seit" }, seit)),
+      h("button", {
+        class: "textknopf klein fz-of-ent", type: "button", "aria-haspopup": "dialog",
+        "aria-label": `Entschuldigung eintragen für ${s.vorname} ${s.nachname}`,
+        onclick: () => fzEntschuldigungOeffnen(s, s.aelteste, s.neueste),
+      }, "Entschuldigung eintragen"));
+  }));
+}
+
+/** Aus den offenen Fällen ins Schülerdetail – Zeitraum so, dass die älteste offene Stunde dabei ist. */
+function fzOffenZumSchueler(s) {
+  if (fz.zr && s.aelteste < fz.zr.von && fz.zeitraeume) {
+    const sj = fz.zeitraeume.zeitraeume.find((x) => x.id === "sj");
+    if (sj) fz.zr = { id: sj.id, von: sj.von, bis: sj.bis };
+  }
+  fz.stapel.push({ art: "schueler", id: s.id });
+  fzZeigen();
 }
 
 // ---------------------------------------------------------------------
@@ -465,7 +892,7 @@ function fzRenderListe(d) {
 // ---------------------------------------------------------------------
 
 function fzRenderThemen(d) {
-  el("fzTWann").textContent = `${fzDatumLang(d.von)} – ${fzDatumLang(fzBis(d.bis))}`;
+  el("fzTWann").textContent = fzZeitraumText(d.von, d.bis);
   el("fzTTitel").textContent = d.titel;
   const n = d.stunden.length;
   const mitThema = d.stunden.filter((x) => x.thema).length;
@@ -537,7 +964,7 @@ async function fzSichtbarSetzen() {
 // ---------------------------------------------------------------------
 
 function fzRenderSchueler(d) {
-  el("fzSWann").textContent = `${fzDatumLang(d.von)} – ${fzDatumLang(fzBis(d.bis))}`;
+  el("fzSWann").textContent = fzZeitraumText(d.von, d.bis);
   el("fzSName").textContent = `${d.vorname} ${d.nachname}`;
   const info = [d.klasse || ""];
   if (d.unterricht) info.push(`nur ${d.unterricht}`);
@@ -557,6 +984,9 @@ function fzRenderSchueler(d) {
     karte(s.verspaetungen, s.verspaetungen === 1 ? "Verspätung" : "Verspätungen",
       teile([[s.verspaetungMinuten, "Min."], [s.verspaetungenOffen, "offen"], [s.verspaetungenUnentschuldigt, "unentschuldigt"]]),
       s.verspaetungenUnentschuldigt > 0 ? "unent" : s.verspaetungenOffen > 0 ? "offen" : null),
+    // Phase 4.1: Fehlquote (nur Anzeige, keine Schwelle)
+    d.soll > 0 ? karte(fzProzent(fzQuote(s.fehlstunden, d.soll)), "Fehlquote",
+      `${s.fehlstunden} von ${d.soll} ${d.soll === 1 ? "Stunde" : "Stunden"}`) : null,
     s.schulveranstaltungen > 0 ? karte(s.schulveranstaltungen, "schulische Veranst.", "keine Fehlzeit") : null,
   ].filter(Boolean));
 
@@ -579,7 +1009,13 @@ function fzRenderEntschuldigungen(d) {
     h("div", { class: "fz-kopfzeile" },
       h("h3", { class: "fz-titel" }, "Entschuldigungen"),
       d.darfZeitraumEntschuldigen
-        ? h("button", { class: "hauptknopf klein", type: "button", onclick: () => fzEntschuldigungOeffnen(d) }, "Entschuldigung eintragen")
+        ? h("button", {
+            class: "hauptknopf klein", type: "button", "aria-haspopup": "dialog",
+            onclick: () => {
+              const offen = d.eintraege.filter((e) => e.bewertung === "Offen").map((e) => e.datum).sort();
+              fzEntschuldigungOeffnen(d, offen[0], offen[offen.length - 1]);
+            },
+          }, "Entschuldigung eintragen")
         : null),
     d.entschuldigungen.length
       ? h("ul", { class: "k-liste" }, d.entschuldigungen.map((e) => h("li", { class: "fz-ent" },
@@ -607,12 +1043,14 @@ function fzRenderFaecher(d) {
         h("th", { scope: "col", class: "zahl" }, "Fehlst."),
         h("th", { scope: "col", class: "zahl" }, "offen"),
         h("th", { scope: "col", class: "zahl" }, "unent."),
+        h("th", { scope: "col", class: "zahl fz-quote" }, h("abbr", { title: "Fehlquote" }, "Quote")),
         h("th", { scope: "col", class: "zahl" }, "Versp."))),
       h("tbody", null, d.faecher.map((f) => h("tr", null,
         h("th", { scope: "row" }, f.fach, h("span", { class: "fz-klasse" }, f.lehrer)),
         h("td", { class: "zahl" }, f.summe.fehlstunden || "–"),
         h("td", { class: "zahl" + (f.summe.offen ? " offen" : "") }, f.summe.offen || "–"),
         h("td", { class: "zahl" + (f.summe.unentschuldigt ? " unent" : "") }, f.summe.unentschuldigt || "–"),
+        h("td", { class: "zahl fz-quote" }, fzProzent(fzQuote(f.summe.fehlstunden, f.soll))),
         h("td", { class: "zahl" }, f.summe.verspaetungen || "–")))))));
 }
 
@@ -700,11 +1138,12 @@ async function fzBewertungSpeichern() {
 //  Entschuldigung (Zeitraum)
 // ---------------------------------------------------------------------
 
-function fzEntschuldigungOeffnen(d) {
-  const offen = d.eintraege.filter((e) => e.bewertung === "Offen").map((e) => e.datum).sort();
-  el("feFuer").textContent = `Für ${d.vorname} ${d.nachname}${d.klasse ? ` (${d.klasse})` : ""}`;
-  el("feVon").value = offen.length ? offen[0] : heuteIso();
-  el("feBis").value = offen.length ? offen[offen.length - 1] : heuteIso();
+/** p = Schüler { id, vorname, nachname, klasse }; von/bis = Vorschlag (z. B. älteste/neueste offene Stunde). */
+function fzEntschuldigungOeffnen(p, von, bis) {
+  fz.entschFuer = p.id;
+  el("feFuer").textContent = `Für ${p.vorname} ${p.nachname}${p.klasse ? ` (${p.klasse})` : ""}`;
+  el("feVon").value = von || heuteIso();
+  el("feBis").value = bis || von || heuteIso();
   el("feGrund").value = "Krankheit";
   fehlerIn("feFehler", "");
   dialogAuf(el("fzEntschDialog"));
@@ -712,16 +1151,17 @@ function fzEntschuldigungOeffnen(d) {
 }
 
 async function fzEntschuldigungSpeichern() {
-  const o = fzOben();
+  const id = fz.entschFuer;
   const von = el("feVon").value;
   const bis = el("feBis").value;
   if (!istIso(von) || !istIso(bis)) { fehlerIn("feFehler", "Bitte „von“ und „bis“ angeben."); return; }
   if (bis < von) { fehlerIn("feFehler", "„Bis“ liegt vor „von“."); return; }
+  if (!id) { dialogZu(el("fzEntschDialog")); return; }
   const knopf = el("feSpeichern");
   knopf.disabled = true;
   fehlerIn("feFehler", "");
   try {
-    const antwort = await senden("POST", `api/fehlzeiten/schueler/${o.id}/entschuldigung`,
+    const antwort = await senden("POST", `api/fehlzeiten/schueler/${id}/entschuldigung`,
       { von, bis, grund: el("feGrund").value });
     dialogZu(el("fzEntschDialog"));
     if (antwort && antwort.meldung) toast(antwort.meldung);
@@ -765,6 +1205,21 @@ function fehlzeitenInit() {
     });
   }
   el("fzTSichtbar").addEventListener("change", fzSichtbarSetzen);
+  // Phase 4.1: Klasse/Stufe – Übersicht | Offene Fälle; Zeitraum; Filter „nur mit offenen"
+  for (const b of el("fzKWahl").querySelectorAll("button")) {
+    b.addEventListener("click", () => {
+      if (fz.kAnsicht === b.dataset.k) return;
+      fz.kAnsicht = b.dataset.k;
+      fzZeigen();
+    });
+  }
+  el("fzZrAnwenden").addEventListener("click", fzZrFreiAnwenden);
+  for (const id of ["fzZrVon", "fzZrBis"])
+    el(id).addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); fzZrFreiAnwenden(); } });
+  el("fzNurOffen").addEventListener("change", (e) => {
+    fz.nurOffen = e.target.checked;
+    if (fz.daten) fzRenderListe(fz.daten);
+  });
   el("fzReiter").addEventListener("keydown", (e) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     const liste = fzReiterListe().map((r) => r.id);
@@ -783,5 +1238,13 @@ function fehlzeitenInit() {
 
   el("feSpeichern").addEventListener("click", fzEntschuldigungSpeichern);
   el("feAbbrechen").addEventListener("click", () => dialogZu(el("fzEntschDialog")));
+  el("fzEntschDialog").addEventListener("close", () => { fz.entschFuer = null; });
+  // Phase 4.2: PDF
+  el("fzPdfKnopf").addEventListener("click", fzPdfOeffnen);
+  el("pdErstellen").addEventListener("click", fzPdfErstellen);
+  el("pdAbbrechen").addEventListener("click", () => dialogZu(el("fzPdfDialog")));
+  el("fzPdfDialog").addEventListener("close", () => { fz.pdfNr++; fz.pdfLaeuft = false; fz.pdf = null;
+    el("pdErstellen").textContent = "PDF erstellen"; el("pdStatus").textContent = ""; });
+  hintergrundSchliesst(el("fzPdfDialog"), () => { if (!fz.pdfLaeuft) dialogZu(el("fzPdfDialog")); });
   hintergrundSchliesst(el("fzEntschDialog"), () => dialogZu(el("fzEntschDialog")));
 }

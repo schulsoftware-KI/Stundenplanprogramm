@@ -42,6 +42,9 @@
 //  Klassenbucheinträge (Phase 3.4, Code in eintraege.js): Stundenblatt,
 //  Schülerdetail und Listen; das Kontomenü „Fehlzeiten" heißt jetzt
 //  „Klassenbuch". Einträge landen nie im Browser-Speicher.
+//  Hilfe (Entscheidungen 52–59, Code in hilfe.js): „?" im Kopf, Kontomenü
+//  „Hilfe", Kurzkarten beim ersten Besuch; gespeichert wird nur der Merker
+//  „Kurzkarte gesehen" (bleibt beim Abmelden).
 // =====================================================================
 
 const MODI = {
@@ -1487,6 +1490,7 @@ async function start() {
   fehlzeitenInit();
   hausaufgabenInit();
   eintraegeInit();
+  hilfeInit();
   altlastenEntfernen();
   state.anmeldung = anmeldungLesen();
   state.anmeldungNoetig = lokal.lesen("optionen", { anmeldungNoetig: true }).anmeldungNoetig !== false;

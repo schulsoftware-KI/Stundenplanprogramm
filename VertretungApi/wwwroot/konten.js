@@ -395,7 +395,7 @@ function verwaltungLeeren() {
 }
 
 function alleDialogeZu() {
-  for (const id of ["kDialog", "kfDialog", "spDialog", "pwDialog"]) dialogZu(el(id));
+  for (const id of ["kDialog", "kfDialog", "spDialog", "pwDialog", "hiDialog"]) dialogZu(el(id));
   kontoSchliessen();
 }
 

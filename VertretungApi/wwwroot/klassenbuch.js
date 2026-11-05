@@ -470,6 +470,7 @@ function renderStunde() {
     el("kbOffen").replaceChildren();
     el("kbListe").replaceChildren();
     el("kbListeKopf").hidden = true;
+    el("kbTipp").hidden = true;
     el("kbLeiste").hidden = true;
     el("kbInhalt").hidden = true;
     el("kbEintraege").hidden = true;
@@ -495,6 +496,7 @@ function renderStunde() {
   const liste = d.teilnehmer || [];
   const keineListe = liste.length === 0;
   el("kbListeKopf").hidden = keineListe;
+  el("kbTipp").hidden = keineListe || !d.darfSchreiben;   // Hilfe (Entscheidung 52)
   el("kbAlleDa").hidden = !d.darfSchreiben || kbAenderbareAbweichungen().length === 0;
   el("kbListe").replaceChildren(...liste.map(teilnehmerZeile));
   renderZahlen();

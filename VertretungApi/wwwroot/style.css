@@ -1601,3 +1601,74 @@ main.hausaufgaben { max-width: 720px; }
 @media (prefers-reduced-motion: reduce) {
   .laedt .symbol svg { animation: none; }
 }
+
+/* =====================================================================
+   Hilfe (Entscheidungen 52–59): „?" im Kopf, Hilfe-Dialog, Kurzkarte,
+   kurze Hinweise an der Stelle
+   ===================================================================== */
+
+/* Das Hilfe-Symbol dreht sich beim Laden nicht mit. */
+.laedt #hilfeKnopf svg { animation: none; }
+/* Schmale Handys: drei Knöpfe im Kopf – etwas enger, damit der Titel Platz behält. */
+@media (max-width: 380px) {
+  .kopf { gap: 4px; padding-right: 10px; }
+}
+
+/* Kurzkarte „Kurz erklärt" */
+.hi-karte {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 12px 0;
+  padding: 12px 14px 10px 14px;
+  border: 1px solid var(--linie);
+  border-left: 4px solid var(--akzent);
+  border-radius: 0 12px 12px 0;
+  background: var(--papier);
+}
+.hi-karte-titel { margin: 0; font-size: 0.82rem; font-weight: 750; letter-spacing: 0.06em; text-transform: uppercase; color: var(--akzent); }
+.hi-karte-text { margin: 0; }
+.hi-karte-knoepfe { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 6px; }
+.hi-karte-knoepfe .hauptknopf, .hi-karte-knoepfe .textknopf { min-height: 44px; }
+main.klassenbuch > .hi-karte, main.fehlzeiten > .hi-karte { margin-top: 2px; }
+
+/* Hilfe-Dialog */
+.hi-dialog { padding-top: 14px; }
+.hi-zurueck { display: inline-flex; align-items: center; gap: 4px; margin: 0 0 4px -6px; min-height: 44px; }
+.hi-dialog .karte-titel { outline-offset: 4px; }
+.hi-inhalt { display: grid; gap: 8px; }
+.hi-inhalt p { margin: 0; }
+.hi-zwischen { margin: 8px 0 0 0; font-size: 0.82rem; font-weight: 750; letter-spacing: 0.04em; text-transform: uppercase; color: var(--leise); }
+.hi-liste, .hi-farben { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.hi-farben { list-style: none; padding-left: 0; }
+.hi-farben li { display: flex; align-items: center; gap: 10px; }
+.hi-farbe { flex: none; width: 22px; height: 16px; border-radius: 4px; }
+.hi-f-vertretung { background: var(--vertretung); }
+.hi-f-entfall { background: var(--entfall); }
+.hi-f-verlegung { background: var(--verlegung); }
+.hi-f-betreuung { background: var(--betreuung); }
+.hi-f-raum { background: var(--raum); }
+.hi-begriffe { margin: 0; display: grid; gap: 2px; }
+.hi-begriffe dt { margin-top: 6px; font-weight: 700; }
+.hi-begriffe dt:first-child { margin-top: 0; }
+.hi-begriffe dd { margin: 0; }
+.hi-dazu, .hi-themen { display: grid; }
+.hi-dazu { gap: 0; margin-top: 4px; border-top: 1px solid var(--linie); padding-top: 4px; }
+.hi-themaknopf { min-height: 44px; color: var(--akzent); }
+
+/* Anmeldung: „Passwort vergessen?" */
+#pwVergessen { justify-self: center; margin-top: 4px; min-height: 44px; }
+.pw-vergessen { margin-top: 2px; font-size: 0.95rem; }
+
+/* Stundenblatt: Bedienhilfe über der Namensliste */
+.kb-tipp { margin: 0 2px; font-size: 0.85rem; color: var(--leise); }
+
+/* Nicht erfasst: sichtbare Überschrift über den Umschaltern (Entscheidung 57) */
+.fz-wahl-titel { margin: 0 2px -6px 2px; font-size: 0.85rem; font-weight: 650; color: var(--leise); }
+#fzNeWahl button { white-space: normal; line-height: 1.2; }
+
+/* Meine Fehlzeiten (Schüler): was „offen" heißt */
+.fz-ich-hinweis { margin: 4px 2px 0 2px; }
+
+@media print {
+  .hi-karte { display: none !important; }
+}

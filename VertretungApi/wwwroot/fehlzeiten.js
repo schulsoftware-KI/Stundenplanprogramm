@@ -255,14 +255,16 @@ function fzReiterListe() {
 }
 
 const fzGruppenName = (k) => (/^(EF|Q1|Q2)$/i.test(k) ? `Stufe ${k.toUpperCase()}` : /^\d\d$/.test(k) ? `Jahrgang ${k}` : `Klasse ${k}`);
+const fzAlleStundenText = (k) => (/^\d\d$/.test(k) ? `Alle Stunden des Jahrgangs ${k}` : `Alle Stunden der ${k.toUpperCase()}`);
 
 function fzNeAnsichten() {
   const r = fz.rechte;
   const l = [];
   if (!r) return l;
   if (r.lehrkraft) l.push({ id: "ich", text: "Meine Stunden" });
+  // Entscheidung 57: nicht „Klasse 05A" (wie der Reiter), sondern „Alle Stunden der 05A".
   if (!r.admin && r.klassen.length)
-    l.push({ id: "zustaendig", text: r.klassen.length === 1 ? fzGruppenName(r.klassen[0]) : "Meine Klassen" });
+    l.push({ id: "zustaendig", text: r.klassen.length === 1 ? fzAlleStundenText(r.klassen[0]) : "Alle Stunden meiner Klassen" });
   if (r.admin) l.push({ id: "alle", text: "Alle" });
   return l;
 }
@@ -353,6 +355,7 @@ function fzZeigen() {
     el("fzListeInfo").textContent = "Wird geladen …";
   } else {
     el("fzSchueler").hidden = false;
+    el("fzIchHinweis").hidden = o.art !== "ich";   // Hilfe: was „offen" heißt (nur Schülerkonto)
     for (const id of ["fzSumme", "fzEntsch", "fzFaecher", "fzEintraege", "fzSInfo", "fzKe"]) el(id).replaceChildren();
     el("fzKe").hidden = true;
     el("fzSName").textContent = "";
@@ -636,6 +639,7 @@ async function fzPdfErstellen() {
 function fzRenderNeWahl() {
   const ansichten = fzNeAnsichten();
   el("fzNeWahl").hidden = ansichten.length < 2;
+  el("fzNeWahlTitel").hidden = ansichten.length < 2;   // Entscheidung 57: „Welche Stunden?" sichtbar
   el("fzNeWahl").replaceChildren(...ansichten.map((a) => h("button", {
     type: "button", "aria-pressed": String(a.id === fz.neAnsicht),
     onclick: () => { if (fz.neAnsicht !== a.id) { fz.neAnsicht = a.id; fzZeigen(); } },

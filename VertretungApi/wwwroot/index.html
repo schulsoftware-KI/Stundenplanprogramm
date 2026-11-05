@@ -15,6 +15,14 @@
 <body>
   <header class="kopf">
     <h1 id="titel">Stundenplan</h1>
+    <!-- Hilfe (Entscheidungen 52–59): erklärt den gerade sichtbaren Bereich -->
+    <button id="hilfeKnopf" class="symbol" type="button" aria-label="Hilfe zu dieser Seite" title="Hilfe" aria-haspopup="dialog">
+      <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+        <circle cx="12" cy="12" r="9.2" fill="none" stroke="currentColor" stroke-width="2"/>
+        <path d="M9.3 9.4a2.8 2.8 0 0 1 5.4 1c0 1.9-2.7 2.4-2.7 4" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="12" cy="17.6" r="1.25" fill="currentColor"/>
+      </svg>
+    </button>
     <button id="aktualisieren" class="symbol" type="button" aria-label="Aktualisieren" hidden>
       <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
         <path d="M20 12a8 8 0 1 1-2.34-5.66" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
@@ -28,6 +36,17 @@
       </svg>
     </button>
   </header>
+
+  <!-- Hilfe: Kurzkarte beim ersten Besuch eines Bereichs (Entscheidung 53).
+       hilfe.js setzt sie an den Anfang des sichtbaren Bereichs. -->
+  <section id="hiKarte" class="hi-karte" aria-labelledby="hiKarteTitel" hidden>
+    <h2 id="hiKarteTitel" class="hi-karte-titel">Kurz erklärt</h2>
+    <p id="hiKarteText" class="hi-karte-text"></p>
+    <div class="hi-karte-knoepfe">
+      <button id="hiKarteOk" class="hauptknopf klein" type="button">Verstanden</button>
+      <button id="hiKarteMehr" class="textknopf" type="button" aria-haspopup="dialog">Mehr dazu</button>
+    </div>
+  </section>
 
   <!-- Anmeldung (Phase 2, Schritt 4) -->
   <main id="anmeldung" class="anmeldung" hidden>
@@ -56,6 +75,9 @@
 
       <button id="anmeldeKnopf" class="hauptknopf" type="submit">Anmelden</button>
       <button id="ohneAnmeldung" class="textknopf" type="button" hidden>Ohne Anmeldung weiter</button>
+      <button id="pwVergessen" class="textknopf" type="button" aria-expanded="false" aria-controls="pwVergessenText">Passwort vergessen?</button>
+      <p id="pwVergessenText" class="hinweis pw-vergessen" hidden>Ein neues Startpasswort bekommst du von deiner
+        Klassenleitung bzw. Stufenkoordination, Lehrkräfte vom Admin. Per E-Mail geht das nicht.</p>
     </form>
   </main>
 
@@ -265,6 +287,8 @@
         <p id="kbZahlen" class="kb-zahlen" role="status"></p>
         <button id="kbAlleDa" class="textknopf klein" type="button" hidden>Alle anwesend</button>
       </div>
+      <!-- Hilfe (Entscheidung 52): kurze Bedienhilfe, nur mit Schreibrecht -->
+      <p id="kbTipp" class="kb-tipp" hidden>Name antippen = fehlt · ⋯ = verspätet, beurlaubt, Eintrag</p>
       <ul id="kbListe" class="kb-liste" aria-label="Anwesenheit"></ul>
       <p id="kbFehler" class="fehler" role="alert" hidden></p>
       <div id="kbLeiste" class="kb-leiste" hidden>
@@ -331,8 +355,10 @@
 
     <!-- Nicht erfasste Stunden -->
     <section id="fzNe" class="fz-bereich" aria-label="Nicht erfasste Stunden" hidden>
-      <div id="fzNeWahl" class="modi fz-wahl" role="group" aria-label="Welche Stunden?"></div>
-      <div id="fzNeArt" class="modi fz-wahl" role="group" aria-label="Was fehlt?"></div>
+      <p id="fzNeWahlTitel" class="fz-wahl-titel" hidden>Welche Stunden?</p>
+      <div id="fzNeWahl" class="modi fz-wahl" role="group" aria-labelledby="fzNeWahlTitel"></div>
+      <p id="fzNeArtTitel" class="fz-wahl-titel">Was fehlt?</p>
+      <div id="fzNeArt" class="modi fz-wahl" role="group" aria-labelledby="fzNeArtTitel"></div>
       <div id="fzNeFilter" class="k-filter" hidden>
         <label for="fzNeLehrer" class="vh">Lehrkraft</label>
         <select id="fzNeLehrer" class="eingabe"></select>
@@ -472,6 +498,9 @@
       <h3 id="fzEintraegeTitel" class="fz-titel">Fehlstunden und Verspätungen</h3>
       <p id="fzEintraegeInfo" class="such-info"></p>
       <ul id="fzEintraege" class="k-liste fz-eintraege" aria-labelledby="fzEintraegeTitel"></ul>
+      <!-- Hilfe (Entscheidung 52): nur in „Meine Fehlzeiten" (Schülerkonto) -->
+      <p id="fzIchHinweis" class="kleingedruckt ohne-einzug fz-ich-hinweis" hidden>„Offen“ heißt: Deine Entschuldigung
+        ist noch nicht eingetragen. Gib sie wie gewohnt schriftlich ab – eingetragen wird sie dann hier.</p>
     </section>
   </main>
 
@@ -561,6 +590,7 @@
     <button id="haKnopf" class="menuepunkt" type="button" hidden>Hausaufgaben</button>
     <button id="fzKnopf" class="menuepunkt" type="button" hidden>Klassenbuch</button>
     <button id="kontenKnopf" class="menuepunkt" type="button" hidden>Konten verwalten</button>
+    <button id="hilfeMenue" class="menuepunkt" type="button" aria-haspopup="dialog">Hilfe</button>
     <button id="pwAendernKnopf" class="menuepunkt" type="button">Passwort ändern</button>
     <button id="abmelden" class="menuepunkt" type="button">Abmelden</button>
     <button id="ueberallAbmelden" class="menuepunkt leise" type="button">Auf allen Geräten abmelden</button>
@@ -791,6 +821,17 @@
     <button id="idZu" class="menuepunkt schliessen" type="button">Schließen</button>
   </dialog>
 
+  <!-- Hilfe (Entscheidungen 52–59): ein Thema bzw. die Themenliste der eigenen Rolle -->
+  <dialog id="hiDialog" class="fenster hi-dialog" aria-labelledby="hiTitel">
+    <button id="hiListeKnopf" class="textknopf hi-zurueck" type="button" hidden>
+      <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Alle Hilfethemen
+    </button>
+    <h2 id="hiTitel" class="karte-titel" tabindex="-1">Hilfe</h2>
+    <div id="hiInhalt" class="hi-inhalt"></div>
+    <button id="hiZu" class="menuepunkt schliessen" type="button">Schließen</button>
+  </dialog>
+
   <!-- kurze Rückmeldungen -->
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
@@ -802,6 +843,7 @@
   <script src="fehlzeiten.js"></script>
   <script src="hausaufgaben.js"></script>
   <script src="eintraege.js"></script>
+  <script src="hilfe.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

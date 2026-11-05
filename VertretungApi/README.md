@@ -454,6 +454,41 @@ Unterrichts der Klasse, gewähltem Zeitraum, Schalter „Schülereinträge aufne
 „Die Datei enthält Schülerdaten …“. Das PDF wird nur heruntergeladen, nichts im Browser-Speicher.
 Service-Worker v13.
 
+## Export für die Verwaltung und Jahresarchiv (Phase 4.3)
+
+Entscheidungen 48–50 und 60–65 (Nutzer 04./05.11.2026). **Keine Schemaänderung** (die Spalte `Art` im
+Download-Protokoll ist Text; neue Werte `FehlzeitenCsv` und `Archiv`). Code: `Services/ExportService.cs`.
+
+| Methode | Pfad | Zweck | Wer |
+|---|---|---|---|
+| GET | `/api/berichte/fehlzeiten-csv/pruefen?klasse=05A&von=&bis=` (bzw. `alle=true`) | Vorab: offene Fehlstunden/Verspätungen, nicht erfasste Stunden | KL/SK zuständig, Admin (`alle` nur Admin) |
+| GET | `/api/berichte/fehlzeiten-csv?klasse=05A&von=&bis=` (bzw. `alle=true`) | Fehlzeiten als CSV | KL/SK zuständig, Admin (`alle` nur Admin) |
+| GET | `/api/berichte/archiv?von=&bis=&schuelerEintraege=` | Jahresarchiv als Zip | Admin |
+| GET | `/api/berichte/protokoll?limit=&art=&akteur=` | Download-Protokoll, Filter nach Art und Person | Admin |
+
+- **CSV:** Semikolon, UTF-8 mit BOM, Formelschutz (wie die Zugangszettel). Spalten `SchILD-Id; Name; Vorname;
+  Klasse; Kurs; Fehlstunden; entschuldigt; unentschuldigt; offen; Verspätungen; Minuten`. Eine Zeile je
+  Schüler (Kurs leer = Summe); in der Oberstufe zusätzlich je Kurs eine Zeile (Kurs = Lerngruppen-Schlüssel,
+  jeder Kurs des Schülers, auch ohne Fehlzeiten). Zählung wie die Konferenzübersicht. Die SchILD-Id bleibt
+  bis zum Import echter Daten (Phase 5) leer. `alle=true` = alle Klassen und Stufen, jede Person einmal.
+- **Vorabprüfung:** nicht erfasst = Stunden ohne Anwesenheit ab `Klassenbuch:ErfassungAb` bis gestern; der
+  Export bleibt trotzdem möglich.
+- **Jahresarchiv:** je Sek-I-Klasse ein Klassenbuch, je Oberstufenkurs (UNr + Lehrkraft laut Plan) ein
+  Kursheft – ermittelt aus dem effektiven Plan des Zeitraums. Zip mit `Klassen/…`, `Kurse/<Stufe>/…` und
+  `Inhalt.txt` (Zeitraum, erstellt von/am, Hinweis Schülerdaten, Dateiliste, nicht erstellte Hefte). Die
+  Plantage werden einmal berechnet; die Zip entsteht als Zwischendatei im Temp-Ordner und wird nach dem
+  Senden gelöscht. Bricht die Verbindung ab, endet die Erzeugung zwischen zwei Heften. Ein fehlerhaftes Heft
+  bricht das Archiv nicht ab (Log + `Inhalt.txt`).
+- **Protokoll:** jeder CSV-/Archiv-Download wie die PDFs (wer, wann, was, Zeitraum – ohne Inhalt).
+  `Berichte:NurAdmin = true` sperrt auch den CSV-Export für alle außer der Verwaltung.
+
+> Über den Cloudflare-Quick-Tunnel kann eine lange Anfrage nach etwa 100 Sekunden abbrechen (Fehler 524).
+> Das Jahresarchiv für ein ganzes Halbjahr deshalb am PC über `http://localhost:5080` erstellen.
+
+In der PWA: Knöpfe „Fehlzeiten als CSV …“ (Klasse/Stufe, Übersicht; Admin wahlweise alle Klassen) und
+„Jahresarchiv …“ (Admin) neben „Klassenbuch als PDF …“; Reiter „Downloads“ in „Konten verwalten“ (Admin).
+Hilfethemen dazu in `hilfe.js`. Service-Worker v15.
+
 ## Produktiv: Migrations statt EnsureCreated
 
 `EnsureCreated` ist nur für die Entwicklung gedacht und verträgt sich **nicht** mit Migrations.
@@ -471,8 +506,8 @@ ersetzen und `Database:SchemaNachruesten` auf `false` setzen.
 ## Nächste Schritte
 
 1. **Schülerkonten aus SchILD** (Phase 5): Import statt Pseudodaten, Zuordnung über `ExtId`.
-2. **Auswertungen (Phase 4):** ~~4.1 am Bildschirm~~, ~~4.2 Klassenbuch/Kursheft als PDF~~;
-   4.3 CSV-Export für die Verwaltung, Jahresarchiv und Ansicht des Download-Protokolls.
+2. **Auswertungen (Phase 4):** ~~4.1 am Bildschirm~~, ~~4.2 Klassenbuch/Kursheft als PDF~~,
+   ~~4.3 CSV-Export, Jahresarchiv, Download-Protokoll~~. Genaues SchILD-Importformat in Phase 5.
 3. **Web-Push:** Benachrichtigung der Apps bei Änderung.
 4. **Produktiv:** Schlüssel aus Umgebungsvariablen, EF-Migrations, PostgreSQL, CORS auf die
    App-Adresse einschränken, Login-Bremse hinter dem Reverse-Proxy je echter Adresse.

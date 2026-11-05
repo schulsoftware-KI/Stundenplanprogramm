@@ -154,9 +154,13 @@ public static class BerichtService
     //  Bericht zusammenstellen
     // =================================================================
 
-    /// <summary>Klassenbuch einer Klasse (Sek I) bzw. Stufe (Sek II). Rechte prüft der Aufrufer.</summary>
+    /// <summary>
+    /// Klassenbuch einer Klasse (Sek I) bzw. Stufe (Sek II). Rechte prüft der Aufrufer.
+    /// <paramref name="tage"/>: schon berechnete Plantage (Phase 4.3, Jahresarchiv) – sonst werden sie geladen.
+    /// </summary>
     public static async Task<Bericht> KlassenbuchAsync(
-        AppDbContext db, KbNutzer u, string klasse, DateOnly von, DateOnly bis, bool schuelerEintraege)
+        AppDbContext db, KbNutzer u, string klasse, DateOnly von, DateOnly bis, bool schuelerEintraege,
+        IReadOnlyList<TagKontext>? tage = null)
     {
         string k = klasse.Trim().ToUpperInvariant();
         var filter = new List<string> { k };
@@ -173,7 +177,8 @@ public static class BerichtService
             st => string.Equals(st.Art, "Unterricht", StringComparison.OrdinalIgnoreCase)
                   && KlassenbuchService.ZustaendigFuer(filter, st.Klassen),
             klassenZeigen: st => st.Klassen.Count > 1,
-            freiFuer: k);
+            freiFuer: k,
+            vorgegeben: tage);
 
         if (schuelerEintraege && (u.IstAdmin || u.IstKlassenleitungOderKoordination))
         {
@@ -185,10 +190,13 @@ public static class BerichtService
         return bericht with { Fehlzeiten = fehlzeiten };
     }
 
-    /// <summary>Kursheft eines Unterrichts (UNr + Lehrkraft laut Plan). Rechte prüft der Aufrufer.</summary>
+    /// <summary>
+    /// Kursheft eines Unterrichts (UNr + Lehrkraft laut Plan). Rechte prüft der Aufrufer.
+    /// <paramref name="tage"/>: schon berechnete Plantage (Phase 4.3, Jahresarchiv) – sonst werden sie geladen.
+    /// </summary>
     public static async Task<Bericht> KursheftAsync(
         AppDbContext db, KbNutzer u, int unr, string lehrer, string fach, IReadOnlyList<string> klassen,
-        DateOnly von, DateOnly bis, bool schuelerEintraege)
+        DateOnly von, DateOnly bis, bool schuelerEintraege, IReadOnlyList<TagKontext>? tage = null)
     {
         string l = lehrer.Trim().ToUpperInvariant();
         var bisEff = BisHoechstensHeute(bis);
@@ -203,7 +211,8 @@ public static class BerichtService
             st => string.Equals(st.Art, "Unterricht", StringComparison.OrdinalIgnoreCase)
                   && KlassenbuchService.Gleich(st.GrundLehrer, l) && (st.GrundUNr == unr || st.UNr == unr),
             klassenZeigen: _ => false,
-            freiFuer: null);
+            freiFuer: null,
+            vorgegeben: tage);
 
         var fehlzeiten = await FehlzeitenService.UnterrichtAsync(db, u, unr, l, von, bisEff);
         if (schuelerEintraege && fehlzeiten != null && (u.IstAdmin || u.IstKlassenleitungOderKoordination))
@@ -229,9 +238,14 @@ public static class BerichtService
     /// <summary>Tage und Stunden aus dem effektiven Plan, ergänzt um die erfassten Lektionen.</summary>
     private static async Task<Bericht> BaueAsync(
         AppDbContext db, BerichtKopf kopf, DateOnly von, DateOnly bis, List<Lektion> lektionen,
-        Func<PlanStunde, bool> passt, Func<PlanStunde, bool> klassenZeigen, string? freiFuer)
+        Func<PlanStunde, bool> passt, Func<PlanStunde, bool> klassenZeigen, string? freiFuer,
+        IReadOnlyList<TagKontext>? vorgegeben = null)
     {
-        var tage = bis < von ? new List<TagKontext>() : await WochenplanService.TageAsync(db, von, bis);
+        IReadOnlyList<TagKontext> tage = bis < von
+            ? new List<TagKontext>()
+            : vorgegeben != null
+                ? vorgegeben.Where(t => t.Datum >= von && t.Datum <= bis).ToList()
+                : await WochenplanService.TageAsync(db, von, bis);
         var jeSchluessel = lektionen
             .GroupBy(x => WochenplanService.LektionSchluessel(x.Datum, x.Stunde, x.GrundUNr, x.GrundLehrer), StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.ErfasstAm != null).ThenByDescending(x => x.Id).First(),
@@ -373,9 +387,15 @@ public static class BerichtService
         var teile = new List<string> { k.Art };
         teile.AddRange(k.Titel.Replace("Klasse ", "").Replace("Stufe ", "")
             .Split(new[] { ' ', '·', ',' }, StringSplitOptions.RemoveEmptyEntries));
-        var roh = string.Join("_", teile) + $"_{k.Von:yyyy-MM-dd}_{k.Bis:yyyy-MM-dd}";
+        return SichererName(string.Join("_", teile) + $"_{k.Von:yyyy-MM-dd}_{k.Bis:yyyy-MM-dd}", ".pdf");
+    }
+
+    /// <summary>Nur ASCII-Buchstaben, Ziffern, „_" und „-" (Phase 4.3 auch für CSV und Zip).</summary>
+    public static string SichererName(string roh, string endung)
+    {
         var sauber = new string(roh.Select(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-' ? c : '_').ToArray());
         while (sauber.Contains("__")) sauber = sauber.Replace("__", "_");
-        return sauber.Trim('_') + ".pdf";
+        sauber = sauber.Trim('_');
+        return (sauber.Length == 0 ? "Datei" : sauber) + endung;
     }
 }

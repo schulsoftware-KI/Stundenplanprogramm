@@ -9,7 +9,8 @@
 //  - Kontenverwaltung (Kontomenü „Konten verwalten"):
 //      Admin: Konten suchen/filtern, anlegen, bearbeiten, Passwort zurücksetzen,
 //             sperren, überall abmelden, löschen; Sammelanlage für Lehrkräfte
-//             (aus dem Grundplan) und Schüler (je Klasse/Stufe); Protokoll.
+//             (aus dem Grundplan) und Schüler (je Klasse/Stufe); Protokoll;
+//             Phase 4.3: Reiter „Downloads" (Download-Protokoll, Filter Art/Person).
 //      Klassenleitung / Stufenkoordination („Schülerpasswörter"): Schülerkonten
 //             der eigenen Klasse/Stufe sehen, Passwort zurücksetzen, sperren/entsperren.
 //  - Startpasswörter erscheinen nur einmal: als Zugangszettel zum Drucken bzw.
@@ -36,6 +37,7 @@ const verw = {
   formSuchNr: 0,
   formSuchTimer: null,
   protokollKonto: null,   // { id, name }: Protokoll nur dieses Kontos
+  downloadTimer: null,    // Phase 4.3: Verzögerung der Personensuche
   sammel: {
     uebersicht: null,
     vorschau: null,       // Antwort der Vorschau
@@ -382,10 +384,13 @@ function verwaltungLeeren() {
   verw.protokollKonto = null;
   verw.einzelZettel = null;
   verw.sammel = { uebersicht: null, vorschau: null, anfrage: null, ergebnis: null, gesichert: false };
-  for (const id of ["kListe", "pListe", "sZeilen", "sErgebnisZeilen", "sGruppen", "druck", "kfTreffer"])
+  for (const id of ["kListe", "pListe", "dListe", "sZeilen", "sErgebnisZeilen", "sGruppen", "druck", "kfTreffer"])
     el(id).replaceChildren();
-  for (const id of ["kInfo", "pInfo", "spName", "spPasswort", "spFuer", "sErgebnis", "sZusammenfassung"])
+  for (const id of ["kInfo", "pInfo", "dInfo", "spName", "spPasswort", "spFuer", "sErgebnis", "sZusammenfassung"])
     el(id).textContent = "";
+  clearTimeout(verw.downloadTimer);
+  el("dArt").value = "";
+  el("dPerson").value = "";
   el("kSuche").value = "";
   el("kRolle").value = "";
   el("kFilter").value = "";
@@ -406,12 +411,14 @@ function reiterWaehlen(reiter) {
   el("vKonten").hidden = reiter !== "konten";
   el("vSammel").hidden = reiter !== "sammel";
   el("vProtokoll").hidden = reiter !== "protokoll";
+  el("vDownloads").hidden = reiter !== "downloads";
   verwaltungAktualisieren();
 }
 
 function verwaltungAktualisieren() {
   if (verw.reiter === "konten") kontenLaden();
   else if (verw.reiter === "sammel") sammelStart();
+  else if (verw.reiter === "downloads") downloadsLaden();
   else protokollLaden();
 }
 
@@ -975,6 +982,48 @@ async function protokollLaden() {
 }
 
 // ---------------------------------------------------------------------
+//  Downloads (Phase 4.3, Entscheidung 65): wer hat wann welche Datei geladen
+// ---------------------------------------------------------------------
+
+const DOWNLOAD_ARTEN = {
+  KlassenbuchPdf: "Klassenbuch (PDF)",
+  KursheftPdf: "Kursheft (PDF)",
+  FehlzeitenCsv: "Fehlzeiten (CSV)",
+  Archiv: "Jahresarchiv (Zip)",
+};
+
+const kurzDatum = (iso) => { const [j, m, t] = String(iso).split("-"); return `${t}.${m}.${j}`; };
+
+async function downloadsLaden() {
+  const nr = ++verw.ladeNr;
+  const art = el("dArt").value;
+  const person = el("dPerson").value.trim();
+  el("dInfo").replaceChildren("Lade …");
+  try {
+    let url = "api/berichte/protokoll?limit=500";
+    if (art) url += "&art=" + encodeURIComponent(art);
+    if (person) url += "&akteur=" + encodeURIComponent(person);
+    const liste = await senden("GET", url);
+    if (nr !== verw.ladeNr) return;
+    const gefiltert = art || person;
+    el("dInfo").textContent = liste.length === 0
+      ? (gefiltert ? "Keine Downloads zu diesem Filter." : "Noch keine Downloads.")
+      : `${liste.length === 1 ? "1 Download" : `${liste.length} Downloads`}${liste.length >= 500 ? " (die neuesten 500)" : ""}`;
+    el("dListe").replaceChildren(...liste.map((p) => h("li", { class: "p-eintrag" },
+      h("span", { class: "p-zeit" }, datumZeit(p.zeit)),
+      h("span", { class: "p-text" },
+        h("strong", null, DOWNLOAD_ARTEN[p.art] || p.art), " · ", p.was,
+        h("span", { class: "p-wer" }, ` (durch ${p.akteur})`)),
+      h("span", { class: "p-details" },
+        `Zeitraum ${kurzDatum(p.von)} – ${kurzDatum(p.bis)}` + (p.mitSchuelerEintraegen ? " · mit Schülereinträgen" : "")))));
+  } catch (f) {
+    if (nr !== verw.ladeNr) return;
+    const t = aktionsFehler(f);
+    if (t !== null) { el("dInfo").textContent = t; el("dListe").replaceChildren(); }
+  }
+}
+
+// ---------------------------------------------------------------------
 //  Zugangszettel drucken, CSV speichern
 // ---------------------------------------------------------------------
 
@@ -1048,7 +1097,7 @@ function kontenInit() {
     b.addEventListener("click", () => { if (verw.reiter !== b.dataset.reiter) reiterWaehlen(b.dataset.reiter); });
   el("verwReiter").addEventListener("keydown", (e) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-    const liste = ["konten", "sammel", "protokoll"];
+    const liste = ["konten", "sammel", "protokoll", "downloads"];
     const i = (liste.indexOf(verw.reiter) + (e.key === "ArrowRight" ? 1 : liste.length - 1)) % liste.length;
     reiterWaehlen(liste[i]);
     document.querySelector(`#verwReiter [data-reiter="${liste[i]}"]`).focus();
@@ -1060,6 +1109,15 @@ function kontenInit() {
   });
   el("kSuche").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); clearTimeout(verw.suchTimer); kontenLaden(); } });
   el("kRolle").addEventListener("change", kontenLaden);
+  // Phase 4.3: Downloads filtern
+  el("dArt").addEventListener("change", downloadsLaden);
+  el("dPerson").addEventListener("input", () => {
+    clearTimeout(verw.downloadTimer);
+    verw.downloadTimer = setTimeout(downloadsLaden, 250);
+  });
+  el("dPerson").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); clearTimeout(verw.downloadTimer); downloadsLaden(); }
+  });
   el("kFilter").addEventListener("change", kontenLaden);
   el("kNeu").addEventListener("click", () => formular("neu"));
 

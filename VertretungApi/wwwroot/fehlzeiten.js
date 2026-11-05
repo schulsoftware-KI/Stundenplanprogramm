@@ -38,6 +38,11 @@
 //  (Unterricht) – im gewählten Zeitraum, Schülereinträge nur auf Wunsch (KL/SK/
 //  Admin). Hinweis „enthält Schülerdaten" im Dialog; der Server protokolliert.
 //  Das PDF wird nur im Arbeitsspeicher gehalten und als Datei angeboten.
+//  Phase 4.3 (Entscheidungen 48–50, 60–65): „Fehlzeiten als CSV …" (Klasse/
+//  Stufe, Übersicht – KL/SK zuständig, Admin; Admin wahlweise alle Klassen)
+//  mit Vorabprüfung (offene/nicht erfasste Stunden) und „Jahresarchiv …"
+//  (nur Admin; Zip mit allen Klassenbüchern und Kursheften, Abbruch möglich).
+//  Wie beim PDF: nur herunterladen, nichts im Browser-Speicher.
 //
 //  Datenschutz: nichts davon im Browser-Speicher; beim Verlassen geleert.
 //  Wird nach klassenbuch.js und VOR app.js geladen; Einstieg fehlzeitenInit().
@@ -74,6 +79,14 @@ const fz = {
   pdf: null,         // im PDF-Dialog: { art: "klasse", klasse } | { art: "kurs", unr, lehrer, titel }
   pdfLaeuft: false,
   pdfNr: 0,
+  // Phase 4.3
+  csv: null,         // im CSV-Dialog: { klasse }
+  csvLaeuft: false,
+  csvNr: 0,
+  archivLaeuft: false,
+  archivNr: 0,
+  archivAbbruch: null,   // AbortController des laufenden Archivs
+  archivUhr: null,       // Zeitanzeige „seit m:ss"
 };
 
 const fehlzeitenOffen = () => !el("fehlzeiten").hidden;
@@ -180,6 +193,13 @@ function fehlzeitenLeeren() {
   el("pdUmfang").replaceChildren();
   for (const id of ["pdWas", "pdZeitraum", "pdStatus"]) el(id).textContent = "";
   dialogZu(el("fzPdfDialog"));
+  // Phase 4.3: CSV- und Archiv-Dialog schließen (ein laufendes Archiv wird dabei abgebrochen)
+  fz.csv = null;
+  fz.csvNr++;
+  dialogZu(el("fzCsvDialog"));
+  dialogZu(el("fzArchivDialog"));
+  for (const id of ["csWas", "csZeitraum", "csPruefung", "arZeitraum", "arStatus"]) el(id).textContent = "";
+  el("csWarnung").replaceChildren();
   for (const id of ["fzReiter", "fzNeWahl", "fzNeArt", "fzNeLehrer", "fzNeKlasse", "fzNeListe", "fzKurseListe", "fzKlasseWahl",
     "fzListeZeilen", "fzSumme", "fzEntsch", "fzFaecher", "fzEintraege", "fzSInfo", "fzTListe",
     "fzListeKopf", "fzListeFuss", "fzListeOffen", "fzOListe", "fzZrWahl"])
@@ -508,8 +528,13 @@ function fzPdfZiel(o) {
 
 function fzPdfLeisteRendern(o) {
   const ziel = fzPdfZiel(o);
-  el("fzPdfLeiste").hidden = !ziel;
+  const csv = fzCsvZiel(o);
+  const archiv = fzArchivMoeglich(o);
+  el("fzPdfKnopf").hidden = !ziel;
   if (ziel) el("fzPdfKnopfText").textContent = ziel.art === "klasse" ? "Klassenbuch als PDF …" : "Kursheft als PDF …";
+  el("fzCsvKnopf").hidden = !csv;
+  el("fzArchivKnopf").hidden = !archiv;
+  el("fzPdfLeiste").hidden = !ziel && !csv && !archiv;
 }
 
 const fzDarfSchuelerEintraege = () =>
@@ -630,6 +655,224 @@ async function fzPdfErstellen() {
       el("pdStatus").textContent = "";
     }
   }
+}
+
+// ---------------------------------------------------------------------
+//  Phase 4.3: Fehlzeiten als CSV, Jahresarchiv
+// ---------------------------------------------------------------------
+
+/** CSV: Klasse/Stufe in der Übersicht – dieselben Rechte wie das Klassenbuch-PDF (Entscheidung 60). */
+function fzCsvZiel(o) {
+  const z = fzPdfZiel(o);
+  return z && z.art === "klasse" ? { klasse: z.klasse } : null;
+}
+
+/** Jahresarchiv: nur Admin, angeboten in der Übersicht „Klassen" (Entscheidung 63). */
+const fzArchivMoeglich = (o) => !!fz.rechte && fz.rechte.admin && !!o && o.art === "reiter"
+  && o.reiter === "klasse" && fz.kAnsicht === "uebersicht";
+
+/** Zeitraum-Text für die Dialoge; „zukunft" = es gibt noch nichts zu exportieren. */
+function fzZeitraumHinweis() {
+  const zr = fz.zr;
+  const name = !zr ? "Schuljahr" : zr.id === "frei" ? "Eigener Zeitraum"
+    : ((fz.zeitraeume && fz.zeitraeume.zeitraeume.find((x) => x.id === zr.id)) || { text: "" }).text;
+  const zukunft = !!zr && zr.von > heuteIso();
+  return {
+    zukunft,
+    text: zukunft
+      ? `${name} (${fzZeitraumText(zr.von, zr.bis)}) liegt noch in der Zukunft – es gibt noch nichts zu exportieren. Wähle oben einen anderen Zeitraum.`
+      : `Zeitraum: ${name}${zr ? ` · ${fzZeitraumText(zr.von, zr.bis)}` : ""} – ändern über die Zeitraumleiste.`,
+  };
+}
+
+/** Datei laden (fetch → Blob → Download). Fehler als HttpFehler bzw. Error; gibt den Dateinamen zurück. */
+async function fzDateiLaden(url, ersatzName, abbruch) {
+  let resp;
+  try {
+    resp = await fetch(url, { cache: "no-store", headers: authKopf(), signal: abbruch.signal });
+  } catch (f) {
+    if (abbruch.signal.aborted) throw f;
+    throw new Error("Keine Verbindung zum Schulserver – bitte später erneut versuchen.");
+  }
+  if (!resp.ok) {
+    let daten = null;
+    try { daten = await resp.json(); } catch { /* kein JSON */ }
+    const f = new HttpFehler(resp.status, (daten && daten.fehler) || "");
+    f.daten = daten;
+    throw f;
+  }
+  const blob = await resp.blob();
+  const name = fzPdfDateiname(resp.headers.get("Content-Disposition"), ersatzName);
+  const adresse = URL.createObjectURL(blob);
+  const a = h("a", { href: adresse, download: name, hidden: true });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(adresse), 60000);
+  return name;
+}
+
+// ---- CSV ----
+
+const fzCsvAlle = () => !el("csUmfangBox").hidden && document.querySelector('input[name="csUmfang"]:checked').value === "alle";
+
+function fzCsvUrl(pfad) {
+  const p = fz.csv;
+  const enc = encodeURIComponent;
+  return fzMitZr(fzCsvAlle() ? `${pfad}?alle=true` : `${pfad}?klasse=${enc(p.klasse)}`);
+}
+
+function fzCsvOeffnen() {
+  const ziel = fzCsvZiel(fzOben());
+  if (!ziel) return;
+  fz.csv = ziel;
+  fz.csvNr++;
+  el("csWas").textContent = fzGruppenName(ziel.klasse);
+  el("csUmfangBox").hidden = !(fz.rechte && fz.rechte.admin);
+  el("csUmfangKlasse").textContent = `Nur ${fzGruppenName(ziel.klasse)}`;
+  document.querySelector('input[name="csUmfang"][value="klasse"]').checked = true;
+  const zr = fzZeitraumHinweis();
+  el("csZeitraum").textContent = zr.text;
+  el("csLaden").disabled = zr.zukunft;
+  el("csLaden").textContent = "CSV speichern";
+  fehlerIn("csFehler", "");
+  dialogAuf(el("fzCsvDialog"));
+  el("csLaden").focus();
+  if (!zr.zukunft) fzCsvPruefen();
+  else { el("csPruefung").textContent = ""; el("csWarnung").hidden = true; }
+}
+
+/** Vorabprüfung (Entscheidung 62): offene Fehlstunden/Verspätungen, nicht erfasste Stunden. */
+async function fzCsvPruefen() {
+  const nr = ++fz.csvNr;
+  el("csPruefung").textContent = "Prüfe offene Stunden …";
+  el("csWarnung").hidden = true;
+  fehlerIn("csFehler", "");
+  try {
+    const d = await senden("GET", fzCsvUrl("api/berichte/fehlzeiten-csv/pruefen"));
+    if (nr !== fz.csvNr) return;
+    const n = (x, eins, viele) => `${x} ${x === 1 ? eins : viele}`;
+    el("csPruefung").textContent = d.gruppen > 1
+      ? `${n(d.schueler, "Schülerin/Schüler", "Schülerinnen und Schüler")} aus ${d.gruppen} Klassen bzw. Stufen.`
+      : `${n(d.schueler, "Schülerin/Schüler", "Schülerinnen und Schüler")}.`;
+    const teile = [];
+    if (d.offeneFehlstunden) teile.push(n(d.offeneFehlstunden, "Fehlstunde", "Fehlstunden") + " noch offen");
+    if (d.offeneVerspaetungen) teile.push(n(d.offeneVerspaetungen, "Verspätung", "Verspätungen") + " noch offen");
+    if (d.nichtErfasst) teile.push(n(d.nichtErfasst, "Stunde", "Stunden") + " ohne erfasste Anwesenheit");
+    if (teile.length) {
+      el("csWarnung").replaceChildren(h("strong", null, "Noch nicht vollständig: "), teile.join(", ") + ". ",
+        "Die Summen können sich noch ändern. Speichern ist trotzdem möglich.");
+      el("csWarnung").hidden = false;
+    }
+  } catch (f) {
+    if (nr !== fz.csvNr) return;
+    el("csPruefung").textContent = "";
+    const t = aktionsFehler(f);
+    if (t !== null) fehlerIn("csFehler", t);
+  }
+}
+
+async function fzCsvLaden() {
+  if (!fz.csv || fz.csvLaeuft) return;
+  const nr = fz.csvNr;
+  fz.csvLaeuft = true;
+  el("csLaden").disabled = true;
+  el("csLaden").textContent = "CSV wird erstellt …";
+  fehlerIn("csFehler", "");
+  const abbruch = new AbortController();
+  const timer = setTimeout(() => abbruch.abort(), 180000);
+  try {
+    const name = await fzDateiLaden(fzCsvUrl("api/berichte/fehlzeiten-csv"), "Fehlzeiten.csv", abbruch);
+    if (nr !== fz.csvNr) return;
+    dialogZu(el("fzCsvDialog"));
+    toast(`CSV gespeichert: ${name}`);
+  } catch (f) {
+    if (nr !== fz.csvNr) return;
+    const t = abbruch.signal.aborted ? "Das hat zu lange gedauert – bitte erneut versuchen." : aktionsFehler(f);
+    if (t !== null) fehlerIn("csFehler", t);
+  } finally {
+    clearTimeout(timer);
+    fz.csvLaeuft = false;
+    if (nr === fz.csvNr) {
+      el("csLaden").disabled = fzZeitraumHinweis().zukunft;
+      el("csLaden").textContent = "CSV speichern";
+    }
+  }
+}
+
+// ---- Jahresarchiv ----
+
+function fzArchivOeffnen() {
+  if (!fzArchivMoeglich(fzOben())) return;
+  fz.archivNr++;
+  const zr = fzZeitraumHinweis();
+  el("arZeitraum").textContent = zr.text;
+  el("arSchueler").checked = false;   // wie beim PDF: Standard aus
+  el("arErstellen").disabled = zr.zukunft;
+  el("arErstellen").textContent = "Archiv erstellen";
+  el("arAbbrechen").textContent = "Abbrechen";
+  el("arStatus").textContent = "";
+  fehlerIn("arFehler", "");
+  dialogAuf(el("fzArchivDialog"));
+  el(zr.zukunft ? "arAbbrechen" : "arErstellen").focus();
+}
+
+function fzArchivUhrStopp() {
+  if (fz.archivUhr) clearInterval(fz.archivUhr);
+  fz.archivUhr = null;
+}
+
+async function fzArchivErstellen() {
+  if (fz.archivLaeuft) return;
+  const nr = ++fz.archivNr;
+  const url = fzMitZr(`api/berichte/archiv?schuelerEintraege=${el("arSchueler").checked}`);
+  const abbruch = new AbortController();
+  fz.archivAbbruch = abbruch;
+  fz.archivLaeuft = true;
+  el("arErstellen").disabled = true;
+  el("arErstellen").textContent = "Archiv wird erstellt …";
+  el("arSchueler").disabled = true;
+  fehlerIn("arFehler", "");
+  // Entscheidung 64: in einem Durchgang, bis zu 15 Minuten.
+  const start = Date.now();
+  const zeige = () => {
+    const s = Math.floor((Date.now() - start) / 1000);
+    el("arStatus").textContent = `Das kann einige Minuten dauern – lass dieses Fenster so lange offen. (${Math.floor(s / 60)}:${pad(s % 60)})`;
+  };
+  zeige();
+  fz.archivUhr = setInterval(zeige, 1000);
+  let zuLange = false;
+  const timer = setTimeout(() => { zuLange = true; abbruch.abort(); }, 15 * 60000);
+  try {
+    const name = await fzDateiLaden(url, "Klassenbuch-Archiv.zip", abbruch);
+    if (nr !== fz.archivNr) return;
+    fz.archivLaeuft = false;
+    dialogZu(el("fzArchivDialog"));
+    toast(`Archiv gespeichert: ${name}`);
+  } catch (f) {
+    if (nr !== fz.archivNr) return;
+    const t = abbruch.signal.aborted
+      ? (zuLange ? "Nach 15 Minuten abgebrochen – bitte einen kürzeren Zeitraum wählen." : "Abgebrochen.")
+      : aktionsFehler(f);
+    if (t !== null) fehlerIn("arFehler", t);
+  } finally {
+    clearTimeout(timer);
+    if (fz.archivAbbruch === abbruch) fz.archivAbbruch = null;
+    if (nr === fz.archivNr) {
+      fz.archivLaeuft = false;
+      fzArchivUhrStopp();
+      el("arStatus").textContent = "";
+      el("arSchueler").disabled = false;
+      el("arErstellen").disabled = fzZeitraumHinweis().zukunft;
+      el("arErstellen").textContent = "Archiv erstellen";
+    }
+  }
+}
+
+/** Abbrechen: läuft das Archiv, wird nur die Anfrage beendet (Dialog bleibt offen), sonst schließen. */
+function fzArchivAbbrechen() {
+  if (fz.archivLaeuft && fz.archivAbbruch) { fz.archivAbbruch.abort(); return; }
+  dialogZu(el("fzArchivDialog"));
 }
 
 // ---------------------------------------------------------------------
@@ -1250,5 +1493,26 @@ function fehlzeitenInit() {
   el("fzPdfDialog").addEventListener("close", () => { fz.pdfNr++; fz.pdfLaeuft = false; fz.pdf = null;
     el("pdErstellen").textContent = "PDF erstellen"; el("pdStatus").textContent = ""; });
   hintergrundSchliesst(el("fzPdfDialog"), () => { if (!fz.pdfLaeuft) dialogZu(el("fzPdfDialog")); });
+
+  // Phase 4.3: CSV und Jahresarchiv
+  el("fzCsvKnopf").addEventListener("click", fzCsvOeffnen);
+  el("csLaden").addEventListener("click", fzCsvLaden);
+  el("csAbbrechen").addEventListener("click", () => dialogZu(el("fzCsvDialog")));
+  for (const r of document.querySelectorAll('input[name="csUmfang"]')) r.addEventListener("change", () => fzCsvPruefen());
+  el("fzCsvDialog").addEventListener("close", () => { fz.csvNr++; fz.csv = null;
+    el("csPruefung").textContent = ""; el("csWarnung").hidden = true; });
+  hintergrundSchliesst(el("fzCsvDialog"), () => { if (!fz.csvLaeuft) dialogZu(el("fzCsvDialog")); });
+
+  el("fzArchivKnopf").addEventListener("click", fzArchivOeffnen);
+  el("arErstellen").addEventListener("click", fzArchivErstellen);
+  el("arAbbrechen").addEventListener("click", fzArchivAbbrechen);
+  // Esc während der Erstellung schließt nicht (sonst liefe das Archiv unsichtbar weiter) – dafür „Abbrechen".
+  el("fzArchivDialog").addEventListener("cancel", (e) => { if (fz.archivLaeuft) e.preventDefault(); });
+  el("fzArchivDialog").addEventListener("close", () => {
+    if (fz.archivAbbruch) fz.archivAbbruch.abort();
+    fz.archivNr++; fz.archivLaeuft = false; fzArchivUhrStopp();
+    el("arStatus").textContent = ""; el("arSchueler").disabled = false;
+  });
+  hintergrundSchliesst(el("fzArchivDialog"), () => { if (!fz.archivLaeuft) dialogZu(el("fzArchivDialog")); });
   hintergrundSchliesst(el("fzEntschDialog"), () => dialogZu(el("fzEntschDialog")));
 }

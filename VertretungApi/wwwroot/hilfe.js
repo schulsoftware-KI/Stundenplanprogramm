@@ -63,7 +63,7 @@ const HI_GRUPPEN = [
  *   { zwischen: "…" }            Zwischenüberschrift
  *   { farben: [[art, text]] }    Aufzählung mit Farbfeld (Farben wie im Plan)
  *   { begriffe: [[wort, text]] } Begriffsliste
- *   { nur: "personal" | "schueler" | "app" | "keineApp", teile: [...] }  nur für diese Fälle
+ *   { nur: "personal" | "schueler" | "admin" | "app" | "keineApp", teile: [...] }  nur für diese Fälle
  * ohneAnmeldung: true = auch vor der Anmeldung lesbar.
  */
 const HI_THEMEN = [
@@ -307,6 +307,19 @@ const HI_THEMEN = [
     ],
   },
   {
+    id: "fehlzeitenCsv", gruppe: "leitung", titel: "Fehlzeiten als CSV",
+    inhalt: [
+      "„Fehlzeiten als CSV …“ in der Übersicht deiner Klasse bzw. Stufe speichert die Summen für die Verwaltung " +
+        "als Tabelle – für Excel, Semikolon-getrennt.",
+      "Eine Zeile je Schüler; in der Oberstufe zusätzlich je Kurs eine Zeile (Spalte „Kurs“, leer = Summe).",
+      "Vorher zeigt der Dialog, wie viele Stunden noch offen oder nicht erfasst sind – die Summen können sich dann " +
+        "noch ändern. Speichern ist trotzdem möglich. Es gilt der Zeitraum, den du oben gewählt hast.",
+      { nur: "admin", teile: ["Als Admin kannst du auch **alle Klassen und Stufen** in einer Datei speichern."] },
+      "Die Datei enthält Schülerdaten: nur auf dienstlich freigegebenen Geräten speichern. Jeder Download wird " +
+        "protokolliert.",
+    ],
+  },
+  {
     id: "schuelerkonten", gruppe: "leitung", titel: "Schülerkonten", nichtAdmin: true,
     inhalt: [
       "Kontomenü → „Schülerpasswörter“: Hier setzt du das Passwort eines Schülerkontos deiner Klasse bzw. Stufe zurück.",
@@ -323,6 +336,7 @@ const HI_THEMEN = [
       "**Sammelanlage:** Lehrkräfte aus dem Grundplan bzw. Schüler je Klasse oder Stufe. Danach die Zugangszettel " +
         "drucken oder als CSV speichern, bevor du die Liste schließt – die Startpasswörter sind danach weg.",
       "**Protokoll:** wer wann was an welchem Konto geändert hat – ohne Passwörter, ein Jahr lang.",
+      "**Downloads:** wer wann welche Datei mit Schülerdaten geladen hat.",
     ],
   },
   {
@@ -330,6 +344,27 @@ const HI_THEMEN = [
     inhalt: [
       "Kontomenü → „Gruppenlisten“: alle Schülergruppen aus dem Plan an einem Ort.",
       "Normalerweise pflegt sie die Lehrkraft der Gruppe; du kannst jede Gruppe ändern.",
+    ],
+  },
+  {
+    id: "jahresarchiv", gruppe: "admin", titel: "Jahresarchiv",
+    inhalt: [
+      "„Jahresarchiv …“ (Klassenbuch → Klassen, Übersicht) erstellt für den gewählten Zeitraum je Klasse der Sek I " +
+        "ein Klassenbuch und je Oberstufenkurs ein Kursheft – als PDF-Dateien in einer Zip-Datei mit Inhaltsverzeichnis.",
+      "Das dauert einige Minuten. Lass das Fenster so lange offen; „Abbrechen“ beendet die Erstellung. Am " +
+        "zuverlässigsten am PC im Schulnetz.",
+      "„Schülereinträge aufnehmen“ ist absichtlich aus – schalte es nur ein, wenn du sie wirklich brauchst.",
+      "Die Datei enthält Schülerdaten aller Klassen: nur auf dienstlich freigegebenen Geräten speichern. Der " +
+        "Download wird protokolliert.",
+    ],
+  },
+  {
+    id: "downloads", gruppe: "admin", titel: "Downloads",
+    inhalt: [
+      "Konten verwalten → „Downloads“ zeigt, wer wann welche Datei mit Schülerdaten geladen hat: Klassenbuch- und " +
+        "Kursheft-PDFs, Fehlzeiten-CSV und Jahresarchive – mit Zeitraum und ob Schülereinträge enthalten waren.",
+      "Filtern kannst du nach Art und nach Person (Teil des Benutzernamens).",
+      "Gespeichert wird nur, was geladen wurde, nicht der Inhalt. Einträge werden nach einem Jahr gelöscht.",
     ],
   },
 ];
@@ -375,6 +410,7 @@ const hiThema = (id) => HI_THEMEN.find((t) => t.id === id) || null;
 function hiNur(nur, r) {
   if (nur === "personal") return r.personal;
   if (nur === "schueler") return r.schueler;
+  if (nur === "admin") return r.admin;
   if (nur === "app") return alsApp();
   if (nur === "keineApp") return !alsApp();
   return true;
@@ -390,7 +426,10 @@ function hiKontext() {
   const r = hiRollen();
   if (hiSichtbar("anmeldung")) return { themen: ["anmelden", "startbildschirm"] };
   if (hiSichtbar("pflicht")) return { themen: ["konto", "anmelden"] };
-  if (hiSichtbar("verwaltung")) return { themen: r.admin ? ["konten", "gruppenlisten"] : ["schuelerkonten"] };
+  if (hiSichtbar("verwaltung")) {
+    if (r.admin && verw.reiter === "downloads") return { themen: ["downloads", "konten"] };
+    return { themen: r.admin ? ["konten", "gruppenlisten", "downloads"] : ["schuelerkonten"] };
+  }
   if (hiSichtbar("klassenbuch")) {
     if (kb.ansicht === "stunde")
       return { themen: ["stundenblatt", "themaHa", "eintraege", "begriffe"],
@@ -413,7 +452,7 @@ function hiKontext() {
       if (o.reiter === "klasse")
         return fz.kAnsicht === "offen"
           ? { themen: ["offeneFaelle", "bewerten"], karte }
-          : { themen: ["uebersicht", "offeneFaelle", "klassenbuchPdf", "begriffe"], karte };
+          : { themen: ["uebersicht", "offeneFaelle", "klassenbuchPdf", "fehlzeitenCsv", "jahresarchiv", "begriffe"], karte };
     }
     return { themen: [], karte };
   }

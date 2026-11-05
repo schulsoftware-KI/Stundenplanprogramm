@@ -180,6 +180,11 @@ public static class FehlzeitenService
         return new FzSummeDto(fehl, ent, offen, unent, versp, minuten, vOffen, vUnent, veranst);
     }
 
+    /// <summary>Phase 4.3 (CSV-Export): dieselbe Zählung für Werte aus einer eigenen Abfrage.</summary>
+    internal static FzSummeDto Summe(IEnumerable<(AnwesenheitStatus Status, int? Minuten, FehlBewertung Bewertung)> werte)
+        => Summe(werte.Select(w => new Zeile(0, 0, default, 0, 0, 0, "", "", "", "",
+            w.Status, w.Minuten, w.Bewertung, null, null, null, null, false)));
+
     /// <summary>Klasse (Sek I) bzw. Stufe (Sek II) eines Schülers für Rechte und Anzeige.</summary>
     private static async Task<(Schueler? S, string? Klasse)> SchuelerMitKlasseAsync(AppDbContext db, int id)
     {
@@ -196,31 +201,34 @@ public static class FehlzeitenService
 
     public static async Task<FzRechteDto> RechteAsync(AppDbContext db, KbNutzer u, DateOnly erfassungAb, bool berichteNurAdmin = false)
     {
-        List<string> klassen;
-        if (u.IstAdmin)
-        {
-            var namen = await db.Lerngruppen.AsNoTracking()
-                .Where(l => l.Typ == LerngruppeTyp.Klasse)
-                .Select(l => l.Bezeichnung)
-                .ToListAsync();
-            var stufen = await db.Schueler.AsNoTracking()
-                .Select(x => x.Stufe)
-                .Distinct()
-                .ToListAsync();
-            klassen = namen
-                .Concat(stufen.Where(st => OberstufenStufen.Contains(st, Cmp)))
-                .Select(k => k.Trim().ToUpperInvariant())
-                .Where(k => k.Length > 0)
-                .Distinct(Cmp)
-                .OrderBy(k => k.Length > 0 && char.IsDigit(k[0]) ? 0 : 1)
-                .ThenBy(k => k, Cmp)
-                .ToList();
-        }
-        else
-        {
-            klassen = u.IstKlassenleitungOderKoordination ? u.Zustaendig.ToList() : new List<string>();
-        }
+        List<string> klassen = u.IstAdmin
+            ? await AlleKlassenUndStufenAsync(db)
+            : u.IstKlassenleitungOderKoordination ? u.Zustaendig.ToList() : new List<string>();
         return new FzRechteDto(u.Kuerzel != null, u.IstAdmin, klassen, erfassungAb, u.IstAdmin || !berichteNurAdmin);
+    }
+
+    /// <summary>
+    /// Alle Klassen (Lerngruppen vom Typ Klasse) und Oberstufen-Stufen mit Schülern – Sek-I-Klassen
+    /// zuerst. Auswahl des Admins; Phase 4.3 auch für den CSV-Export „alle Klassen".
+    /// </summary>
+    internal static async Task<List<string>> AlleKlassenUndStufenAsync(AppDbContext db)
+    {
+        var namen = await db.Lerngruppen.AsNoTracking()
+            .Where(l => l.Typ == LerngruppeTyp.Klasse)
+            .Select(l => l.Bezeichnung)
+            .ToListAsync();
+        var stufen = await db.Schueler.AsNoTracking()
+            .Select(x => x.Stufe)
+            .Distinct()
+            .ToListAsync();
+        return namen
+            .Concat(stufen.Where(st => OberstufenStufen.Contains(st, Cmp)))
+            .Select(k => k.Trim().ToUpperInvariant())
+            .Where(k => k.Length > 0)
+            .Distinct(Cmp)
+            .OrderBy(k => k.Length > 0 && char.IsDigit(k[0]) ? 0 : 1)
+            .ThenBy(k => k, Cmp)
+            .ToList();
     }
 
     /// <summary>„Meine Kurse": Unterrichte der Lehrkraft im heute gültigen Grundplan (mit Klassenbuch).</summary>
@@ -254,7 +262,7 @@ public static class FehlzeitenService
     // =================================================================
 
     /// <summary>Schüler einer Klasse (Sek I) bzw. – ohne Klasse dieses Namens – einer Stufe (Sek II).</summary>
-    private static async Task<(List<int> Ids, bool IstStufe)> KlassenSchuelerAsync(AppDbContext db, string klasse)
+    internal static async Task<(List<int> Ids, bool IstStufe)> KlassenSchuelerAsync(AppDbContext db, string klasse)
     {
         string k = klasse.Trim();
         var lgIds = (await db.Lerngruppen.AsNoTracking().Where(l => l.Typ == LerngruppeTyp.Klasse).ToListAsync())

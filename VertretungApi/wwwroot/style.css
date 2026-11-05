@@ -1672,3 +1672,31 @@ main.klassenbuch > .hi-karte, main.fehlzeiten > .hi-karte { margin-top: 2px; }
 @media print {
   .hi-karte { display: none !important; }
 }
+
+/* =====================================================================
+   Phase 4.3: Fehlzeiten als CSV, Jahresarchiv, Reiter „Downloads"
+   ===================================================================== */
+.fz-pdf-leiste { flex-wrap: wrap; column-gap: 14px; }
+#fzCsvDialog .feld, #fzArchivDialog .feld { margin-top: 4px; }
+#fzCsvDialog .art-wahl .schalter { min-height: 44px; }
+.cs-offen {
+  margin: 10px 0 0 0; padding: 8px 10px; border-left: 4px solid var(--entfall); border-radius: 0 8px 8px 0;
+  background: var(--entfall-t); color: var(--tinte); font-size: 0.86rem; line-height: 1.4;
+}
+#csPruefung, #arStatus { margin: 8px 0 0 0; }
+#csPruefung:empty, #arStatus:empty { display: none; }
+#arStatus { font-variant-numeric: tabular-nums; }
+#fzCsvDialog .knopfreihe .hauptknopf, #fzCsvDialog .knopfreihe .textknopf,
+#fzArchivDialog .knopfreihe .hauptknopf, #fzArchivDialog .knopfreihe .textknopf { min-height: 44px; }
+.d-filter { margin-bottom: 6px; }
+.d-filter input { min-width: 0; }
+/* Konten verwalten: vier Reiter passen auf schmalen Handys in zwei Reihen */
+@media (max-width: 440px) {
+  #verwReiter:has(> :nth-child(4)) { grid-auto-flow: row; grid-template-columns: 1fr 1fr; }
+}
+#dInfo { margin: 6px 2px 8px 2px; }
+@media (min-width: 760px) {
+  .d-filter { grid-template-columns: minmax(0, 15em) minmax(0, 20em); }
+}
+/* Tippflächen ≥ 44 px auch für die Reiter in „Konten verwalten" (wie die Klassenbuch-Reiter) */
+#verwReiter button { min-height: 44px; }

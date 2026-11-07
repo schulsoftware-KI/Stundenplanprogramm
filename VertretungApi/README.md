@@ -553,12 +553,20 @@ Schema-Nachrüstung und braucht keine Migrations.
 ### Probelauf mit PostgreSQL auf dem eigenen PC
 
 1. PostgreSQL installieren (`winget install PostgreSQL.PostgreSQL.17`, Passwort für `postgres` merken).
-   In der „SQL Shell (psql)“ als `postgres`:
+   Bricht der Download mit „403“ ab, den Installer im Browser laden: postgresql.org/download/windows →
+   „Download the installer“ → Version 17, Windows x86-64; Komponenten „PostgreSQL Server“ und „Command Line
+   Tools“, Stack Builder am Ende abwählen (bzw. einfach abbrechen).
+   In der „SQL Shell (psql)“ als `postgres` (viermal Enter, dann das `postgres`-Passwort):
    ```sql
    CREATE ROLE vertretung LOGIN PASSWORD 'eigenes-passwort' CREATEDB;
    CREATE DATABASE vertretung OWNER vertretung;
    CREATE DATABASE vertretung_dev OWNER vertretung;
    ```
+   **Passwort nur aus Buchstaben, Ziffern und Bindestrichen.** Die psql-Konsole unter Windows arbeitet mit
+   Codeseite 850 (Warnung „Konsolencodeseite …“): Sonderzeichen wie `§` oder Umlaute kommen dort anders an als
+   später aus der API – die Anmeldung scheitert dann mit `28P01: Passwort-Authentifizierung … fehlgeschlagen`.
+   Abhilfe: `ALTER ROLE vertretung WITH PASSWORD 'nur-buchstaben-und-ziffern';` und dasselbe Passwort in
+   `ConnectionStrings:Postgres` eintragen. (Ein `;` würde zudem die Verbindungsangabe zerschneiden.)
 2. Grundlinie erzeugen (siehe „Migrations“) und neu bauen.
 3. **Entwicklung auf PostgreSQL** (alle Funktionen mit Pseudodaten – prüft die Abfragen auf PostgreSQL):
    ```powershell

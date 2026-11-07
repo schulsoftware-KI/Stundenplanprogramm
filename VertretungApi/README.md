@@ -540,12 +540,15 @@ Die Migrations gelten nur für PostgreSQL; `Data/EntwurfsFabrik.cs` baut dafür 
 Npgsql (ohne Datenbankverbindung). Die API bringt die Datenbank **beim Start selbst** auf den neuesten
 Stand (`Data/DatenbankStart.cs`) – `dotnet ef database update` ist nicht nötig.
 
-Einmalig (Grundlinie) und danach **nach jeder Änderung am Datenmodell** im Ordner `VertretungApi`:
+Die erste Migration **„Grundlinie“** liegt im Repo (`Data/Migrations`, erzeugt am 07.11.2026 mit EF Core 10)
+und legt eine leere Datenbank vollständig an. **Nach jeder Änderung am Datenmodell** kommt eine weitere
+Migration dazu – im Ordner `VertretungApi`:
 ```powershell
 dotnet tool install --global dotnet-ef        # nur einmal
-dotnet ef migrations add Grundlinie -o Data/Migrations
+dotnet ef migrations add <Name> -o Data/Migrations
 ```
-(spätere Namen z. B. `Zugehoerigkeit_Gueltigkeit`). Den Ordner `Data/Migrations` ins Repo übernehmen.
+(Namen z. B. `Zugehoerigkeit_Gueltigkeit`; „Grundlinie“ ist schon vergeben). Den Ordner `Data/Migrations`
+danach ins Repo übernehmen.
 Fehlt nach einer Modelländerung die Migration, bricht der Start mit „pending changes“ und einem Hinweis
 ab, statt mit unvollständigem Schema zu laufen. SQLite in der Entwicklung bleibt bei EnsureCreated +
 Schema-Nachrüstung und braucht keine Migrations.
@@ -567,7 +570,8 @@ Schema-Nachrüstung und braucht keine Migrations.
    später aus der API – die Anmeldung scheitert dann mit `28P01: Passwort-Authentifizierung … fehlgeschlagen`.
    Abhilfe: `ALTER ROLE vertretung WITH PASSWORD 'nur-buchstaben-und-ziffern';` und dasselbe Passwort in
    `ConnectionStrings:Postgres` eintragen. (Ein `;` würde zudem die Verbindungsangabe zerschneiden.)
-2. Grundlinie erzeugen (siehe „Migrations“) und neu bauen.
+2. Neu bauen. Die Migration „Grundlinie“ liegt im Repo – `dotnet-ef` braucht man erst, wenn sich das
+   Datenmodell ändert (siehe „Migrations“).
 3. **Entwicklung auf PostgreSQL** (alle Funktionen mit Pseudodaten – prüft die Abfragen auf PostgreSQL):
    ```powershell
    $env:Database__Provider = "Postgres"
@@ -585,6 +589,18 @@ Schema-Nachrüstung und braucht keine Migrations.
    dotnet run --launch-profile Produktionstest
    ```
    Anmelden mit `admin` + Startpasswort, eigenes Passwort festlegen. Seeds antworten jetzt mit 404.
+
+**Startet die API nicht, weil es mit PostgreSQL hakt,** steht die Ursache mit Abhilfe in der Zeile `crit:` im Log
+(`Data/DatenbankStart.cs`, ohne Passwort):
+
+| Log-Meldung | Häufige Ursache | Abhilfe |
+|---|---|---|
+| Anmeldung abgelehnt (28P01/28000) | falsches Passwort, Sonderzeichen im Passwort, Umgebungsvariable überstimmt die Datei | `ConnectionStrings:Postgres` prüfen, ggf. `ALTER ROLE … WITH PASSWORD '…';` |
+| Datenbank gibt es nicht (3D000) | Tippfehler bei `Database=` oder nicht angelegt | `CREATE DATABASE … OWNER …;` |
+| Rechte fehlen (42501) | Datenbank gehört `postgres` statt dem API-Benutzer | `ALTER DATABASE … OWNER TO …;` |
+| Tabellen nicht aus den Migrations (42P07) | Datenbank früher per EnsureCreated gefüllt | neue, leere Datenbank verwenden |
+| Keine Verbindung / nicht rechtzeitig geantwortet | PostgreSQL-Dienst läuft nicht, falscher Host/Port | Dienst „postgresql-x64-17“ starten |
+| nicht auf den Stand gebracht | Modell geändert, Migration fehlt | `dotnet ef migrations add <Name> -o Data/Migrations` |
 
 ### Notfallzugang: Admin-Konto über die Konsole
 

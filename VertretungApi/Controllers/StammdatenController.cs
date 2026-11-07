@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using VertretungApi.Data;
+using VertretungApi.Helpers;
 using VertretungApi.Model;
 using VertretungApi.Services;
 
@@ -9,8 +10,8 @@ namespace VertretungApi.Controllers;
 
 // =====================================================================
 //  Stammdaten (Phase 1): Pseudodaten erzeugen + Lerngruppen/Schüler lesen.
-//  Seed ist per X-Api-Key geschützt; die Lese-Endpunkte sind in Phase 1
-//  noch offen (nur Pseudodaten!) und werden in Phase 1C (Auth) geschützt.
+//  Seed ist per X-Api-Key geschützt und nur in der Entwicklung erreichbar (Phase 5.1);
+//  die Lese-Endpunkte brauchen eine Anmeldung (Personal).
 // =====================================================================
 
 [ApiController]
@@ -32,15 +33,16 @@ public class StammdatenController : ControllerBase
     /// Lerngruppen (neueste Version); sonst frei erfundene Daten wie in Phase 1B.
     /// quelle=synthetisch erzwingt den alten Weg.
     /// </summary>
+    // Phase 5.1: nur in der Entwicklung (im Echtbetrieb 404) und nur, solange keine echten
+    // Schüler in der Datenbank stehen.
+    [NurEntwicklung]
     [HttpPost("seed/pseudodaten")]
     public IActionResult Seed([FromQuery] string? schuljahr, [FromQuery] int? seed, [FromQuery] string? quelle)
     {
-        var erwartet = _cfg["Api:PushKey"];
-        if (!string.IsNullOrEmpty(erwartet))
-        {
-            if (!Request.Headers.TryGetValue("X-Api-Key", out var key) || key != erwartet)
-                return Unauthorized("Ungültiger oder fehlender X-Api-Key.");
-        }
+        if (!ApiSchluessel.Gueltig(Request, _cfg))      // Phase 5.1: Vergleich in konstanter Zeit
+            return Unauthorized(ApiSchluessel.Fehlertext);
+        if (_db.Schueler.Any(x => !x.IstPseudo))
+            return Conflict(new { fehler = "Es sind echte Schülerdaten vorhanden – Pseudodaten werden nicht erzeugt." });
 
         string sj = string.IsNullOrWhiteSpace(schuljahr)
             ? (_cfg["DefaultSchuljahr"] ?? "2026/27")

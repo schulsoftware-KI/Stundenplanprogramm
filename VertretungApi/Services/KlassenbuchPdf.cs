@@ -26,7 +26,8 @@ public static class KlassenbuchPdf
         QuestPDF.Settings.License = LicenseType.Community;
         // Freitext (Thema, Hausaufgabe, Einträge) kann Zeichen enthalten, die keine Schrift
         // kennt (z. B. Emoji vom Handy). Dann lieber ein leeres Kästchen als ein Abbruch.
-        QuestPDF.Settings.CheckIfAllTextGlyphsAreAvailable = false;
+        // (Seit QuestPDF 2026.9 heißt die Einstellung ThrowOnMissingTextGlyphs.)
+        QuestPDF.Settings.ThrowOnMissingTextGlyphs = false;
     }
 
     private const float Klein = 7.5f;

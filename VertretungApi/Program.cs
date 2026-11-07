@@ -1,16 +1,44 @@
+using System.Net;
 using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using VertretungApi.Data;
 using VertretungApi.Helpers;
 using VertretungApi.Services;
 
-var builder = WebApplication.CreateBuilder(args);
+// ---------------------------------------------------------------------------
+//  Phase 5.1: Befehl statt Serverstart.
+//    admin-anlegen [benutzername] – Admin-Konto anlegen bzw. Passwort zurücksetzen
+//    (Services/Notfallzugang.cs). Alle übrigen Argumente gehen wie gewohnt an ASP.NET Core.
+// ---------------------------------------------------------------------------
+string? befehl = null, befehlWert = null;
+var hostArgs = args;
+if (args.Length > 0 && args[0].Equals(Notfallzugang.Befehl, StringComparison.OrdinalIgnoreCase))
+{
+    befehl = Notfallzugang.Befehl;
+    befehlWert = args.Length > 1 && !args[1].StartsWith('-') ? args[1] : null;
+    hostArgs = args.Skip(befehlWert == null ? 1 : 2).ToArray();
+}
+
+var builder = WebApplication.CreateBuilder(hostArgs);
+
+// Phase 5.1: Echtbetrieb = jede Umgebung außer Development. Ungeeignete Einstellungen
+// (Schlüssel aus dem Repo, Woche:OhneLogin, Standardpasswort der Datenbank …) beenden
+// den Start mit einer Meldung, statt unsicher zu laufen. Der Befehl admin-anlegen braucht
+// nur die Datenbank und wird deshalb nicht geprüft.
+bool produktiv = Betrieb.Produktiv(builder.Environment);
+var pruefung = Betrieb.Pruefen(builder.Configuration, produktiv);
+if (befehl == null && pruefung.Fehler.Count > 0)
+{
+    Betrieb.FehlerAusgeben(pruefung.Fehler);
+    return 1;
+}
 
 builder.Services.AddControllers();
-builder.Services.AddOpenApi();   // OpenAPI-Dokument unter /openapi/v1.json
+builder.Services.AddOpenApi();   // OpenAPI-Dokument unter /openapi/v1.json (nur Entwicklung)
 
 // ---------------------------------------------------------------------------
 //  EF Core mit umschaltbarem Provider (SQLite dev / PostgreSQL prod).
@@ -30,12 +58,35 @@ builder.Services.AddDbContext<AppDbContext>(opt =>
         opt.UseSqlite(conn ?? "Data Source=vertretung.db");
 });
 
-// CORS für die spätere PWA (Lehrer-/Schüler-App). Für die Entwicklung offen;
-// produktiv auf die konkrete App-Herkunft einschränken.
-builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
-    p.AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin()));
+// CORS: Die PWA kommt vom selben Server und braucht kein CORS (auch der Desktop nicht – er
+// ist kein Browser). In der Entwicklung offen wie bisher; im Echtbetrieb nur für die unter
+// "Cors:Herkuenfte" eingetragenen Adressen (Standard: keine).
+var corsHerkuenfte = builder.Configuration.GetSection("Cors:Herkuenfte").Get<string[]>() ?? Array.Empty<string>();
+bool corsAktiv = !produktiv || corsHerkuenfte.Length > 0;
+if (corsAktiv)
+    builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
+    {
+        if (produktiv) p.WithOrigins(corsHerkuenfte).AllowAnyHeader().AllowAnyMethod();
+        else p.AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin();
+    }));
 
-// JWT-Authentifizierung (Phase 1C).
+// Phase 5.1: hinter einem Reverse Proxy (nginx, IIS, Caddy …) die echte Absenderadresse und
+// das Schema (https) aus X-Forwarded-For/-Proto übernehmen – nur von bekannten Proxys.
+// Ohne das sähe die Login-Bremse alle Anfragen mit der Adresse des Proxys.
+bool proxyAktiv = builder.Configuration.GetValue("Proxy:Aktiv", false);
+if (proxyAktiv)
+    builder.Services.Configure<ForwardedHeadersOptions>(o =>
+    {
+        o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+        foreach (var ip in Betrieb.BekannteProxys(builder.Configuration, out _))
+        {
+            o.KnownProxies.Add(ip);
+            if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                o.KnownProxies.Add(ip.MapToIPv6());   // Kestrel meldet IPv4 teils als ::ffff:a.b.c.d
+        }
+    });
+
+// JWT-Authentifizierung (Phase 1C). Im Echtbetrieb ist Jwt:Key durch die Startprüfung gesetzt.
 var jwtKey = builder.Configuration["Jwt:Key"] ?? "dev-geheimschluessel-bitte-aendern-min-32-zeichen!";
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(o =>
@@ -85,7 +136,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
 // Zugriff auf Pläne (Phase 2, Schritt 4): nur Personal. Mit "Woche:OhneLogin": true in
 // appsettings.json sind Lehrer-/Klassen-/Kurspläne auch ohne Anmeldung abrufbar
-// (Änderung erst nach Neustart der API wirksam).
+// (Änderung erst nach Neustart der API; im Echtbetrieb verweigert die Startprüfung das).
 bool planOhneLogin = builder.Configuration.GetValue<bool>("Woche:OhneLogin");
 builder.Services.AddAuthorization(o =>
 {
@@ -97,61 +148,60 @@ builder.Services.AddSingleton<LoginBremse>();
 
 var app = builder.Build();
 
-// Entwicklung: Schema bei Start sicherstellen. Produktiv stattdessen Migrations
-// verwenden (siehe README) – EnsureCreated und Migrations nicht mischen.
-using (var scope = app.Services.CreateScope())
+// Datenbank anlegen bzw. auf den Stand des Programms bringen, Protokolle aufräumen
+// (Data/DatenbankStart.cs).
+if (!DatenbankStart.Ausfuehren(app, produktiv))
+    return 1;
+
+if (befehl == Notfallzugang.Befehl)
+    return await Notfallzugang.AusfuehrenAsync(app.Services, befehlWert);
+
+bool httpsErzwingen = app.Configuration.GetValue("Betrieb:HttpsErzwingen", true);
+app.Logger.LogInformation(
+    "Betrieb: {Modus} · Datenbank {Provider} · Proxy {Proxy} · HTTPS erzwingen {Https}",
+    produktiv ? $"Echtbetrieb ({app.Environment.EnvironmentName})" : "Entwicklung",
+    provider, proxyAktiv ? "an" : "aus", produktiv && httpsErzwingen ? "an" : "aus");
+foreach (var hinweis in pruefung.Hinweise)
+    app.Logger.LogWarning("Einstellungen: {Hinweis}", hinweis);
+
+// Phase 5.1: zuerst die Angaben des Proxys übernehmen (Absenderadresse, https).
+if (proxyAktiv)
+    app.UseForwardedHeaders();
+
+// Phase 5.1: Kommt eine Anfrage mit X-Forwarded-For an, die nicht ausgewertet wurde, steht
+// die API hinter einem Proxy, der nicht eingetragen ist – dann bremst die Login-Bremse alle
+// gemeinsam. Einmal im Log melden (ohne Adressen). Anfragen von localhost (z. B. der
+// Cloudflare-Testtunnel) sind ausgenommen; die Login-Bremse zählt sie ohnehin nicht.
+int proxyWarnung = 0;
+app.Use(async (ctx, next) =>
 {
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    var log = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Datenbank");
-    db.Database.EnsureCreated();
+    if (proxyWarnung == 0
+        && ctx.Request.Headers.ContainsKey("X-Forwarded-For")
+        && ctx.Connection.RemoteIpAddress is IPAddress absender
+        && !IPAddress.IsLoopback(absender.IsIPv4MappedToIPv6 ? absender.MapToIPv4() : absender)
+        && Interlocked.Exchange(ref proxyWarnung, 1) == 0)
+    {
+        app.Logger.LogWarning(proxyAktiv
+            ? "Anfrage über einen Proxy, der nicht in Proxy:BekannteProxys steht – seine Angaben werden ignoriert. Adresse des Proxys eintragen (README, Produktionsmodus)."
+            : "Anfrage über einen Proxy, aber Proxy:Aktiv ist aus – alle Anfragen erscheinen mit der Adresse des Proxys. Proxy:Aktiv und Proxy:BekannteProxys setzen (README, Produktionsmodus).");
+    }
+    await next();
+});
 
-    // Phase 2, Schritt 5: fehlende Tabellen/Spalten in einer bestehenden Entwicklungs-DB
-    // ergänzen, damit sie nicht bei jeder Schemaänderung gelöscht werden muss.
-    if (app.Configuration.GetValue("Database:SchemaNachruesten", true))
-    {
-        try
-        {
-            foreach (var m in SchemaNachruestung.Ausfuehren(db))
-                log.LogInformation("Schema nachgerüstet: {Meldung}", m);
-        }
-        catch (Exception ex)
-        {
-            log.LogError(ex, "Schema-Nachrüstung fehlgeschlagen. Abhilfe: vertretung.db löschen, API neu starten, Seeds erneut ausführen.");
-        }
-    }
-
-    // Protokoll der Kontenverwaltung nur begrenzt aufbewahren (Datensparsamkeit).
-    try
-    {
-        int geloescht = KontenService.ProtokollAufraeumen(db, app.Configuration.GetValue("Konten:ProtokollTage", 365));
-        if (geloescht > 0) log.LogInformation("{Anzahl} alte Protokolleinträge gelöscht.", geloescht);
-        // Phase 4.2: Download-Protokoll mit derselben Frist.
-        int downloads = BerichtService.ProtokollAufraeumen(db, app.Configuration.GetValue("Konten:ProtokollTage", 365));
-        if (downloads > 0) log.LogInformation("{Anzahl} alte Einträge im Download-Protokoll gelöscht.", downloads);
-    }
-    catch (Exception ex)
-    {
-        log.LogWarning(ex, "Kontenprotokoll konnte nicht aufgeräumt werden.");
-    }
-
-    // Phase 3.4: Löschfrist für Klassenbucheinträge – vorbereitet, Standard aus (0).
-    // Die Frist legt die Schule in Phase 5 mit der/dem Datenschutzbeauftragten fest.
-    try
-    {
-        int tage = app.Configuration.GetValue("Klassenbuch:EintraegeLoeschenNachTagen", 0);
-        int geloescht = KlassenbuchEintragService.Aufraeumen(db, tage);
-        if (geloescht > 0) log.LogInformation("{Anzahl} Klassenbucheinträge nach Ablauf der Frist gelöscht.", geloescht);
-    }
-    catch (Exception ex)
-    {
-        log.LogWarning(ex, "Alte Klassenbucheinträge konnten nicht gelöscht werden.");
-    }
-}
-
-if (app.Environment.IsDevelopment())
+if (!produktiv)
     app.MapOpenApi();
 
-app.UseCors();
+// Phase 5.1: Im Echtbetrieb nur verschlüsselt. HSTS sagt dem Browser „künftig nur https“
+// (nicht für localhost); die Umleitung greift, sobald ein https-Port bekannt ist (eigener
+// Endpunkt in Kestrel bzw. X-Forwarded-Proto vom Proxy).
+if (produktiv && httpsErzwingen)
+{
+    app.UseHsts();
+    app.UseHttpsRedirection();
+}
+
+if (corsAktiv)
+    app.UseCors();
 
 // Sicherheitsheader (Phase 2, Schritt 4). Die PWA lädt nur eigene Dateien (keine
 // fremden Skripte/Schriften); API-Antworten mit Personendaten werden nicht im
@@ -200,4 +250,16 @@ app.UseAuthorization();
 
 app.MapControllers();
 
+// Phase 5.1: Lebenszeichen für Überwachung/Proxy – ohne Anmeldung, ohne Daten.
+app.MapGet("/api/gesundheit", async (AppDbContext db) =>
+{
+    bool ok;
+    try { ok = await db.Database.CanConnectAsync(); }
+    catch { ok = false; }
+    return ok
+        ? Results.Ok(new { status = "ok" })
+        : Results.Json(new { status = "Datenbank nicht erreichbar" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+}).AllowAnonymous();
+
 app.Run();
+return 0;

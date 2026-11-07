@@ -8,3 +8,14 @@ obj/
 vertretung.db
 vertretung.db-shm
 vertretung.db-wal
+
+# Echtbetrieb (Phase 5.1): Einstellungen mit Schlüsseln/Passwörtern nie ins Repo.
+# Vorlage ohne Werte: VertretungApi/appsettings.Production.Beispiel.json
+appsettings.Production.json
+appsettings.*.lokal.json
+# Datenbanksicherungen und ihre Einstellungen (VertretungApi/Betrieb/)
+*.dump
+*.dump.gpg
+*.dump.7z
+sicherung.conf
+sicherung.einstellungen.ps1

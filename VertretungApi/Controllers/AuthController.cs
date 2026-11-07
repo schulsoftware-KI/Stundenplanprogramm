@@ -20,7 +20,7 @@ namespace VertretungApi.Controllers;
 //    POST api/auth/ueberall-abmelden       – eigene Tokens auf allen Geräten ungültig machen
 //    POST api/auth/abmelden/{benutzername} – dasselbe für ein anderes Konto (Admin)
 //    POST api/auth/passwort                – eigenes Passwort ändern (Schritt 5) -> neues JWT
-//    POST api/auth/seed-konten             – Testkonten anlegen (X-Api-Key)
+//    POST api/auth/seed-konten             – Testkonten anlegen (X-Api-Key, nur Entwicklung)
 //
 //  Schritt 5: Gesperrte Konten können sich nicht anmelden. Konten mit Startpasswort bzw.
 //  zurückgesetztem Passwort (MussPasswortAendern) dürfen nach der Anmeldung nur das
@@ -198,16 +198,19 @@ public class AuthController : ControllerBase
     /// nach erneutem Seeden der Pseudodaten einfach noch einmal aufrufen – die Konten werden
     /// dann neu verknüpft.
     /// </summary>
+    // Phase 5.1: nur in der Entwicklung (im Echtbetrieb 404) und nur, solange keine echten
+    // Schüler in der Datenbank stehen – Testkonten mit bekannten Passwörtern gehören nie in
+    // eine Datenbank mit echten Daten. Das erste Admin-Konto im Echtbetrieb entsteht über
+    // den Befehl „admin-anlegen“ (Services/Notfallzugang.cs).
+    [NurEntwicklung]
     [AllowAnonymous]
     [HttpPost("seed-konten")]
     public async Task<IActionResult> SeedKonten()
     {
-        var erwartet = _cfg["Api:PushKey"];
-        if (!string.IsNullOrEmpty(erwartet))
-        {
-            if (!Request.Headers.TryGetValue("X-Api-Key", out var key) || key != erwartet)
-                return Unauthorized("Ungültiger oder fehlender X-Api-Key.");
-        }
+        if (!ApiSchluessel.Gueltig(Request, _cfg))      // Phase 5.1: Vergleich in konstanter Zeit
+            return Unauthorized(ApiSchluessel.Fehlertext);
+        if (await _db.Schueler.AnyAsync(x => !x.IstPseudo))
+            return Conflict(new { fehler = "Es sind echte Schülerdaten vorhanden – Testkonten werden nicht angelegt." });
 
         // Testkonten mit bewusst einfachen Passwörtern (nur Entwicklung, ohne Pflicht zum Ändern).
         var standard = new (string Name, string Pw, BenutzerRolle Rolle, string? Kuerzel, string? Zustaendig)[]

@@ -48,6 +48,13 @@ API dann unter `http://localhost:5080`, OpenAPI-Doc unter `http://localhost:5080
   Entwicklung; produktiv mit EF-Migrations auf `false`).
 - `Konten:ProtokollTage` (365) – so lange bleiben Einträge im Kontenprotokoll; ältere werden
   beim Start gelöscht.
+- `Betrieb:HttpsErzwingen` (`true`) – im Echtbetrieb HSTS und Umleitung auf https (Phase 5.1).
+- `Proxy:Aktiv` (`false`) / `Proxy:BekannteProxys` (`[]`) – hinter einem Reverse Proxy die echte
+  Absenderadresse übernehmen (Phase 5.1).
+- `Cors:Herkuenfte` (`[]`) – im Echtbetrieb erlaubte fremde Herkünfte (normalerweise keine).
+
+Im **Echtbetrieb** (jede Umgebung außer Development) gelten zusätzliche Regeln – siehe
+„Produktionsmodus (Phase 5.1)“ unten.
 
 Auf **PostgreSQL** umstellen: `Database:Provider` auf `Postgres` setzen und
 `ConnectionStrings:Postgres` anpassen.
@@ -127,7 +134,7 @@ Benutzer getrennt; beim Abmelden gelöscht).
 | POST | `/api/auth/ueberall-abmelden` | alle Anmeldungen des eigenen Kontos beenden | JWT |
 | POST | `/api/auth/abmelden/{benutzername}` | alle Anmeldungen eines Kontos beenden (z. B. Handy verloren) | JWT Admin |
 | POST | `/api/auth/passwort` | eigenes Passwort ändern `{ altesPasswort, neuesPasswort, angemeldetBleiben }` → neues Token | JWT |
-| POST | `/api/auth/seed-konten` | Testkonten anlegen bzw. Schülerkonten neu verknüpfen | `X-Api-Key` |
+| POST | `/api/auth/seed-konten` | Testkonten anlegen bzw. Schülerkonten neu verknüpfen (nur Entwicklung, nicht bei echten Schülern) | `X-Api-Key` |
 
 - **Personal** = Admin, Lehrer, Klassenlehrer, Stufenkoordination.
 - **PlanLesen** = nur Personal; mit `Woche:OhneLogin: true` für alle (auch ohne Anmeldung).
@@ -489,19 +496,151 @@ In der PWA: Knöpfe „Fehlzeiten als CSV …“ (Klasse/Stufe, Übersicht; Admi
 „Jahresarchiv …“ (Admin) neben „Klassenbuch als PDF …“; Reiter „Downloads“ in „Konten verwalten“ (Admin).
 Hilfethemen dazu in `hilfe.js`. Service-Worker v15.
 
-## Produktiv: Migrations statt EnsureCreated
+## Produktionsmodus (Phase 5.1)
 
-`EnsureCreated` ist nur für die Entwicklung gedacht und verträgt sich **nicht** mit Migrations.
-Für den Schulserver (PostgreSQL) stattdessen EF-Core-Migrations verwenden:
+**Echtbetrieb ist jede Umgebung außer `Development`** (`ASPNETCORE_ENVIRONMENT`). Ohne Angabe startet
+ASP.NET Core als `Production` – das ist der sichere Standard für den Server. Visual Studio und
+`dotnet run` setzen über `Properties/launchSettings.json` weiterhin `Development`.
 
+### Was sich im Echtbetrieb ändert
+
+| | Entwicklung | Echtbetrieb |
+|---|---|---|
+| Startprüfung | – | Start bricht ab bei fehlendem/zu kurzem/Repo-`Jwt:Key` (mind. 32 Zeichen) oder `Api:PushKey` (mind. 24 Zeichen), gleichen Schlüsseln, `Woche:OhneLogin: true`, fehlender Postgres-Verbindung oder Passwort `postgres` bzw. Platzhalter aus der Vorlage |
+| Seeds (`/api/seed/pseudodaten`, `/api/auth/seed-konten`) | erlaubt, solange keine echten Schüler da sind (sonst 409) | 404 |
+| Erstes Admin-Konto | `seed-konten` | Befehl `admin-anlegen` (siehe unten) |
+| Datenbank | SQLite: EnsureCreated + Schema-Nachrüstung | PostgreSQL mit **EF-Migrations** (`Data/Migrations`); ohne Migrations startet die API nicht |
+| HTTPS | – | HSTS + Umleitung auf https (`Betrieb:HttpsErzwingen`) |
+| CORS | offen | nur `Cors:Herkuenfte` (Standard: keine – die PWA kommt vom selben Server) |
+| OpenAPI (`/openapi/v1.json`) | ja | nein |
+
+Immer (beide Modi): Push-Schlüssel wird in konstanter Zeit verglichen (`Helpers/ApiSchluessel.cs`);
+`GET /api/gesundheit` → `{ status: "ok" }` bzw. 503, ohne Anmeldung und ohne Daten (für Überwachung/Proxy);
+beim Start eine Zeile „Betrieb: … · Datenbank … · Proxy … · HTTPS erzwingen …“ und ggf. Hinweise
+(z. B. `AllowedHosts` noch „*“, SQLite im Echtbetrieb).
+
+### Schlüssel und Passwörter
+
+Nie ins Repo (es ist öffentlich). Zwei Wege, beliebig kombinierbar:
+- **Umgebungsvariablen** (doppelter Unterstrich statt Doppelpunkt): `Jwt__Key`, `Api__PushKey`,
+  `ConnectionStrings__Postgres`, `Database__Provider=Postgres`.
+- **`appsettings.Production.json`** neben der API (steht in `.gitignore`). Vorlage ohne Werte:
+  `appsettings.Production.Beispiel.json` – kopieren, umbenennen, Werte eintragen. Die Platzhalter
+  „HIER-EIGEN…“ erkennt die Startprüfung.
+
+Zufälligen Schlüssel erzeugen (PowerShell, zweimal ausführen – je einer für `Jwt:Key` und `Api:PushKey`):
+```powershell
+$b = New-Object byte[] 48; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
 ```
-dotnet tool install --global dotnet-ef
-dotnet ef migrations add Init
-dotnet ef database update
-```
+Den `Api:PushKey` im Desktop unter „Online-Einstellungen…“ eintragen.
 
-Dann in `Program.cs` den `EnsureCreated`-Block entfernen bzw. durch `db.Database.Migrate()`
-ersetzen und `Database:SchemaNachruesten` auf `false` setzen.
+### Migrations (PostgreSQL)
+
+Die Migrations gelten nur für PostgreSQL; `Data/EntwurfsFabrik.cs` baut dafür den Kontext immer mit
+Npgsql (ohne Datenbankverbindung). Die API bringt die Datenbank **beim Start selbst** auf den neuesten
+Stand (`Data/DatenbankStart.cs`) – `dotnet ef database update` ist nicht nötig.
+
+Einmalig (Grundlinie) und danach **nach jeder Änderung am Datenmodell** im Ordner `VertretungApi`:
+```powershell
+dotnet tool install --global dotnet-ef        # nur einmal
+dotnet ef migrations add Grundlinie -o Data/Migrations
+```
+(spätere Namen z. B. `Zugehoerigkeit_Gueltigkeit`). Den Ordner `Data/Migrations` ins Repo übernehmen.
+Fehlt nach einer Modelländerung die Migration, bricht der Start mit „pending changes“ und einem Hinweis
+ab, statt mit unvollständigem Schema zu laufen. SQLite in der Entwicklung bleibt bei EnsureCreated +
+Schema-Nachrüstung und braucht keine Migrations.
+
+### Probelauf mit PostgreSQL auf dem eigenen PC
+
+1. PostgreSQL installieren (`winget install PostgreSQL.PostgreSQL.17`, Passwort für `postgres` merken).
+   In der „SQL Shell (psql)“ als `postgres`:
+   ```sql
+   CREATE ROLE vertretung LOGIN PASSWORD 'eigenes-passwort' CREATEDB;
+   CREATE DATABASE vertretung OWNER vertretung;
+   CREATE DATABASE vertretung_dev OWNER vertretung;
+   ```
+2. Grundlinie erzeugen (siehe „Migrations“) und neu bauen.
+3. **Entwicklung auf PostgreSQL** (alle Funktionen mit Pseudodaten – prüft die Abfragen auf PostgreSQL):
+   ```powershell
+   $env:Database__Provider = "Postgres"
+   $env:ConnectionStrings__Postgres = "Host=localhost;Database=vertretung_dev;Username=vertretung;Password=eigenes-passwort"
+   dotnet run
+   ```
+   Log: „Datenbank auf den neuesten Stand gebracht: …_Grundlinie“. Dann wie gewohnt Grundplan und einen
+   Vertretungstag veröffentlichen, `seed/pseudodaten`, `auth/seed-konten`, in der App testen. Die beiden
+   `$env:`-Zeilen gelten nur für dieses Terminal.
+4. **Echtbetrieb lokal** (Startprüfung, Sperren, Notfallzugang): `appsettings.Production.json` aus der
+   Vorlage anlegen (Datenbank `vertretung`, eigene Schlüssel, `"HttpsErzwingen": false` für den Test über
+   http), dann in einem **neuen** Terminal (ohne die `$env:`-Zeilen):
+   ```powershell
+   dotnet run --launch-profile Produktionstest -- admin-anlegen     # zeigt ein Startpasswort
+   dotnet run --launch-profile Produktionstest
+   ```
+   Anmelden mit `admin` + Startpasswort, eigenes Passwort festlegen. Seeds antworten jetzt mit 404.
+
+### Notfallzugang: Admin-Konto über die Konsole
+
+```powershell
+dotnet VertretungApi.dll admin-anlegen [benutzername]        # Server (veröffentlichte Fassung)
+dotnet run -- admin-anlegen [benutzername]                   # Entwicklung
+```
+Legt das Konto als Admin an (Standardname `admin`) bzw. gibt einem vorhandenen **Admin**-Konto ein neues
+Startpasswort, entsperrt es und beendet alle Anmeldungen. Konten anderer Rollen werden nicht angefasst.
+Das Startpasswort steht nur auf der Konsole; bei der ersten Anmeldung muss ein eigenes festgelegt werden.
+Kontenprotokoll: Akteur „Konsole“. Gedacht für das erste Konto im Echtbetrieb und für „Admin-Passwort
+vergessen“.
+
+### HTTPS und Reverse Proxy
+
+- **Direkt mit Zertifikat** (ohne Proxy), z. B. in `appsettings.Production.json`:
+  ```json
+  "Kestrel": { "Endpoints": {
+    "Http":  { "Url": "http://*:80" },
+    "Https": { "Url": "https://*:443",
+               "Certificate": { "Path": "C:\\Vertretung\\zertifikat.pfx", "Password": "…" } } } }
+  ```
+- **Hinter einem Reverse Proxy** (nginx, IIS, Caddy, Relais), der TLS übernimmt:
+  `"Proxy": { "Aktiv": true, "BekannteProxys": ["10.0.0.5"] }` (Adresse des Proxys; ein Proxy auf
+  demselben Rechner braucht keinen Eintrag). Die API übernimmt dann Absenderadresse und `https` aus
+  `X-Forwarded-For`/`-Proto` – sonst sähe die **Login-Bremse** alle Anfragen mit der Adresse des Proxys und
+  sperrte nach 20 Fehlversuchen alle gemeinsam. Kommen Proxy-Angaben an, die nicht ausgewertet werden,
+  steht einmal eine Warnung im Log. Die Umleitung von http auf https übernimmt am besten der Proxy (sonst
+  `"https_port": 443` setzen).
+- `AllowedHosts` auf die eigene Adresse beschränken, z. B. `"klassenbuch.meine-schule.de;localhost"`.
+- Der Desktop pusht an die https-Adresse („Online-Einstellungen…“).
+
+### Logs
+
+Die API schreibt keine Namen oder Inhalte ins Log (Kategorien, Zahlen, Klassen-/Kursbezeichnungen).
+Im Echtbetrieb EF-Befehle nur ab `Warning` (Vorlage). In der Postgres-Verbindung **kein**
+`Include Error Detail=true` – sonst können Datenbankwerte in Fehlermeldungen landen (die Startprüfung weist
+darauf hin).
+
+### Sicherung und Rücksicherung
+
+Skripte in `Betrieb/` (Einstellungen jeweils in einer Datei neben dem Skript, nicht im Repo):
+- **Windows:** `sicherung.ps1` – `pg_dump` + 7-Zip (AES-256, verschlüsselte Dateinamen). Einstellungen in
+  `sicherung.einstellungen.ps1` (Beispiel im Kopf des Skripts).
+- **Linux:** `sicherung.sh` – `pg_dump` + gpg (AES-256). Einstellungen in `sicherung.conf`.
+
+Beide: ohne Angabe = neue Sicherung `vertretung_JJJJ-MM-TT_hhmmss.dump.7z|.gpg`, Sicherungen älter als
+`Tage` (30) werden gelöscht; bricht `pg_dump` ab, bleibt keine halbe Datei liegen. Mit `-Pruefen` bzw.
+`--pruefen` = **Rücksicherungstest**: neueste Sicherung entschlüsseln, in die Testdatenbank
+`vertretung_pruefung` zurückspielen, Datensätze zählen (Konten, Schüler, Lektionen, Anwesenheiten,
+Einträge …), Testdatenbank wieder löschen; Fehler, wenn keine Konten darin sind. Empfehlung: täglich
+sichern (Aufgabenplanung/cron), monatlich prüfen. Die **Passphrase** (mind. 12 Zeichen, nur Buchstaben,
+Ziffern, Bindestriche) getrennt vom Server aufbewahren – ohne sie ist jede Sicherung wertlos.
+Sicherungen enthalten Schülerdaten: Ordner nur für Administratoren lesbar.
+
+**Ernstfall – Datenbank aus einer Sicherung wiederherstellen** (API vorher beenden):
+```powershell
+& "C:\Program Files\7-Zip\7z.exe" e vertretung_2026-11-07_023000.dump.7z -oC:\Temp\rueck   # fragt nach der Passphrase
+dropdb -U vertretung vertretung
+createdb -U vertretung vertretung
+pg_restore -U vertretung --no-owner --no-privileges -d vertretung C:\Temp\rueck\sicherung.dump
+```
+(Linux: `gpg --decrypt datei.dump.gpg > sicherung.dump`, dann dieselben drei Befehle.) Danach die Datei
+`sicherung.dump` löschen und die API starten.
 
 ## Nächste Schritte
 
@@ -509,5 +648,6 @@ ersetzen und `Database:SchemaNachruesten` auf `false` setzen.
 2. **Auswertungen (Phase 4):** ~~4.1 am Bildschirm~~, ~~4.2 Klassenbuch/Kursheft als PDF~~,
    ~~4.3 CSV-Export, Jahresarchiv, Download-Protokoll~~. Genaues SchILD-Importformat in Phase 5.
 3. **Web-Push:** Benachrichtigung der Apps bei Änderung.
-4. **Produktiv:** Schlüssel aus Umgebungsvariablen, EF-Migrations, PostgreSQL, CORS auf die
-   App-Adresse einschränken, Login-Bremse hinter dem Reverse-Proxy je echter Adresse.
+4. ~~**Produktiv:** Schlüssel aus Umgebungsvariablen, EF-Migrations, PostgreSQL, CORS auf die
+   App-Adresse einschränken, Login-Bremse hinter dem Reverse-Proxy je echter Adresse.~~ Phase 5.1.
+5. **Phase 5.2:** SchILD-NRW-3-Schnittstelle (`.dat`-Dateien) – Import per Desktop statt Pseudodaten-Seed.

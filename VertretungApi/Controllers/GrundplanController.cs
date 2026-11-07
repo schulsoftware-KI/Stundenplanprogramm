@@ -36,12 +36,8 @@ public class GrundplanController : ControllerBase
     [HttpPost("push")]
     public async Task<IActionResult> Push([FromBody] GrundplanPushDto dto)
     {
-        var erwartet = _cfg["Api:PushKey"];
-        if (!string.IsNullOrEmpty(erwartet))
-        {
-            if (!Request.Headers.TryGetValue("X-Api-Key", out var key) || key != erwartet)
-                return Unauthorized("Ungültiger oder fehlender X-Api-Key.");
-        }
+        if (!ApiSchluessel.Gueltig(Request, _cfg))      // Phase 5.1: Vergleich in konstanter Zeit
+            return Unauthorized(ApiSchluessel.Fehlertext);
 
         if (string.IsNullOrWhiteSpace(dto.Schuljahr)) return BadRequest("Schuljahr fehlt.");
         if (dto.GueltigAb == default) return BadRequest("GueltigAb fehlt.");

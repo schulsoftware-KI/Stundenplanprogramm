@@ -155,12 +155,22 @@ public class AppDbContext : DbContext
         // App zeigte die UTC-Zeit als Ortszeit (eine bzw. zwei Stunden zu früh). Beim Lesen
         // deshalb als UTC kennzeichnen. Betrifft Konten und Kontenprotokoll (Phase 2, Schritt 5);
         // DateTimeOffset/DateOnly sind nicht betroffen. Keine Schemaänderung.
+        // Phase 5.1 (PostgreSQL): Npgsql speichert DateTime als „timestamp with time zone“ und
+        // nimmt dort nur Werte mit Kind = Utc an. Beim Schreiben (auch bei Vergleichswerten in
+        // Abfragen) deshalb ebenfalls als UTC kennzeichnen; Ortszeit wird umgerechnet.
         var alsUtc = new ValueConverter<DateTime, DateTime>(
-            v => v,
+            v => ZuUtc(v),
             v => DateTime.SpecifyKind(v, DateTimeKind.Utc));
         foreach (var entity in b.Model.GetEntityTypes())
             foreach (var prop in entity.GetProperties())
                 if (prop.ClrType == typeof(DateTime) || prop.ClrType == typeof(DateTime?))
                     prop.SetValueConverter(alsUtc);
     }
+
+    private static DateTime ZuUtc(DateTime v) => v.Kind switch
+    {
+        DateTimeKind.Utc => v,
+        DateTimeKind.Local => v.ToUniversalTime(),
+        _ => DateTime.SpecifyKind(v, DateTimeKind.Utc)
+    };
 }

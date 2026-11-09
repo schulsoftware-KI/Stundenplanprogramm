@@ -103,6 +103,10 @@ namespace Stundenplan_V2.Raumplanung
         public const string Zusatzraum = "Zusatzraum";    // zusätzlicher Raum zum Ausweichen (z. B. Halle beim Schwimmen)
         public const string Fest = "fest";                // Zeile mit Fix (X)
         public const string OhneRaum = "ohne Raum";
+        // Planeditor (R2): Stunde wurde verschoben, ihr Raum ist noch nicht verteilt
+        // (Räume werden dort nur auf Nachfrage verteilt). Nicht in „Alle" – die Verteilung
+        // selbst erzeugt diese Herkunft nie.
+        public const string Offen = "offen";
 
         /// <summary>Reihenfolge in Übersichten.</summary>
         public static readonly string[] Alle =
@@ -129,6 +133,13 @@ namespace Stundenplan_V2.Raumplanung
         public bool Uebernommen { get; set; }
 
         public string FixText => Fix ? "X" : "";
+
+        public RaumZeile Kopie(string? plan = null) => new()
+        {
+            Plan = plan ?? Plan, WTag = WTag, Stunde = Stunde, UNr = UNr, Lehrer = Lehrer, Fach = Fach,
+            Klassen = Klassen, Raum = Raum, Wunschraum = Wunschraum, Herkunft = Herkunft, Fix = Fix,
+            Hinweis = Hinweis, Uebernommen = Uebernommen
+        };
 
         /// <summary>Zeilen, die in der Vorschau unter „nur Ausweich und Probleme" erscheinen.</summary>
         public bool IstPruefFall =>
@@ -182,6 +193,34 @@ namespace Stundenplan_V2.Raumplanung
         public bool RaumplanVorhanden { get; set; }
 
         public List<string> Hinweise { get; } = new();
+
+        /// <summary>
+        /// Kopie mit eigener Belegung und eigenem Raumplan (Planeditor, R2): UV, FGR und
+        /// Raumverzeichnis werden geteilt (nur gelesen), Slots und Raumplan-Zeilen ersetzt.
+        /// </summary>
+        public RaumEingabe MitPlan(string planSpalte,
+                                   IEnumerable<(string WTag, int Stunde, List<int> UNrn)> slots,
+                                   IEnumerable<RaumZeile> raumplan)
+        {
+            var k = new RaumEingabe
+            {
+                PlanPfad = PlanPfad,
+                PlanSpalte = planSpalte,
+                FgrPraefixe = FgrPraefixe,
+                VerzeichnisAusBlatt = VerzeichnisAusBlatt,
+                RaumplanVorhanden = RaumplanVorhanden
+            };
+            k.PlanSpalten.AddRange(PlanSpalten);
+            foreach (var kv in Unterrichte) k.Unterrichte[kv.Key] = kv.Value;
+            foreach (var kv in FgrAnzahl) k.FgrAnzahl[kv.Key] = kv.Value;
+            foreach (var s in slots)
+            {
+                k.Slots.Add(s);
+                if (!k.Tage.Contains(s.WTag, StringComparer.OrdinalIgnoreCase)) k.Tage.Add(s.WTag);
+            }
+            k.Raumplan.AddRange(raumplan);
+            return k;
+        }
     }
 
     /// <summary>Ergebnis eines Verteilungslaufs.</summary>

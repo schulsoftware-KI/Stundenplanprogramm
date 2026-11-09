@@ -91,6 +91,18 @@
                       ToolTip="Zusaetzlicher Plan (reine Ansicht): zeigt je Zeitslot alle Bloecke EINES Fachs (ueber alle Klassen/Lehrer) und wie viele davon parallel liegen. Kein Raumlimit — nur Parallelitaets-Zaehler. Klick auf einen Unterricht stellt Lehrer- und Klassenplan darauf um."
                       Checked="ChkFaecherPlan_Changed" Unchecked="ChkFaecherPlan_Changed"/>
 
+            <!-- Raumplan (R2, PlanEditorDialog_Raeume.cs): Raum-Abzeichen in Lehrer-/Klassenplan
+                 bzw. eigene Raum-Ansicht. Die Raumdaten werden erst beim Einschalten gelesen. -->
+            <CheckBox x:Name="ChkRaeume" Content="Räume zeigen"
+                      VerticalAlignment="Center" Margin="0,0,20,0"
+                      ToolTip="Zeigt in Lehrer- und Klassenplan je Stunde den Raum (oben rechts). Grün = gespeichert (Blatt „Raumplan“), grau = verteilt (noch kein Raumplan gespeichert), blau = fest, orange * = geändert und noch nicht gespeichert, gelb ? = Raum offen (Stunde verschoben), rot = kein freier Raum. Räume werden nur auf Nachfrage verteilt: Verschieben und Tauschen ändern keinen Raum, verschobene Stunden bleiben offen bis „Räume verteilen“. Rechtsklick auf eine Stunde: Raum ändern."
+                      Checked="ChkRaeume_Changed" Unchecked="ChkRaeume_Changed"/>
+
+            <CheckBox x:Name="ChkRaumPlan" Content="Raumplan zeigen"
+                      VerticalAlignment="Center" Margin="0,0,20,0"
+                      ToolTip="Zusaetzlicher Plan (reine Ansicht): zeigt je Zeitslot, welcher Unterricht in dem gewaehlten Raum liegt. Klick auf einen Unterricht stellt Lehrer- und Klassenplan darauf um."
+                      Checked="ChkRaumPlan_Changed" Unchecked="ChkRaumPlan_Changed"/>
+
             <CheckBox x:Name="ChkVergleichsModus" Content="Vergleichsmodus (2 Lösungen)"
                       VerticalAlignment="Center" Margin="0,0,10,0" Checked="ChkVergleichsModus_Changed" Unchecked="ChkVergleichsModus_Changed"/>
             <TextBlock x:Name="LblVglLoesung" Text="2. Lösung:" FontWeight="Bold" VerticalAlignment="Center"
@@ -120,7 +132,7 @@
             <Run Text="Links Lehrerplan, rechts Klassenplan. Klick auf eine Zelle zeigt im anderen Plan die zugehoerige Klasse bzw. den Lehrer. Ziehen: leere Zelle = verschieben, belegte Zelle gleicher Stundenzahl = tauschen, Parkbereich = entplanen. Ressourcenkonflikte werden hart gesperrt; Qualitaetsprobleme gelb gewarnt."/>
             <LineBreak/>
             <Run FontWeight="SemiBold" Foreground="#333"
-                 Text="Rechtsklick auf eine Stunde (nur im Modus &quot;Einzelstunde&quot;): fixieren bzw. Fixierung entfernen. Das wird sofort in die Tabelle &quot;Fix UNrn&quot; und in die UV-Spalte &quot;Fix (X)&quot; geschrieben; die Excel-Datei wird nach dem Schliessen des Editors automatisch neu eingelesen."/>
+                 Text="Rechtsklick auf eine Stunde (nur im Modus &quot;Einzelstunde&quot;): fixieren bzw. Fixierung entfernen. Das wird sofort in die Tabelle &quot;Fix UNrn&quot; und in die UV-Spalte &quot;Fix (X)&quot; geschrieben; die Excel-Datei wird nach dem Schliessen des Editors automatisch neu eingelesen. Mit &quot;Räume zeigen&quot; zusaetzlich: Raum ändern. Verschobene Stunden bekommen erst mit &quot;Räume verteilen&quot; einen Raum; gespeichert wird mit &quot;Räume speichern&quot; bzw. &quot;Uebernehmen&quot;."/>
         </TextBlock>
 
         <!-- Hauptbereich: Lehrerplan | Klassenplan | Vergleich-Vorher | Vergleich-Nachher | KlVgl-Vorher | KlVgl-Nachher -->
@@ -145,13 +157,38 @@
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
             <!-- ANGEHEFTETE PLAENE (beliebig viele Lehrer-/Klassenpläne
                  zusätzlich zur normalen Auswahl oben, nebeneinander scrollbar
                  über ScrollEditAnsicht, alle live editierbar auf derselben
                  _belegung — siehe AnhefteTile()/ZeichneAlleAngehefteten(). -->
-            <StackPanel x:Name="PnlAngeheftet" Grid.Column="8" Orientation="Horizontal"/>
+            <StackPanel x:Name="PnlAngeheftet" Grid.Column="9" Orientation="Horizontal"/>
+
+            <!-- RAUM-PLAN (R2, reine Ansicht, siehe ZeichneRaumplanGrid in
+                 PlanEditorDialog_Raeume.cs): je Zeitslot der Unterricht im gewaehlten
+                 Raum, nach der live verteilten Raumbelegung der Arbeitskopie. -->
+            <Border Grid.Column="8" x:Name="BrdRaumPlan" BorderBrush="#CCC" BorderThickness="1"
+                    Margin="4,0,4,0" Background="#FBFBFB" Visibility="Collapsed">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="4" Height="32">
+                        <TextBlock Text="Raum:" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <Button x:Name="BtnVorigerRaum" Content="&#9664;" Width="28" VerticalAlignment="Center"
+                                Margin="0,0,2,0" ToolTip="Voriger Raum" Click="BtnVorigerRaum_Click"/>
+                        <ComboBox x:Name="CboRaum" Width="140" VerticalAlignment="Center" Margin="0,0,2,0"
+                                  SelectionChanged="CboRaum_SelectionChanged"/>
+                        <Button x:Name="BtnNaechsterRaum" Content="&#9654;" Width="28" VerticalAlignment="Center"
+                                ToolTip="Naechster Raum" Click="BtnNaechsterRaum_Click"/>
+                    </StackPanel>
+                    <TextBlock x:Name="LblRaumplanKopf" DockPanel.Dock="Top" Text="RAUMPLAN"
+                               FontWeight="Bold" Height="20"
+                               HorizontalAlignment="Center" Margin="0,0,0,2"/>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <Grid x:Name="RaumplanGrid"/>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
 
             <!-- FACHGRUPPEN-PLAN (reine Ansicht, siehe ZeichneEinFachgruppenGrid).
                  Zeigt je Zeitslot ALLE Bloecke, die einen Raum der gewaehlten
@@ -539,6 +576,12 @@
                 <Button x:Name="BtnReset"       Content="Zuruecksetzen" Width="120" Margin="0,0,6,0" Click="BtnReset_Click"/>
                 <Button x:Name="BtnUebernehmen" Content="Uebernehmen"   Width="180" Margin="0,0,6,0" Click="BtnUebernehmen_Click"/>
                 <Button x:Name="BtnSchliessen"  Content="Schliessen"    Width="100" Margin="0,0,20,0" Click="BtnSchliessen_Click"/>
+                <Button x:Name="BtnRaeumeVerteilen" Content="Räume verteilen" Padding="10,0" Margin="0,0,6,0"
+                        Visibility="Collapsed" Click="BtnRaeumeVerteilen_Click"
+                        ToolTip="Gibt den offenen (verschobenen) Stunden einen freien Raum – wie Knopf 25 „Behalten und ergänzen“. Alle übrigen Räume bleiben, wie sie sind. Gibt es für die Lösung noch keine Räume: Vorschlag für die ganze Lösung. Gespeichert wird erst mit „Räume speichern“ bzw. „Uebernehmen“."/>
+                <Button x:Name="BtnRaeumeSpeichern" Content="Räume speichern" Padding="10,0" Margin="0,0,20,0"
+                        Visibility="Collapsed" Click="BtnRaeumeSpeichern_Click"
+                        ToolTip="Schreibt die Räume dieser Lösung (inkl. der Änderungen von Hand) ins Blatt „Raumplan“. Nur solange keine Stunde verschoben wurde – sonst werden die Räume mit „Uebernehmen“ für die neue Lösung gespeichert (nur mit eingeschalteter Raum-Ansicht)."/>
 
                 <!-- Zoom-Bedienung. Der eigentliche Effekt haengt am
                      ZoomTransform des Wurzel-Grids (siehe oben) und wird in

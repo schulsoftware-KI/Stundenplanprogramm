@@ -39,12 +39,22 @@ namespace Stundenplan_V2.Raumplanung
         // =====================================================
 
         public static RaumEingabe Lies(string planPfad, string? planSpalte)
+            => Lies(planPfad, planSpalte, mitLoes: true);
+
+        /// <summary>
+        /// Wie <see cref="Lies(string, string?)"/>, aber ohne das Blatt „Lös" – für den
+        /// Planeditor (R2), der die Belegung selbst mitbringt (<see cref="RaumEingabe.MitPlan"/>).
+        /// </summary>
+        public static RaumEingabe LiesOhnePlan(string planPfad)
+            => Lies(planPfad, null, mitLoes: false);
+
+        private static RaumEingabe Lies(string planPfad, string? planSpalte, bool mitLoes)
         {
             var e = new RaumEingabe { PlanPfad = planPfad };
             using var wb = new XLWorkbook(planPfad);
 
             LiesUv(wb, e);
-            LiesLoes(wb, e, planSpalte);
+            if (mitLoes) LiesLoes(wb, e, planSpalte);
             LiesFgr(wb, e);
             e.VerzeichnisAusBlatt = LiesRaeume(wb);
             LiesRaumplan(wb, e);

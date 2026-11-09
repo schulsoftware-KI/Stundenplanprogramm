@@ -356,6 +356,8 @@ namespace Stundenplan_V2
             ChkIgnorierteZeigen.IsChecked    = cfg.IgnorierteZeigen;
             ChkFilterVerletzungen.IsChecked  = cfg.FilterVerletzungen;
             ChkAusweichSuche.IsChecked       = cfg.AusweichSuche;
+            ChkRaeume.IsChecked              = cfg.RaeumeZeigen;
+            _raumStartAuswahl                = cfg.Raum;
 
             _parkKontextLehrer = cfg.ParkkontextLehrer;
 
@@ -382,6 +384,9 @@ namespace Stundenplan_V2
 
             if (cfg.Faecherplan && ChkFaecherPlan.IsChecked != true)
                 ChkFaecherPlan.IsChecked = true;
+
+            if (cfg.Raumplan && ChkRaumPlan.IsChecked != true)
+                ChkRaumPlan.IsChecked = true;
 
             if (cfg.Vergleichsmodus)
             {
@@ -528,6 +533,9 @@ namespace Stundenplan_V2
                     IgnorierteZeigen   = ChkIgnorierteZeigen.IsChecked == true,
                     FilterVerletzungen = ChkFilterVerletzungen.IsChecked == true,
                     AusweichSuche      = ChkAusweichSuche.IsChecked == true,
+                    RaeumeZeigen       = ChkRaeume.IsChecked == true,
+                    Raumplan           = ChkRaumPlan.IsChecked == true,
+                    Raum               = CboRaum.SelectedItem as string ?? _raumStartAuswahl ?? "",
                     ParkkontextLehrer  = _parkKontextLehrer,
                     DiagFilter         = _diagFilterKriterien != null ? new List<int>(_diagFilterKriterien) : new List<int>(),
                     DiagFilterUnd      = _diagFilterUnd,
@@ -582,6 +590,8 @@ namespace Stundenplan_V2
             var sol = _loesungen.FirstOrDefault(l => l.label == label);
             if (sol.belegung == null) return;
 
+            MerkeRaumStandVorWechsel(label);   // R2: vor dem Umladen, solange _belegung noch die alte ist
+
             _aktLabel = label;
             _blocks = sol.blocks;
 
@@ -622,6 +632,7 @@ namespace Stundenplan_V2
             else ZeichneBeideGrids();
             ZeichneParkbereich();
             SetStatus("Lösung '" + label + "' geladen.", false);
+            AktualisiereRaumKnopf();
             AktualisiereDiagFenster();
             AktualisiereUvFenster();
         }
@@ -2005,6 +2016,7 @@ namespace Stundenplan_V2
             ZeichneKlasseGrid();
             ZeichneFachgruppenGrid();
             ZeichneFaecherGrid();
+            ZeichneRaumplanGrid();
             ZeichneAlleAngehefteten();
         }
 
@@ -2734,6 +2746,7 @@ namespace Stundenplan_V2
             ZeichneAlleAngehefteten();
             ZeichneFachgruppenGrid();
             ZeichneFaecherGrid();
+            ZeichneRaumplanGrid();
         }
 
         // true = Auswahl wurde tatsaechlich geaendert (SelectionChanged laeuft).
@@ -2994,6 +3007,10 @@ namespace Stundenplan_V2
 
             if (auswahl == null) return;
 
+            // Raumstand zur Arbeitskopie abgleichen (R2, ohne zu verteilen) – einmal je Plan,
+            // nicht je Zelle; nur in bearbeitbaren Plänen, nicht in Vorher/Nachher-Vergleichen.
+            if (RaeumeInZellen && interaktiv && ReferenceEquals(belegung, _belegung)) SichereRaumStand();
+
             // Spalten: 1 (Stunde-Label) + je Tag
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
             foreach (var _ in _tage)
@@ -3116,9 +3133,11 @@ namespace Stundenplan_V2
             // UniformGrid (1 Zeile) verteilt parallele Bloecke gleichmaessig auf die volle Zellbreite
             var hStack = new System.Windows.Controls.Primitives.UniformGrid { Rows = 1 };
 
+            // Raum-Abzeichen (R2) nur in bearbeitbaren Plänen der Arbeitskopie, nicht im Vergleich.
+            bool raeume = RaeumeInZellen && interaktiv && _raumStand != null && ReferenceEquals(belegung, _belegung);
             foreach (int b in blockIdxInSlot.Take(MaxTeileProZelle))
             {
-                var teil = BaueTeilbereich(b, slotIdx, lehrerAnsicht, interaktiv);
+                var teil = BaueTeilbereich(b, slotIdx, lehrerAnsicht, interaktiv, raeume ? auswahl : null, raeume);
                 hStack.Children.Add(teil);
             }
 
@@ -3169,7 +3188,8 @@ namespace Stundenplan_V2
         }
 
         // Ein Teilbereich = ein Block in diesem Slot (Drag-Quelle + Klick-Sync)
-        private Border BaueTeilbereich(int blockIdx, int slotIdx, bool lehrerAnsicht, bool interaktiv = true)
+        private Border BaueTeilbereich(int blockIdx, int slotIdx, bool lehrerAnsicht, bool interaktiv = true,
+                                       string raumAuswahl = null, bool raeume = false)
         {
             var block = _blocks[blockIdx];
             // HARTE Kollision (Lehrer-/Klassen-Konflikt) — z.B. ein Lehrer mit
@@ -3250,27 +3270,10 @@ namespace Stundenplan_V2
             tb.Inlines.Add(new System.Windows.Documents.Run(lehrer + "\n") { Foreground = Brushes.DarkSlateGray, FontWeight = FontWeights.SemiBold });
             tb.Inlines.Add(new System.Windows.Documents.Run("UNr " + block.UNr + "  " + block.Zeilentext) { FontSize = 10, Foreground = Brushes.Gray });
 
-            FrameworkElement inhalt = tb;
-
-            if (istFixiert)
-            {
-                // Kleines blaues "F" oben rechts: zeigt, dass diese Stunde im
-                // Fix-UNr-Plan steht (nur im Plan-Editor-Grid sichtbar).
-                var fixGrid = new Grid();
-                fixGrid.Children.Add(tb);
-                var fLabel = new TextBlock
-                {
-                    Text = "F",
-                    FontSize = 11,
-                    FontWeight = FontWeights.Bold,
-                    Foreground = new SolidColorBrush(Color.FromRgb(0x10, 0x4A, 0xE0)),
-                    HorizontalAlignment = HorizontalAlignment.Right,
-                    VerticalAlignment = VerticalAlignment.Top,
-                    Margin = new Thickness(0, -2, 1, 0)
-                };
-                fixGrid.Children.Add(fLabel);
-                inhalt = fixGrid;
-            }
+            // Oben rechts: Raum-Abzeichen (R2, PlanEditorDialog_Raeume.cs) und das kleine
+            // blaue "F" für Stunden im Fix-UNr-Plan (nur im Plan-Editor-Grid sichtbar).
+            var raumAbzeichen = raeume ? BaueRaumAbzeichen(blockIdx, slotIdx, raumAuswahl, lehrerAnsicht) : null;
+            FrameworkElement inhalt = BaueTeilInhaltMitEcke(tb, istFixiert, raumAbzeichen);
 
             // Zweizonig: Textflaeche als eigene Border (Fachfarbe) INNERHALB der
             // Teilbereich-Border, deren Padding als Klassenfarbe stehen bleibt.
@@ -3357,7 +3360,11 @@ namespace Stundenplan_V2
                 e.Handled = true;
                 return;
             }
-            if (RbEinzel.IsChecked != true || _aendereFixUNrCallback == null)
+            // Fixieren/NuHo nur im Modus "Einzelstunde" mit Callback; "Raum ändern" (R2),
+            // sobald Räume angezeigt werden.
+            bool fixMenue = RbEinzel.IsChecked == true && _aendereFixUNrCallback != null;
+            bool raumMenue = RaeumeBenoetigt && arr.Length > 1 && arr[1] >= 0;
+            if (!fixMenue && !raumMenue)
             {
                 e.Handled = true; // Im Block-Modus / ohne Callback kein Kontextmenü
                 return;
@@ -3369,40 +3376,50 @@ namespace Stundenplan_V2
             bool istFixiert = _slots[slotIdx].FixUNrn.Contains(block.UNr);
 
             var menu = new ContextMenu();
-            var item = new MenuItem
+            if (fixMenue)
             {
-                Header = istFixiert
-                    ? $"Fixierung von UNr {block.UNr} entfernen"
-                    : $"UNr {block.UNr} hier fixieren"
-            };
-            item.Click += (s2, e2) => UmschalteFixierung(blockIdx, slotIdx, istFixiert);
-            menu.Items.Add(item);
-
-            // NuHos der Lehrer dieses Blocks anzeigen (nutzbare Hohlstunden).
-            foreach (var lehrer in block.Teile.Select(t => t.Lehrer)
-                                              .Where(l => !string.IsNullOrWhiteSpace(l))
-                                              .Distinct())
-            {
-                string lh = lehrer;
-                var nuhoItem = new MenuItem { Header = $"NuHos von {lh} anzeigen" };
-                nuhoItem.Click += (s3, e3) =>
+                var item = new MenuItem
                 {
-                    var erg = NuHoAnalyse.BerechneFuerLehrer(
-                        lh, _belegung, _blocks, _slots, _bewParam.LehrerStammdaten);
-
-                    string txt = erg.VberWstd <= 0
-                        ? $"{lh}: keine Vertretungsbereitschaft (Vber Wstd = 0) – keine NuHos."
-                        : erg.Slots.Count == 0
-                            ? $"{lh}: Vber Wstd = {erg.VberWstd}, aber 0 nutzbare Hohlstunden."
-                            : $"{lh}: Vber Wstd = {erg.VberWstd}, NuHo Wstd = {erg.NuHoWstd}\n" +
-                              string.Join("\n", erg.Slots
-                                  .OrderBy(x => x.wtag).ThenBy(x => x.stunde)
-                                  .Select(x => $"   {x.wtag} – {x.stunde}. Std"));
-
-                    MessageBox.Show(txt, "Nutzbare Hohlstunden (NuHo)",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    Header = istFixiert
+                        ? $"Fixierung von UNr {block.UNr} entfernen"
+                        : $"UNr {block.UNr} hier fixieren"
                 };
-                menu.Items.Add(nuhoItem);
+                item.Click += (s2, e2) => UmschalteFixierung(blockIdx, slotIdx, istFixiert);
+                menu.Items.Add(item);
+
+                // NuHos der Lehrer dieses Blocks anzeigen (nutzbare Hohlstunden).
+                foreach (var lehrer in block.Teile.Select(t => t.Lehrer)
+                                                  .Where(l => !string.IsNullOrWhiteSpace(l))
+                                                  .Distinct())
+                {
+                    string lh = lehrer;
+                    var nuhoItem = new MenuItem { Header = $"NuHos von {lh} anzeigen" };
+                    nuhoItem.Click += (s3, e3) =>
+                    {
+                        var erg = NuHoAnalyse.BerechneFuerLehrer(
+                            lh, _belegung, _blocks, _slots, _bewParam.LehrerStammdaten);
+
+                        string txt = erg.VberWstd <= 0
+                            ? $"{lh}: keine Vertretungsbereitschaft (Vber Wstd = 0) – keine NuHos."
+                            : erg.Slots.Count == 0
+                                ? $"{lh}: Vber Wstd = {erg.VberWstd}, aber 0 nutzbare Hohlstunden."
+                                : $"{lh}: Vber Wstd = {erg.VberWstd}, NuHo Wstd = {erg.NuHoWstd}\n" +
+                                  string.Join("\n", erg.Slots
+                                      .OrderBy(x => x.wtag).ThenBy(x => x.stunde)
+                                      .Select(x => $"   {x.wtag} – {x.stunde}. Std"));
+
+                        MessageBox.Show(txt, "Nutzbare Hohlstunden (NuHo)",
+                            MessageBoxButton.OK, MessageBoxImage.Information);
+                    };
+                    menu.Items.Add(nuhoItem);
+                }
+            }
+
+            if (raumMenue) FuegeRaumMenueHinzu(menu, blockIdx, slotIdx);
+            if (menu.Items.Count == 0)
+            {
+                e.Handled = true;
+                return;
             }
 
             bd.ContextMenu = menu;
@@ -3485,11 +3502,13 @@ namespace Stundenplan_V2
             bool ausLehrerPlan = _maybeDrag.Length > 2 && _maybeDrag[2] == 1;
             _maybeDrag = null;
 
-            // Details anzeigen
+            // Details anzeigen (mit den Räumen dieser Stunde, R2)
             ZeigeDetails(blockIdx);
+            ErgaenzeRaumDetails(blockIdx, slotIdx);
 
             // Klick-Synchronisation: anderen Plan auf zugehörige(n) Klasse/Lehrer setzen
             SynchronisiereAnderenPlan(blockIdx, ausLehrerPlan);
+            SpringeZuRaum(blockIdx, slotIdx);
 
             // Tauschvorschläge (klassenintern) fuer beide Ansichten.
             LeereVerschiebungen();
@@ -3936,6 +3955,11 @@ namespace Stundenplan_V2
                 {
                     CboKlasse.SelectedIndex = idx; // ZeichneKlasseGrid via SelectionChanged
                     ZeichneLehrerGrid();
+                    // Reine Ansichten (Fachgruppen-, Fächer-, Raumplan) zeigen sonst bis zum
+                    // nächsten Neuzeichnen noch den Stand vor dem Tausch.
+                    ZeichneFachgruppenGrid();
+                    ZeichneFaecherGrid();
+                    ZeichneRaumplanGrid();
                     ZeichneAlleAngehefteten();
                     ZeichneParkbereich();
                     return;
@@ -8465,6 +8489,7 @@ namespace Stundenplan_V2
                 for (int s = 0; s < S; s++)
                     _belegung[b, s] = _belegungOriginal[b, s];
 
+            VerwerfeRaumAenderungen();   // Räume von Hand (R2) gehören zum Zurücksetzen dazu
             ZeichneBeideGrids();
             ZeichneParkbereich();
             LeereTauschvorschlaege();
@@ -8505,6 +8530,15 @@ namespace Stundenplan_V2
             while (vorhandene.Contains(basis + "_man" + n)) n++;
             string neuLabel = basis + "_man" + n;
 
+            // Räume (R2): nur mit eingeschalteter Raum-Ansicht; bei offenen Stunden vorher
+            // nachfragen. „Abbrechen" bricht das Übernehmen ab, bevor etwas geschrieben wird.
+            var raumZeilen = RaeumeFuerUebernahme(out bool raumAbbruch);
+            if (raumAbbruch)
+            {
+                SetStatus("Uebernehmen abgebrochen.", false);
+                return;
+            }
+
             // Das Uebernehmen schreibt die Excel-Datei und laedt anschliessend
             // die neue Loesung — beides synchron auf dem UI-Thread und je nach
             // Dateigroesse spuerbar lang. Ohne Rueckmeldung sieht das Fenster
@@ -8524,12 +8558,15 @@ namespace Stundenplan_V2
             try
             {
                 _uebernehmenCallback?.Invoke(neuLabel, (int[,])_belegung.Clone(), _blocks);
+                // Raumplan für die neue Lösung schreiben (R2) – VOR dem Umschalten.
+                string raumInfo = UebernehmeRaeumeFuer(neuLabel, raumZeilen);
                 // Lokale Lösungsliste ergänzen, damit man weiter editieren kann
                 _loesungen.Add((neuLabel, (int[,])_belegung.Clone(), _blocks));
                 CboLoesung.Items.Add(neuLabel);
                 // Direkt auf die neue Lösung umschalten: lädt _belegung neu und zeichnet.
                 CboLoesung.SelectedItem = neuLabel;
-                SetStatus("Uebernommen als '" + neuLabel + "' und geladen (Lös + Diag aktualisiert).", false);
+                SetStatus("Uebernommen als '" + neuLabel + "' und geladen (Lös + Diag aktualisiert)." +
+                          (raumInfo != null ? " " + raumInfo : ""), false);
             }
             catch (Exception ex)
             {

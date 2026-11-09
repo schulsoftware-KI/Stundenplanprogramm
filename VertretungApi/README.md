@@ -729,8 +729,38 @@ Nur Desktop, **keine API- und keine Schemaänderung, es wird nichts gesendet.** 
   anlegen“) aus der UV angelegt – danach in Excel prüfen. Räume aus der UV, die im Blatt fehlen, werden unten
   angehängt; vorhandene Zeilen ändert das Programm nie. Zusätzliche Räume (z. B. ein freier Raum ohne Klasse)
   dürfen eingetragen werden und dienen dann als Ausweichraum.
-- **Später:** R2 Räume im Planeditor anzeigen/ändern; R3 Vertretungsmodul (Raumvertretung, Raumsperre) und App
-  (echter Raum statt „Fachraum vor Stammraum“, braucht eine EF-Migration).
+- **Später:** R3 Vertretungsmodul (Raumvertretung, Raumsperre) und App (echter Raum statt „Fachraum vor
+  Stammraum“, braucht eine EF-Migration).
+
+### Räume im Planeditor (Schritt R2, Desktop)
+
+Code: `src/PlanEditorDialog_Raeume.cs` (partielle Klasse des Planeditors), Einstellungen in `EdCfg`
+(`RaeumeZeigen`, `Raumplan`, `Raum`). Die Raumdaten (UV, FGR, Räume, Raumplan) werden erst gelesen, wenn eine
+der beiden Raum-Ansichten eingeschaltet wird. **Ohne Raum-Ansicht verhält sich der Editor wie vorher** (auch beim
+Uebernehmen); Verschieben, Tauschvorschläge und die Fachraum-Limits aus FGR (harte Sperre, Fachgruppenplan,
+Meldungen) sind unverändert – die Räume sperren und warnen nie.
+
+- **„Räume zeigen“:** Lehrer- und Klassenplan zeigen je Stunde oben rechts ein Raum-Abzeichen (bei mehreren
+  Räumen „RSh1 +1“, Tooltip mit allen Räumen). Farbe: **grün** = wie im Blatt „Raumplan“ gespeichert,
+  **grau** = verteilt, aber für diese Lösung noch kein Raumplan gespeichert, **blau** = fest, **orange mit „*“** =
+  geändert und noch nicht gespeichert, **gelb „?“** = Raum offen, **rot** = kein freier Raum. Nur in den
+  bearbeitbaren Plänen, nicht in den Vorher/Nachher-Vergleichen.
+- **Räume nur auf Nachfrage:** Grundlage ist der gespeicherte Raumplan der Lösung. Verschieben, Tauschen und
+  Entplanen verteilen **nichts** um: Stunden an ihrem Platz behalten ihren Raum, verschobene Stunden sind
+  „Raum offen“. Kommt eine Stunde an ihren Ausgangsplatz zurück, hat sie wieder ihren Raum (wenn er frei ist).
+  **„Räume verteilen (n offen)“** gibt nur den offenen Stunden einen freien Raum (wie Knopf 25 „Behalten und
+  ergänzen“), alle übrigen Räume bleiben. Gibt es für die Lösung noch keinen Raumplan, fragt der Editor beim
+  Einschalten einer Raum-Ansicht einmal nach; sonst steht der Knopf „Räume verteilen“ bereit.
+- **„Raumplan zeigen“:** eigene Ansicht je Raum (wie Fachgruppen-/Fächerplan), Auswahl mit ◀ ▶. Doppelt
+  belegte Stunden haben einen roten Rahmen; „A · B“ = A- und B-Woche teilen sich den Raum. Klick auf einen
+  Unterricht stellt Lehrer- und Klassenplan darauf um; Klick im Lehrer-/Klassenplan springt zum Raum.
+- **Rechtsklick → „Raum ändern“:** zeigt die in dieser Stunde freien Räume (Wunschraum, gleiche Fachgruppe,
+  Stammraum, übrige Räume). Die Wahl gilt als **fest** (Fix X) und ändert nur diese eine Zeile. Außerdem
+  „Festlegung aufheben“ (der Raum bleibt) und „Wie gespeichert“. „Zurücksetzen“ setzt auch die Räume zurück.
+- **Speichern:** **„Räume speichern“** schreibt den Raumplan der geladenen Lösung – nur solange keine Stunde
+  verschoben wurde. Wurde der Plan verändert, schreibt **„Uebernehmen“** die Räume für die neue Lösung `X_manN`
+  mit – nur bei eingeschalteter Raum-Ansicht. Bei offenen Stunden fragt es vorher: verteilen, mit „Raum offen“
+  speichern oder abbrechen. Beim Schließen warnt der Editor vor nicht gespeicherten Raumänderungen.
 
 ## Nächste Schritte
 

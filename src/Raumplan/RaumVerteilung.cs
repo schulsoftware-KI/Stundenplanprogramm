@@ -662,6 +662,72 @@ namespace Stundenplan_V2.Raumplanung
             Fix = z.Fix, Hinweis = z.Hinweis, Uebernommen = true
         };
 
+        // =====================================================
+        //  Planeditor (R2): Zeilen einer Stunde OHNE Verteilung
+        // =====================================================
+
+        /// <summary>
+        /// Baut für den Planeditor die Raumzeilen einer Stunde, ohne einen Raum zu vergeben
+        /// („Raum offen“) – dieselben Zeilen je Teil und Raumbedarf, die <see cref="Verteile"/>
+        /// erzeugen würde. Teile ohne Raumangabe: „ohne Raum – keine Raumangabe in der UV“;
+        /// Pseudofächer bekommen keine Zeile.
+        /// </summary>
+        public sealed class ZeilenVorlage
+        {
+            private readonly RaumEingabe _e;
+            private readonly RaumVerzeichnis _v;
+            private readonly Dictionary<string, string> _klassenStamm;
+            private readonly Dictionary<int, Vorlage> _vorlagen = new();
+
+            public ZeilenVorlage(RaumEingabe e, RaumVerzeichnis v)
+            {
+                _e = e;
+                _v = v;
+                _klassenStamm = KlassenStammraeume(e);
+            }
+
+            private Vorlage? VorlageFuer(int unr)
+            {
+                if (!_e.Unterrichte.TryGetValue(unr, out var teile)) return null;
+                if (!_vorlagen.TryGetValue(unr, out var vl))
+                    _vorlagen[unr] = vl = BaueVorlage(unr, teile, _v, _klassenStamm);
+                return vl;
+            }
+
+            /// <summary>Zeilen „Raum offen“ für eine UNr in einer Stunde.</summary>
+            public List<RaumZeile> Offen(string plan, string wtag, int stunde, int unr)
+            {
+                var l = new List<RaumZeile>();
+                var vl = VorlageFuer(unr);
+                if (vl == null) return l;
+                foreach (var b in vl.Bedarfe)
+                    foreach (var t in b.Teile)
+                        l.Add(new RaumZeile
+                        {
+                            Plan = plan, WTag = wtag, Stunde = stunde, UNr = unr,
+                            Lehrer = t.Lehrer, Fach = t.Fach, Klassen = t.KlassenText,
+                            Raum = "", Wunschraum = b.Wunsch, Herkunft = RaumHerkunft.Offen,
+                            Hinweis = "verschoben – Raum noch nicht verteilt"
+                        });
+                foreach (var t in vl.OhneAngabe)
+                    l.Add(new RaumZeile
+                    {
+                        Plan = plan, WTag = wtag, Stunde = stunde, UNr = unr,
+                        Lehrer = t.Lehrer, Fach = t.Fach, Klassen = t.KlassenText,
+                        Herkunft = RaumHerkunft.OhneRaum, Hinweis = "keine Raumangabe in der UV"
+                    });
+                return l;
+            }
+
+            /// <summary>Herkunft des Raums einer Zeile (z. B. nach „Festlegung aufheben“).</summary>
+            public string HerkunftVon(RaumZeile z)
+            {
+                var b = VorlageFuer(z.UNr)?.Bedarfe.FirstOrDefault(x => Cmp.Equals(x.Wunsch, z.Wunschraum)
+                                                                      && x.Teile.Any(t => Cmp.Equals(t.Lehrer, z.Lehrer)));
+                return b == null ? RaumHerkunft.Ausweich : RaumVerteilung.HerkunftFuer(b, z.Raum);
+            }
+        }
+
         private static string Liste(IEnumerable<string> namen)
         {
             var l = namen.ToList();

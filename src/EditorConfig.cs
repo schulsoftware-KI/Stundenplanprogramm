@@ -49,6 +49,9 @@ namespace Stundenplan_V2
         public bool ParkkontextLehrer = true;       // true = Lehrer, false = Klasse
         public List<int> DiagFilter = new();        // Kriteriums-Indizes; leer = kein Filter
         public bool DiagFilterUnd = false;
+        // Raumplan im Editor (R2): Raum-Abzeichen in den Zellen / Raumplan-Ansicht.
+        public bool RaeumeZeigen = false;
+        public bool Raumplan = false;
 
         // ---- Zuletzt gewaehlte Ansicht (datenabhaengig!) ----
         // Diese drei haengen an den geladenen Daten. Beim Oeffnen werden sie nur
@@ -58,6 +61,7 @@ namespace Stundenplan_V2
         public string LoesungName = "";
         public string Lehrer = "";
         public string Klasse = "";
+        public string Raum = "";                    // zuletzt gewaehlter Raum der Raumplan-Ansicht
 
         // ---- Fenstergeometrie (NaN = nicht gespeichert -> Default nutzen) ----
         public double FensterBreite = double.NaN;
@@ -137,10 +141,13 @@ namespace Stundenplan_V2
                                             .Equals("Lehrer", StringComparison.OrdinalIgnoreCase);
                 cfg.DiagFilter        = LiesIntListe(w, "DiagFilter");
                 cfg.DiagFilterUnd     = LiesBool(w, "DiagFilterUnd", cfg.DiagFilterUnd);
+                cfg.RaeumeZeigen      = LiesBool(w, "RaeumeZeigen", cfg.RaeumeZeigen);
+                cfg.Raumplan          = LiesBool(w, "Raumplan", cfg.Raumplan);
 
                 cfg.LoesungName = LiesText(w, "LoesungName", cfg.LoesungName);
                 cfg.Lehrer      = LiesText(w, "Lehrer", cfg.Lehrer);
                 cfg.Klasse      = LiesText(w, "Klasse", cfg.Klasse);
+                cfg.Raum        = LiesText(w, "Raum", cfg.Raum);
 
                 cfg.FensterBreite = LiesDouble(w, "FensterBreite");
                 cfg.FensterHoehe  = LiesDouble(w, "FensterHoehe");
@@ -216,10 +223,13 @@ namespace Stundenplan_V2
             Schreibe("Parkkontext", ParkkontextLehrer ? "Lehrer" : "Klasse");
             Schreibe("DiagFilter", string.Join(",", DiagFilter ?? new List<int>()));
             Schreibe("DiagFilterUnd", DiagFilterUnd ? "1" : "0");
+            Schreibe("RaeumeZeigen", RaeumeZeigen ? "1" : "0");
+            Schreibe("Raumplan", Raumplan ? "1" : "0");
 
             Schreibe("LoesungName", LoesungName ?? "");
             Schreibe("Lehrer", Lehrer ?? "");
             Schreibe("Klasse", Klasse ?? "");
+            Schreibe("Raum", Raum ?? "");
             Schreibe("Zoom", Zoom.ToString("0.00", CultureInfo.InvariantCulture));
             Schreibe("MarkierungDicke", MarkierungDicke.ToString("0.00", CultureInfo.InvariantCulture));
             Schreibe("VergleichDicke", VergleichDicke.ToString("0.00", CultureInfo.InvariantCulture));

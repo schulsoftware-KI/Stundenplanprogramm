@@ -820,16 +820,20 @@ namespace Stundenplan_V2
         // IMPORT: GPU001.TXT -> Sheet "Plan"
         //
         // GPU001.TXT ist das Untis-Export-Format des fertigen Stundenplans
-        // (Zeitraster je Element), Trennzeichen ';', Text in "...":
-        //   UNr;Klasse;LehrerLang;LehrerKurz;Raum;Tag;Stunde;;
-        // (Tag: 1=Mo..5=Fr). Eine UNr steht dabei über mehrere Zeilen verteilt
-        // (je Klasse/Lehrer bzw. je Einzelstunde eine eigene Zeile).
+        // (Zeitraster je Element), Text in "...". Felder laut Untis-Handbuch
+        // („Export Stundenplan GPU001.TXT"):
+        //   1 Unterr.-Nr. · 2 Klasse · 3 Lehrer · 4 Fach · 5 Raum · 6 Tag ·
+        //   7 Stunde · 8 Stundenlänge (nur bei Minuten) · …
+        // (Tag: 1=Mo..5=Fr). Trennzeichen ist je nach Export-Einstellung in Untis
+        // ';' oder ',' – wird an der ersten Zeile erkannt. Eine UNr steht dabei
+        // über mehrere Zeilen verteilt (je Klasse/Lehrer/Raum bzw. je Einzelstunde
+        // eine eigene Zeile).
         //
         // Der Import schreibt NICHT in UV, sondern direkt ins Sheet "Plan"
         // im Format WTag | Stunde | UNr | UNr | ... (wie von
-        // MainWindow.LadeUnrPlanAusExcel erwartet). Nur die UNr sowie Tag/
-        // Stunde werden ausgewertet — Klasse, Lehrer und Raum stehen bereits
-        // in UV und werden hier nicht benötigt.
+        // MainWindow.LadeUnrPlanAusExcel erwartet). Dafür zählen nur UNr, Tag
+        // und Stunde; Lehrer und Raum nutzt auf Wunsch die Raum-Übernahme
+        // (Raumplanung.RaumUntisImport, Knopf 3).
         //
         // ACHTUNG: Das Sheet "Plan" wird dabei komplett überschrieben (alte
         // Inhalte gehen verloren) — nur auf ausdrücklichen Wunsch des
@@ -843,25 +847,76 @@ namespace Stundenplan_V2
             public int UNr;
             public int Tag;    // 1=Mo..5=Fr
             public int Stunde;
+            public string Klasse = "";
+            public string Lehrer = "";
+            public string Fach = "";
+            public string Raum = "";
         }
 
         public static List<Gpu001Zeile> LiesGpu001(string gpuPfad)
         {
             var ergebnis = new List<Gpu001Zeile>();
+            char trenn = '\0';
             foreach (var zeile in LiesTextdateiAutoEncoding(gpuPfad))
             {
                 if (string.IsNullOrWhiteSpace(zeile)) continue;
-                var teile = zeile.Split(';');
-                if (teile.Length < 7) continue;
+                if (trenn == '\0') trenn = ErkenneTrennzeichen(zeile);
+                var teile = TeileDifZeile(zeile, trenn);
+                if (teile.Count < 7) continue;
 
-                if (!int.TryParse(Unquote(teile[0]).Trim(), out int unr)) continue;
-                if (!int.TryParse(Unquote(teile[5]).Trim(), out int tag)) continue;
-                if (!int.TryParse(Unquote(teile[6]).Trim(), out int stunde)) continue;
+                if (!int.TryParse(teile[0].Trim(), out int unr)) continue;
+                if (!int.TryParse(teile[5].Trim(), out int tag)) continue;
+                if (!int.TryParse(teile[6].Trim(), out int stunde)) continue;
                 if (tag < 1 || tag > 5) continue;
 
-                ergebnis.Add(new Gpu001Zeile { UNr = unr, Tag = tag, Stunde = stunde });
+                ergebnis.Add(new Gpu001Zeile
+                {
+                    UNr = unr, Tag = tag, Stunde = stunde,
+                    Klasse = teile[1].Trim(), Lehrer = teile[2].Trim(),
+                    Fach = teile[3].Trim(), Raum = teile[4].Trim()
+                });
             }
             return ergebnis;
+        }
+
+        // ';' oder ',' – das Zeichen, das außerhalb von Anführungszeichen häufiger vorkommt.
+        private static char ErkenneTrennzeichen(string zeile)
+        {
+            int semi = 0, komma = 0;
+            bool inText = false;
+            foreach (char c in zeile)
+            {
+                if (c == '"') inText = !inText;
+                else if (!inText && c == ';') semi++;
+                else if (!inText && c == ',') komma++;
+            }
+            return komma > semi ? ',' : ';';
+        }
+
+        // Zerlegt eine DIF-Zeile; Felder in "..." dürfen das Trennzeichen enthalten,
+        // "" steht für ein Anführungszeichen. Liefert die Felder ohne Anführungszeichen.
+        private static List<string> TeileDifZeile(string zeile, char trenn)
+        {
+            var felder = new List<string>();
+            var sb = new StringBuilder();
+            bool inText = false;
+            for (int i = 0; i < zeile.Length; i++)
+            {
+                char c = zeile[i];
+                if (c == '"')
+                {
+                    if (inText && i + 1 < zeile.Length && zeile[i + 1] == '"') { sb.Append('"'); i++; }
+                    else inText = !inText;
+                }
+                else if (c == trenn && !inText)
+                {
+                    felder.Add(sb.ToString());
+                    sb.Clear();
+                }
+                else sb.Append(c);
+            }
+            felder.Add(sb.ToString());
+            return felder;
         }
 
         // Importiert eine GPU001.TXT direkt ins Sheet "Plan". Gruppiert die

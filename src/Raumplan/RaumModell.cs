@@ -103,6 +103,7 @@ namespace Stundenplan_V2.Raumplanung
         public const string Zusatzraum = "Zusatzraum";    // zusätzlicher Raum zum Ausweichen (z. B. Halle beim Schwimmen)
         public const string Fest = "fest";                // Zeile mit Fix (X)
         public const string OhneRaum = "ohne Raum";
+        public const string Untis = "aus Untis";          // aus der GPU001.TXT übernommen (Knopf 3)
         // Planeditor (R2): Stunde wurde verschoben, ihr Raum ist noch nicht verteilt
         // (Räume werden dort nur auf Nachfrage verteilt). Nicht in „Alle" – die Verteilung
         // selbst erzeugt diese Herkunft nie.
@@ -110,7 +111,7 @@ namespace Stundenplan_V2.Raumplanung
 
         /// <summary>Reihenfolge in Übersichten.</summary>
         public static readonly string[] Alle =
-            { Fachraum, Stammraum, Abgeleitet, Fachgruppe, Zusatzraum, Ausweich, Fest, OhneRaum };
+            { Fachraum, Stammraum, Abgeleitet, Fachgruppe, Zusatzraum, Ausweich, Untis, Fest, OhneRaum };
     }
 
     /// <summary>Eine Zeile im Blatt „Raumplan" (eine Raumbelegung eines Unterrichtsteils).</summary>
@@ -173,8 +174,14 @@ namespace Stundenplan_V2.Raumplanung
     public class RaumEingabe
     {
         public string PlanPfad { get; set; } = "";
+        /// <summary>
+        /// Wählbare Pläne wie im Planeditor: Spalten aus „Lös“, gesicherte Lösungen aus
+        /// „Gesichert“ („[Gesichert] X“) und der manuelle UNr-Plan aus Blatt „Plan“ („Plan“).
+        /// </summary>
         public List<string> PlanSpalten { get; set; } = new();
         public string PlanSpalte { get; set; } = "";
+        /// <summary>Woher die Belegung des gewählten Plans stammt (Anzeige im Fenster).</summary>
+        public string PlanQuelle { get; set; } = "";
 
         public Dictionary<int, List<RaumTeil>> Unterrichte { get; } = new();
 
@@ -206,6 +213,7 @@ namespace Stundenplan_V2.Raumplanung
             {
                 PlanPfad = PlanPfad,
                 PlanSpalte = planSpalte,
+                PlanQuelle = "Planeditor (Arbeitskopie)",
                 FgrPraefixe = FgrPraefixe,
                 VerzeichnisAusBlatt = VerzeichnisAusBlatt,
                 RaumplanVorhanden = RaumplanVorhanden

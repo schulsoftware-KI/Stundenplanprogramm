@@ -34,6 +34,10 @@ namespace Stundenplan_V2
         // eintragen, an denen sie im importierten Plan liegen
         // (GpuImportExport.BaueFixUNrnAusUvNeu). Die UV selbst bleibt dabei
         // unverändert. Standard der Rückfrage ist "Nein".
+        //
+        // OPTIONAL (Rückfrage, nur wenn die Datei Räume enthält): die Räume als
+        // Raumplan für den Plan "Plan" übernehmen (Raumplanung.RaumUntisImport;
+        // Blatt "Raumplan", Zeilen für "Plan" werden ersetzt). Standard "Ja".
         // =====================================================
         private void BtnPlanImportieren_Click(object sender, RoutedEventArgs e)
         {
@@ -49,6 +53,18 @@ namespace Stundenplan_V2
                 Title = "GPU001.TXT zum Import in Sheet 'Plan' wählen"
             };
             if (dlgOpen.ShowDialog() != true) return;
+
+            // Datei einmal vorab lesen: für die Raum-Rückfrage und die Raum-Übernahme.
+            List<GpuImportExport.Gpu001Zeile> gpuZeilen;
+            try
+            {
+                gpuZeilen = GpuImportExport.LiesGpu001(dlgOpen.FileName);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Fehler beim Lesen der GPU001.TXT: " + ex.Message);
+                return;
+            }
 
             // ---- Optional: "Fix UNrn" aus UV + importiertem Plan neu aufbauen ----
             bool fixNeuAufbauen = false;
@@ -86,12 +102,39 @@ namespace Stundenplan_V2
                     "Neuaufbau von 'Fix UNrn' nicht möglich, Rückfrage übersprungen.");
             }
 
+            // ---- Optional: Räume aus der GPU001.TXT als Raumplan für „Plan" ----
+            bool raeumeUebernehmen = false;
+            int zeilenMitRaum = gpuZeilen.Count(z => z.Raum.Length > 0);
+            if (zeilenMitRaum > 0)
+            {
+                var antwortRaum = MessageBox.Show(
+                    "Sollen die Räume aus der GPU001.TXT als Raumplan für den Plan „Plan“ übernommen werden?\n\n" +
+                    $"{zeilenMitRaum} von {gpuZeilen.Count} Zeile(n) der Datei nennen einen Raum.\n\n" +
+                    "[Ja] = Räume übernehmen (Blatt „Raumplan“, die Zeilen für „Plan“ werden ersetzt). " +
+                    "Raumbedarfe laut UV, für die Untis keinen Raum hat, bleiben ohne Raum – verteilt wird " +
+                    "nur auf Nachfrage (Planeditor „Räume verteilen“ bzw. Knopf 25).\n" +
+                    "[Nein] = ohne Räume (vorhandene Raumplan-Zeilen für „Plan“ bleiben unverändert)\n" +
+                    "[Abbrechen] = Import abbrechen",
+                    "Räume aus Untis übernehmen?",
+                    MessageBoxButton.YesNoCancel, MessageBoxImage.Question, MessageBoxResult.Yes);
+
+                if (antwortRaum == MessageBoxResult.Cancel) return;
+                raeumeUebernehmen = antwortRaum == MessageBoxResult.Yes;
+            }
+            else
+            {
+                Log("Plan-Import: Die GPU001.TXT nennt keine Räume — Raumplan bleibt unverändert, Rückfrage übersprungen.");
+            }
+
             var bestaetigung = MessageBox.Show(
                 $"Die Datei\n{dlgOpen.FileName}\n\nwird ins Sheet 'Plan' importiert. " +
                 "Der bisherige Inhalt von 'Plan' wird dabei VOLLSTÄNDIG ÜBERSCHRIEBEN." +
                 (fixNeuAufbauen
                     ? "\n\nAußerdem wird die Tabelle 'Fix UNrn' GELEERT und aus UV und " +
                       "importiertem Plan neu befüllt."
+                    : "") +
+                (raeumeUebernehmen
+                    ? "\n\nAußerdem wird der Raumplan für „Plan“ aus den Räumen der Datei neu geschrieben."
                     : "") +
                 "\n\nFortfahren?",
                 "Import bestätigen", MessageBoxButton.YesNo, MessageBoxImage.Warning);
@@ -119,6 +162,32 @@ namespace Stundenplan_V2
                         fixText = $"⚠ 'Fix UNrn' konnte nicht neu aufgebaut werden: {fixEx.Message}\n" +
                                   "(Der Plan-Import selbst ist erfolgt; 'Fix UNrn' ist unverändert.)";
                         Log("Plan-Import: " + fixText.Replace("\n", " "));
+                    }
+                }
+
+                // Räume übernehmen – nach dem Schreiben von „Plan" (die Belegung kommt von dort).
+                // Ein Fehler bricht den bereits erfolgten Plan-Import nicht ab.
+                string raumText = "";
+                if (raeumeUebernehmen)
+                {
+                    try
+                    {
+                        var raumErg = Stundenplan_V2.Raumplanung.RaumUntisImport.Importiere(excelPfad,
+                            gpuZeilen.Select(z => new Stundenplan_V2.Raumplanung.RaumUntisImport.UntisRaum
+                            {
+                                UNr = z.UNr, Tag = z.Tag, Stunde = z.Stunde, Lehrer = z.Lehrer, Raum = z.Raum
+                            }));
+                        raumText = raumErg.Kurztext();
+                        Log("Plan-Import: " + raumText);
+                        foreach (var h in raumErg.Hinweise) Log("   " + h);
+                        if (raumErg.Hinweise.Count > 0)
+                            raumText += $"\n{raumErg.Hinweise.Count} Hinweis(e) im Log.";
+                    }
+                    catch (Exception raumEx)
+                    {
+                        raumText = $"⚠ Räume konnten nicht übernommen werden: {raumEx.Message}\n" +
+                                   "(Der Plan-Import selbst ist erfolgt; der Raumplan ist unverändert.)";
+                        Log("Plan-Import: " + raumText.Replace("\n", " "));
                     }
                 }
 
@@ -163,10 +232,12 @@ namespace Stundenplan_V2
                 }
 
                 TxtStatus.Text = $"{anzahl} Slot(s) aus GPU001.TXT importiert und als Lösung 'Plan' eingetragen." +
-                                 (fixNeuAufbauen ? " 'Fix UNrn' neu aufgebaut." : "");
+                                 (fixNeuAufbauen ? " 'Fix UNrn' neu aufgebaut." : "") +
+                                 (raeumeUebernehmen && !raumText.StartsWith("⚠") ? " Räume aus Untis übernommen." : "");
                 MessageBox.Show($"{anzahl} Slot(s) wurden ins Sheet 'Plan' importiert " +
                     "und automatisch als Lösung 'Plan' in die Lösungen-Tabelle eingetragen.\n\n" +
                     (fixText.Length > 0 ? fixText + "\n\n" : "") +
+                    (raumText.Length > 0 ? raumText + "\n\n" : "") +
                     "Die Excel-Datei wurde automatisch neu eingelesen.\n\n" +
                     "Details zum Ablauf stehen jetzt im Log-Fenster (Zeilen mit '[Diag]').",
                     "Import fertig", MessageBoxButton.OK, MessageBoxImage.Information);

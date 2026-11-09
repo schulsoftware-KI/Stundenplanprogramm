@@ -239,6 +239,7 @@ namespace Stundenplan_V2
             string excelPfad = null)
         {
             InitializeComponent();
+            RichteKopfleisteEin();   // Zustandsanzeige der Klappmenüs (PlanEditorDialog_Kopfleiste.cs)
 
             _loesungen = loesungen;
             _slots = slots;
@@ -358,6 +359,7 @@ namespace Stundenplan_V2
             ChkAusweichSuche.IsChecked       = cfg.AusweichSuche;
             ChkRaeume.IsChecked              = cfg.RaeumeZeigen;
             _raumStartAuswahl                = cfg.Raum;
+            TglHinweise.IsChecked            = cfg.HinweiseZeigen;
 
             _parkKontextLehrer = cfg.ParkkontextLehrer;
 
@@ -535,6 +537,7 @@ namespace Stundenplan_V2
                     AusweichSuche      = ChkAusweichSuche.IsChecked == true,
                     RaeumeZeigen       = ChkRaeume.IsChecked == true,
                     Raumplan           = ChkRaumPlan.IsChecked == true,
+                    HinweiseZeigen     = TglHinweise.IsChecked == true,
                     Raum               = CboRaum.SelectedItem as string ?? _raumStartAuswahl ?? "",
                     ParkkontextLehrer  = _parkKontextLehrer,
                     DiagFilter         = _diagFilterKriterien != null ? new List<int>(_diagFilterKriterien) : new List<int>(),
@@ -715,6 +718,7 @@ namespace Stundenplan_V2
         // nicht noetig — die Farben beruehren weder Solver noch Exporte.
         private void BtnFarbcode_Click(object sender, RoutedEventArgs e)
         {
+            TglFarben.IsChecked = false;   // Klappmenü „Farben" schließen, bevor der Dialog kommt
             if (string.IsNullOrWhiteSpace(_excelPfad))
             {
                 SetStatus("Farbcode nicht verfuegbar: kein Excel-Pfad bekannt.", true);
@@ -754,7 +758,7 @@ namespace Stundenplan_V2
 
             ZeichneNachFarbwechsel();
             SetStatus(RbFarbeAus.IsChecked == true
-                ? "Farbcode gespeichert — Anzeige ueber \"Farbe nach: Klasse/Fach\" einschalten."
+                ? "Farbcode gespeichert — Anzeige ueber \"Farben ▾ → Zellen färben nach\" einschalten."
                 : "Farbcode gespeichert.", false);
         }
 

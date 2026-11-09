@@ -2,11 +2,11 @@
 // Raumplan im Plan-Editor (Schritt R2) – erweitert die partielle Klasse
 // PlanEditorDialog. Konzept: claude/Raumplan_Vorschlag.md (§10).
 //
-//  - „Räume zeigen": Lehrer- und Klassenplan zeigen je Stunde ein Raum-Abzeichen
+//  - „Ansicht ▾ → Räume" (ChkRaeume): Lehrer- und Klassenplan zeigen je Stunde ein Raum-Abzeichen
 //    (oben rechts). Farbe = Zustand: gespeichert (grün), verteilt und noch nicht
 //    gespeichert (grau bzw. orange „*"), fest (blau), Raum offen (gelb „?"),
 //    kein freier Raum (rot).
-//  - „Raumplan zeigen": zusätzliche Ansicht je Raum (wie Fachgruppen-/Fächerplan).
+//  - „Ansicht ▾ → Raumplan" (ChkRaumPlan): zusätzliche Ansicht je Raum (wie Fachgruppen-/Fächerplan).
 //  - Räume werden NUR AUF NACHFRAGE verteilt (Nutzer 09.11.2026). Grundlage ist der
 //    gespeicherte Raumplan der Lösung (Blatt „Raumplan"). Verschieben, Tauschen und
 //    Entplanen verteilen nichts: Stunden an ihrem Platz behalten ihren Raum, verschobene
@@ -412,6 +412,7 @@ namespace Stundenplan_V2
             RaumHerkunft.Zusatzraum => "Zusatzraum (Ausweichhalle)",
             RaumHerkunft.Ausweich => "Ausweichraum",
             RaumHerkunft.Fest => "fest",
+            RaumHerkunft.Untis => "Raum laut Untis",
             RaumHerkunft.Offen => "Raum offen",
             _ => herkunft
         };
@@ -1108,12 +1109,7 @@ namespace Stundenplan_V2
         private void BtnRaeumeSpeichern_Click(object sender, RoutedEventArgs e)
         {
             if (_belegung == null || string.IsNullOrWhiteSpace(_aktLabel)) return;
-            if (_aktLabel.StartsWith("[", StringComparison.Ordinal))
-            {
-                MessageBox.Show(this, "Räume lassen sich nur für Lösungen aus dem Blatt „Lös“ speichern.",
-                    "Räume speichern", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
+            // Alle Lösungen des Editors (Lös, „[Gesichert] …“, „Plan“) kennt auch Knopf 25.
             if (!BelegungUnveraendert())
             {
                 MessageBox.Show(this,

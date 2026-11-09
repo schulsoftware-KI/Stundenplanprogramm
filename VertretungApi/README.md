@@ -704,7 +704,9 @@ Nur Desktop, **keine API- und keine Schemaänderung, es wird nichts gesendet.** 
 (Raumplan)“** im Hauptfenster öffnet das Fenster „Räume zuweisen“. Code: `src/Raumplan/`, Knopf in
 `src/MainWindow_Raumplan.cs`. Konzept und Entscheidungen 95–102: `claude/Raumplan_Vorschlag.md` (Claude-Projekt).
 
-- **Plan wählen** (Spalte aus `Lös`), Modus **„Behalten und ergänzen“** (Standard, sobald es einen Raumplan
+- **Plan wählen** – dieselben Pläne wie im Planeditor: Spalten aus `Lös`, gesicherte Lösungen aus `Gesichert`
+  („[Gesichert] A10“) und der manuelle UNr-Plan aus Blatt `Plan` („Plan“); Standard wie bisher die Lös-Spalte
+  „Plan“, sonst die letzte Lös-Spalte. Modus **„Behalten und ergänzen“** (Standard, sobald es einen Raumplan
   gibt: vorhandene Zuweisungen bleiben, nur neue/verschobene Stunden bekommen Räume) oder **„Neu verteilen“**.
   Die Vorschau rechnet sofort; Reiter **Übersicht** (Zahlen je Herkunft), **Zuweisungen** (Filter „nur Ausweich
   und Probleme“, Suche), **Räume** (Raumverzeichnis), **Hinweise**. Erst **„Speichern“** schreibt in die Plandatei
@@ -732,6 +734,39 @@ Nur Desktop, **keine API- und keine Schemaänderung, es wird nichts gesendet.** 
 - **Später:** R3 Vertretungsmodul (Raumvertretung, Raumsperre) und App (echter Raum statt „Fachraum vor
   Stammraum“, braucht eine EF-Migration).
 
+### Räume aus Untis übernehmen (Knopf 3, Desktop)
+
+Code: `src/Raumplan/RaumUntisImport.cs`, `src/MainWindow_PlanImport.cs`, `GpuImportExport.LiesGpu001`. Knopf 3 („Plan
+importieren“, GPU001.TXT) fragt – nur wenn die Datei Räume enthält – „Räume aus der GPU001.TXT als Raumplan für den Plan
+„Plan“ übernehmen?“ (Standard Ja; Abbrechen bricht den Import ab). Felder laut Untis: 1 Unterr.-Nr., 2 Klasse, 3 Lehrer,
+4 Fach, 5 Raum, 6 Tag, 7 Stunde; Trennzeichen `;` oder `,` wird erkannt.
+
+- Je Stunde × UNr × Lehrkraft (Untis hat je Klasse eine Zeile) werden die Untis-Räume den Raumbedarfen laut UV zugeordnet:
+  gleicher Raum wie in der UV → dieser Bedarf; sonst der nächste offene Bedarf derselben Lehrkraft; dann Teile ohne
+  Raumangabe in der UV; Rest als zusätzlicher Raum. Team-Teaching: fehlt einer Lehrkraft der Raum, gilt der des
+  Partners. Räume einer Lehrkraft, die die UV für die UNr nicht kennt, gehen an noch offene Bedarfe der Stunde.
+- Herkunft **„aus Untis“**, nicht fest. Bedarfe ohne Untis-Raum: „ohne Raum – in Untis kein Raum“ (rot) – verteilt wird
+  nur auf Nachfrage (Planeditor „Räume verteilen“, Knopf 25 „Behalten und ergänzen“).
+- Blatt „Raumplan“: Die Zeilen für „Plan“ werden ersetzt; bei „Nein“ bleiben sie unverändert. Räume, die die UV nicht
+  kennt, werden im Blatt „Räume“ ergänzt (Art „Fachraum“, nicht als Ausweich – bitte prüfen).
+- Ein Fehler dabei bricht den Plan-Import nicht ab; Ergebnis und Hinweise stehen in der Meldung und im Log.
+
+### Kopfleiste des Planeditors (Desktop)
+
+Code: `src/PlanEditorDialog_Kopfleiste.cs`, `src/PlanEditorDialog.xaml`. Eine feste Zeile, die beim Ändern der
+Fensterbreite nicht umbricht und nicht mitzoomt (Mindestbreite des Fensters 1100 px): links **Lösung** ◀ ▾ ▶ und
+**Modus** „Block | Einzelstunde“, dann drei Klappmenüs, rechts **Diag-Werte**, **UV anzeigen** und **„?“**.
+
+- **Ansicht ▾:** zusätzliche Pläne (Klassenvergleich, Fachgruppenplan, Fächerplan, Raumplan) und „In den Zellen:
+  Räume“. Knopf zeigt „Ansicht (n)“.
+- **Farben ▾:** Zellen färben nach aus/Klasse/Fach/Klasse + Fach, „Farben festlegen …“ (früher „Farbcode“),
+  Markieren: späte nichtfixierte päd. Einheiten rot, auch fixierte (heller). Knopf zeigt z. B. „Farben: Fach · rot“.
+- **Vergleich ▾:** Vergleichsmodus (2 Lösungen) mit Unterschiede farbig, Verschiebungspfeile, Nur Abw; bei
+  eingeschaltetem Modus steht „2. Lösung ◀ ▾ ▶“ direkt hinter dem Knopf. Knopf zeigt „Vergleich: an“.
+- Knöpfe mit eingeschalteten Optionen sind hellblau hinterlegt. Ein Klappmenü schließt bei einem Klick daneben,
+  auf seinen Knopf oder mit Esc. **„?“** blendet die Hinweise zur Bedienung unter der Leiste ein (gemerkt in EdCfg
+  `HinweiseZeigen`, Standard aus). Alle übrigen Einstellungen werden wie bisher in EdCfg gemerkt.
+
 ### Räume im Planeditor (Schritt R2, Desktop)
 
 Code: `src/PlanEditorDialog_Raeume.cs` (partielle Klasse des Planeditors), Einstellungen in `EdCfg`
@@ -740,7 +775,7 @@ der beiden Raum-Ansichten eingeschaltet wird. **Ohne Raum-Ansicht verhält sich 
 Uebernehmen); Verschieben, Tauschvorschläge und die Fachraum-Limits aus FGR (harte Sperre, Fachgruppenplan,
 Meldungen) sind unverändert – die Räume sperren und warnen nie.
 
-- **„Räume zeigen“:** Lehrer- und Klassenplan zeigen je Stunde oben rechts ein Raum-Abzeichen (bei mehreren
+- **„Ansicht ▾ → Räume“:** Lehrer- und Klassenplan zeigen je Stunde oben rechts ein Raum-Abzeichen (bei mehreren
   Räumen „RSh1 +1“, Tooltip mit allen Räumen). Farbe: **grün** = wie im Blatt „Raumplan“ gespeichert,
   **grau** = verteilt, aber für diese Lösung noch kein Raumplan gespeichert, **blau** = fest, **orange mit „*“** =
   geändert und noch nicht gespeichert, **gelb „?“** = Raum offen, **rot** = kein freier Raum. Nur in den
@@ -751,7 +786,7 @@ Meldungen) sind unverändert – die Räume sperren und warnen nie.
   **„Räume verteilen (n offen)“** gibt nur den offenen Stunden einen freien Raum (wie Knopf 25 „Behalten und
   ergänzen“), alle übrigen Räume bleiben. Gibt es für die Lösung noch keinen Raumplan, fragt der Editor beim
   Einschalten einer Raum-Ansicht einmal nach; sonst steht der Knopf „Räume verteilen“ bereit.
-- **„Raumplan zeigen“:** eigene Ansicht je Raum (wie Fachgruppen-/Fächerplan), Auswahl mit ◀ ▶. Doppelt
+- **„Ansicht ▾ → Raumplan“:** eigene Ansicht je Raum (wie Fachgruppen-/Fächerplan), Auswahl mit ◀ ▶. Doppelt
   belegte Stunden haben einen roten Rahmen; „A · B“ = A- und B-Woche teilen sich den Raum. Klick auf einen
   Unterricht stellt Lehrer- und Klassenplan darauf um; Klick im Lehrer-/Klassenplan springt zum Raum.
 - **Rechtsklick → „Raum ändern“:** zeigt die in dieser Stunde freien Räume (Wunschraum, gleiche Fachgruppe,

@@ -52,6 +52,8 @@ namespace Stundenplan_V2
         // Raumplan im Editor (R2): Raum-Abzeichen in den Zellen / Raumplan-Ansicht.
         public bool RaeumeZeigen = false;
         public bool Raumplan = false;
+        // Kopfleiste: Hinweise zur Bedienung unter der Leiste (Knopf „?“), Standard zu.
+        public bool HinweiseZeigen = false;
 
         // ---- Zuletzt gewaehlte Ansicht (datenabhaengig!) ----
         // Diese drei haengen an den geladenen Daten. Beim Oeffnen werden sie nur
@@ -143,6 +145,7 @@ namespace Stundenplan_V2
                 cfg.DiagFilterUnd     = LiesBool(w, "DiagFilterUnd", cfg.DiagFilterUnd);
                 cfg.RaeumeZeigen      = LiesBool(w, "RaeumeZeigen", cfg.RaeumeZeigen);
                 cfg.Raumplan          = LiesBool(w, "Raumplan", cfg.Raumplan);
+                cfg.HinweiseZeigen    = LiesBool(w, "HinweiseZeigen", cfg.HinweiseZeigen);
 
                 cfg.LoesungName = LiesText(w, "LoesungName", cfg.LoesungName);
                 cfg.Lehrer      = LiesText(w, "Lehrer", cfg.Lehrer);
@@ -225,6 +228,7 @@ namespace Stundenplan_V2
             Schreibe("DiagFilterUnd", DiagFilterUnd ? "1" : "0");
             Schreibe("RaeumeZeigen", RaeumeZeigen ? "1" : "0");
             Schreibe("Raumplan", Raumplan ? "1" : "0");
+            Schreibe("HinweiseZeigen", HinweiseZeigen ? "1" : "0");
 
             Schreibe("LoesungName", LoesungName ?? "");
             Schreibe("Lehrer", Lehrer ?? "");

@@ -42,6 +42,7 @@ namespace Stundenplan_V2.Raumplanung
             [RaumHerkunft.Fachgruppe] = "anderer Raum derselben Fachgruppe",
             [RaumHerkunft.Zusatzraum] = "Zusatzraum (z. B. Halle zum Ausweichen beim Schwimmen)",
             [RaumHerkunft.Ausweich] = "freier Ausweichraum",
+            [RaumHerkunft.Untis] = "Raum laut Untis (Knopf 3, GPU001.TXT)",
             [RaumHerkunft.Fest] = "fest (Fix X im Blatt „Raumplan“)",
             [RaumHerkunft.OhneRaum] = "ohne Raum (kein freier Raum gefunden)"
         };
@@ -179,7 +180,8 @@ namespace Stundenplan_V2.Raumplanung
             var r = _ergebnis;
             var l = new List<RaumZahl>
             {
-                new("Plan", "Plan-Spalte aus „Lös“", r.PlanSpalte),
+                new("Plan", "Plan", r.PlanSpalte),
+                new("Plan", "Belegung aus", _eingabe.PlanQuelle),
                 new("Plan", "Stunden im Raster", _eingabe.Slots.Count.ToString()),
                 new("Plan", "Modus", r.Behalten ? "behalten und ergänzen" : "neu verteilen"),
                 new("Raumbelegungen", "gesamt (Unterricht × Raum × Stunde)", r.Belegungen.ToString())

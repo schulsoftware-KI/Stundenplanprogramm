@@ -14,8 +14,9 @@ namespace Stundenplan_V2.Raumplanung
     //  Blatt „Raumplan": Plan | WTag | Stunde | UNr | Lehrer | Fach | Klasse(n) |
     //                    Raum | Wunschraum | Herkunft | Fix (X) | Hinweis
     //    eine Zeile je Raumbelegung eines Unterrichtsteils; mehrere Pläne in
-    //    einem Blatt (Spalte „Plan" = Plan-Spalte aus „Lös"). Spalten werden über
-    //    die Kopfzeile gefunden (Reihenfolge egal).
+    //    einem Blatt (Spalte „Plan" = Name des Plans wie im Planeditor: Spalte aus
+    //    „Lös", „[Gesichert] X" aus „Gesichert" oder „Plan" aus Blatt „Plan").
+    //    Spalten werden über die Kopfzeile gefunden (Reihenfolge egal).
     //  Blatt „Räume":    Raum | Art | Fachgruppe | als Ausweich | Bereich | Bemerkung
     //    Reihenfolge der Zeilen = Reihenfolge beim Ausweichen.
     // =====================================================================
@@ -25,6 +26,10 @@ namespace Stundenplan_V2.Raumplanung
         public const string BlattRaeume = "Räume";
         private const string SheetUV = "UV";
         private const string SheetLoes = "Lös";
+        private const string SheetGesichert = "Gesichert";
+        private const string SheetUnrPlan = "Plan";
+        /// <summary>Präfix gesicherter Lösungen – wie im Hauptfenster/Planeditor.</summary>
+        public const string GesichertPraefix = "[Gesichert] ";
         private const string SheetFGR = "FGR";
         private const string StandardPlanSpalte = "Plan";
 
@@ -54,7 +59,7 @@ namespace Stundenplan_V2.Raumplanung
             using var wb = new XLWorkbook(planPfad);
 
             LiesUv(wb, e);
-            if (mitLoes) LiesLoes(wb, e, planSpalte);
+            if (mitLoes) LiesPlan(wb, e, planSpalte);
             LiesFgr(wb, e);
             e.VerzeichnisAusBlatt = LiesRaeume(wb);
             LiesRaumplan(wb, e);
@@ -127,39 +132,73 @@ namespace Stundenplan_V2.Raumplanung
             }
         }
 
-        private static void LiesLoes(XLWorkbook wb, RaumEingabe e, string? planSpalte)
+        /// <summary>
+        /// Liest die Belegung des gewählten Plans. Wählbar sind dieselben Pläne wie im
+        /// Planeditor: die Spalten aus „Lös", die gesicherten Lösungen aus „Gesichert"
+        /// („[Gesichert] X") und der manuelle UNr-Plan aus Blatt „Plan" (Name „Plan"; er geht
+        /// einer gleichnamigen Lös-Spalte vor – wie im Hauptfenster). Ohne Wunsch wie bisher:
+        /// Lös-Spalte „Plan", sonst die letzte Lös-Spalte.
+        /// </summary>
+        private static void LiesPlan(XLWorkbook wb, RaumEingabe e, string? planSpalte)
         {
-            if (!wb.Worksheets.TryGetWorksheet(SheetLoes, out var ws))
-                throw new InvalidOperationException("Blatt 'Lös' nicht gefunden.");
+            var loes = SpaltenVon(wb, SheetLoes);
+            var gesichert = SpaltenVon(wb, SheetGesichert);
+            bool unrPlan = wb.Worksheets.TryGetWorksheet(SheetUnrPlan, out var wsPlan);
 
+            void Dazu(string name)
+            {
+                if (!e.PlanSpalten.Contains(name, StringComparer.OrdinalIgnoreCase)) e.PlanSpalten.Add(name);
+            }
+            foreach (var (_, name) in loes) Dazu(name);
+            foreach (var (_, name) in gesichert) Dazu(GesichertPraefix + name);
+            if (unrPlan) Dazu(StandardPlanSpalte);
+            if (e.PlanSpalten.Count == 0)
+                throw new InvalidOperationException("Kein Plan gefunden (Blätter „Lös“, „Gesichert“ und „Plan“ fehlen oder sind leer).");
+
+            string? ziel = null;
+            string wunsch = (planSpalte ?? "").Trim();
+            if (wunsch.Length > 0)
+                ziel = e.PlanSpalten.FirstOrDefault(p => string.Equals(p, wunsch, StringComparison.OrdinalIgnoreCase));
+            ziel ??= loes.Select(x => x.Name).FirstOrDefault(n => string.Equals(n, StandardPlanSpalte, StringComparison.OrdinalIgnoreCase));
+            ziel ??= loes.Count > 0 ? loes[^1].Name : e.PlanSpalten[0];
+            e.PlanSpalte = ziel;
+
+            if (unrPlan && string.Equals(ziel, StandardPlanSpalte, StringComparison.OrdinalIgnoreCase))
+            {
+                e.PlanQuelle = "Blatt „Plan“ (manueller UNr-Plan)";
+                LiesUnrPlan(wsPlan!, e);
+                return;
+            }
+            var ausLoes = loes.FirstOrDefault(x => string.Equals(x.Name, ziel, StringComparison.OrdinalIgnoreCase));
+            if (ausLoes.Name != null)
+            {
+                e.PlanQuelle = "Spalte aus Blatt „Lös“";
+                LiesPlanSpalte(wb.Worksheet(SheetLoes), ausLoes.Spalte, e);
+                return;
+            }
+            var ausGesichert = gesichert.First(x => string.Equals(GesichertPraefix + x.Name, ziel, StringComparison.OrdinalIgnoreCase));
+            e.PlanQuelle = "gesicherte Lösung (Blatt „Gesichert“)";
+            LiesPlanSpalte(wb.Worksheet(SheetGesichert), ausGesichert.Spalte, e);
+        }
+
+        // Benannte Plan-Spalten eines Blatts im Lös-Format (A = WTag, B = Stunde, ab C je Plan).
+        private static List<(int Spalte, string Name)> SpaltenVon(XLWorkbook wb, string blatt)
+        {
+            var l = new List<(int Spalte, string Name)>();
+            if (!wb.Worksheets.TryGetWorksheet(blatt, out var ws)) return l;
             var kopf = ws.Row(1);
             int letzte = kopf.LastCellUsed()?.Address.ColumnNumber ?? 0;
             for (int c = 3; c <= letzte; c++)
             {
                 string name = kopf.Cell(c).GetString().Trim();
-                if (name.Length > 0) e.PlanSpalten.Add(name);
+                if (name.Length > 0) l.Add((c, name));
             }
+            return l;
+        }
 
-            // Spaltenwahl wie PlanLeser: gewünschte Spalte, sonst „Plan", sonst die letzte.
-            int ziel = -1; string zielName = "";
-            if (!string.IsNullOrWhiteSpace(planSpalte))
-                for (int c = 3; c <= letzte; c++)
-                    if (string.Equals(kopf.Cell(c).GetString().Trim(), planSpalte.Trim(), StringComparison.OrdinalIgnoreCase))
-                    { ziel = c; zielName = kopf.Cell(c).GetString().Trim(); break; }
-            if (ziel < 0)
-                for (int c = 3; c <= letzte; c++)
-                    if (string.Equals(kopf.Cell(c).GetString().Trim(), StandardPlanSpalte, StringComparison.OrdinalIgnoreCase))
-                    { ziel = c; zielName = kopf.Cell(c).GetString().Trim(); break; }
-            if (ziel < 0)
-                for (int c = letzte; c >= 3; c--)
-                {
-                    string name = kopf.Cell(c).GetString().Trim();
-                    if (name.Length > 0) { ziel = c; zielName = name; break; }
-                }
-            if (ziel < 0)
-                throw new InvalidOperationException("Lös: keine Plan-Spalte gefunden.");
-            e.PlanSpalte = zielName;
-
+        // Lös-Format: je Zeile WTag, Stunde und in der Plan-Spalte die UNrn mit Komma.
+        private static void LiesPlanSpalte(IXLWorksheet ws, int spalte, RaumEingabe e)
+        {
             foreach (var row in ws.RowsUsed().Skip(1))
             {
                 string wtag = row.Cell(1).GetString().Trim();
@@ -167,8 +206,29 @@ namespace Stundenplan_V2.Raumplanung
                 if (!e.Tage.Contains(wtag, StringComparer.OrdinalIgnoreCase)) e.Tage.Add(wtag);
 
                 var unrs = new List<int>();
-                foreach (var tok in row.Cell(ziel).GetString().Split(','))
+                foreach (var tok in row.Cell(spalte).GetString().Split(','))
                     if (LiesZahl(tok, out int u) && !unrs.Contains(u)) unrs.Add(u);
+                e.Slots.Add((wtag, stunde, unrs));
+            }
+        }
+
+        // Blatt „Plan" (manueller UNr-Plan): je Zeile WTag, Stunde und ab Spalte C je Zelle eine
+        // UNr bis zur ersten leeren Zelle – wie LadeUnrPlanAusExcel im Hauptfenster.
+        private static void LiesUnrPlan(IXLWorksheet ws, RaumEingabe e)
+        {
+            foreach (var row in ws.RowsUsed().Where(r => r.RowNumber() > 1))
+            {
+                string wtag = row.Cell(1).GetString().Trim();
+                if (wtag.Length == 0 || !LiesZahl(row.Cell(2).GetString(), out int stunde)) continue;
+                if (!e.Tage.Contains(wtag, StringComparer.OrdinalIgnoreCase)) e.Tage.Add(wtag);
+
+                var unrs = new List<int>();
+                for (int c = 3; ; c++)
+                {
+                    var zelle = row.Cell(c);
+                    if (zelle.IsEmpty()) break;
+                    if (LiesZahl(zelle.GetString(), out int u) && !unrs.Contains(u)) unrs.Add(u);
+                }
                 e.Slots.Add((wtag, stunde, unrs));
             }
         }

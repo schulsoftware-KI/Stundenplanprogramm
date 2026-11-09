@@ -688,12 +688,14 @@ namespace Stundenplan_V2
         }
 
         // In der UV-Tabelle kommen bei Mehrfachräumen BEIDE Trennzeichen vor:
-        // "RSh1~RSb1" (unverändert aus Untis übernommen, Untis nutzt selbst
-        // Tilde für Raum-Alternativen) und "RSh1,RSb2" (vermutlich manuell
-        // mit Komma nachgetragen). Damit in keinem der beiden Fälle ein Raum
-        // verloren geht, wird hier bei BEIDEN Zeichen gesplittet; für den
-        // Export wird danach einheitlich wieder mit "~" zusammengefügt
-        // (Untis-Syntax für Raum-Alternativen).
+        // "RSh1~RSb1" (unverändert aus Untis übernommen, Untis trennt mehrere
+        // Räume selbst mit der Tilde) und "RSh1,RSb2" (vermutlich manuell
+        // mit Komma nachgetragen). Beide bedeuten: der Unterricht braucht ALLE
+        // genannten Räume gleichzeitig (z. B. Schwimmbad + Halle zum Ausweichen;
+        // Nutzer 09.11.2026, so auch in der Raumverteilung, Raumplan/RaumVerteilung.cs).
+        // Damit in keinem der beiden Fälle ein Raum verloren geht, wird hier bei
+        // BEIDEN Zeichen gesplittet; für den Export wird danach einheitlich wieder
+        // mit "~" zusammengefügt (Untis-Schreibweise für mehrere Räume).
         private static string NormalisiereRaum(string roh, int unr, string feldname, List<string> hinweise)
         {
             var teile = (roh ?? "")
@@ -706,7 +708,7 @@ namespace Stundenplan_V2
                 hinweise.Add(
                     $"UNr {unr}: {feldname} '{roh}' hatte mehrere Räume — " +
                     $"für den Export mit '~' zusammengeführt zu '{string.Join("~", teile)}' " +
-                    "(Untis-Syntax für Raum-Alternativen).");
+                    "(Untis-Schreibweise für mehrere Räume).");
 
             return string.Join("~", teile);
         }

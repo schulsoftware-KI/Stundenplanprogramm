@@ -1420,11 +1420,13 @@ namespace Stundenplan_V2
             };
         }
 
+        // (internal: auch die Raumverteilung, Raum/RaumVerzeichnis.cs, nutzt genau diese
+        // Zuordnung, damit Solver und Raumplan dieselben Fachgruppen sehen.)
         // Fach -> Fachgruppe. Bevorzugt werden die in FGR (ab Spalte C) je Gruppe
         // hinterlegten Präfixe; passt keiner, greift die fest verdrahtete
         // Fallback-Regel. Bei mehreren passenden Präfixen gewinnt der längste
         // (spezifischste), Groß-/Kleinschreibung wird ignoriert.
-        private static string BestimmeFachgruppe(
+        internal static string BestimmeFachgruppe(
             string fach, Dictionary<string, List<string>> praefixe)
         {
             if (string.IsNullOrWhiteSpace(fach))
@@ -1524,7 +1526,7 @@ namespace Stundenplan_V2
             return KlassenGruppen.Baue(zeilen, diagnose);
         }
 
-        private static bool FgrHatKopfzeile(IXLWorkbook workbook)
+        internal static bool FgrHatKopfzeile(IXLWorkbook workbook)
         {
             if (!workbook.Worksheets.Any(ws => ws.Name == "FGR"))
                 return false;
@@ -1538,7 +1540,7 @@ namespace Stundenplan_V2
         // Liest aus dem Blatt "FGR" je Zeile die Fachgruppe (Spalte A) und ihre
         // Präfixe (ab Spalte C bis zur letzten benutzten Zelle der Zeile).
         // Leere Zellen werden übersprungen, Präfixe getrimmt.
-        private static Dictionary<string, List<string>> LiesFachgruppenPraefixe(
+        internal static Dictionary<string, List<string>> LiesFachgruppenPraefixe(
             IXLWorkbook workbook)
         {
             var result = new Dictionary<string, List<string>>();

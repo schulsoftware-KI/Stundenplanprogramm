@@ -111,6 +111,7 @@
             <Button Grid.Row="10" Grid.Column="1" Content="23. Vertretung erfassen" Margin="6,0,0,10" Click="BtnVertretung_Click"/>
 
             <Button Grid.Row="11" Grid.Column="0" Content="24. Tages-Vertretungseditor" Margin="0,0,6,10" Click="BtnTagesEditor_Click"/>
+            <Button Grid.Row="11" Grid.Column="1" Content="25. Räume zuweisen (Raumplan)" Margin="6,0,0,10" Click="BtnRaeumeZuweisen_Click"/>
         </Grid>
 
         <!-- Meldefenster (Protokoll-Log). Feste Höhe, damit es im ScrollViewer

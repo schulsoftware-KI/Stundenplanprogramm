@@ -698,6 +698,40 @@ Es nutzt die oben unter „Plan“ gewählte Plan-Spalte. Code: `src/Vertretung/
 - Kommt in **5.2a-2:** Zuordnung SchILD-Kurse/Sek-I-Gruppen/Kürzel/Fächer ↔ Plan mit `schild_zuordnung.json`;
   danach 5.2b Import.
 
+## Räume zuweisen – Raumplan (Schritt R1, Desktop)
+
+Nur Desktop, **keine API- und keine Schemaänderung, es wird nichts gesendet.** Knopf **„25. Räume zuweisen
+(Raumplan)“** im Hauptfenster öffnet das Fenster „Räume zuweisen“. Code: `src/Raumplan/`, Knopf in
+`src/MainWindow_Raumplan.cs`. Konzept und Entscheidungen 95–102: `claude/Raumplan_Vorschlag.md` (Claude-Projekt).
+
+- **Plan wählen** (Spalte aus `Lös`), Modus **„Behalten und ergänzen“** (Standard, sobald es einen Raumplan
+  gibt: vorhandene Zuweisungen bleiben, nur neue/verschobene Stunden bekommen Räume) oder **„Neu verteilen“**.
+  Die Vorschau rechnet sofort; Reiter **Übersicht** (Zahlen je Herkunft), **Zuweisungen** (Filter „nur Ausweich
+  und Probleme“, Suche), **Räume** (Raumverzeichnis), **Hinweise**. Erst **„Speichern“** schreibt in die Plandatei
+  (sie darf nicht in Excel geöffnet sein).
+- **Regeln je Unterrichtsteil:** Fachraum laut UV – bei `A~B` bzw. `A,B` werden **alle** Räume gleichzeitig
+  gebraucht – sonst anderer Raum derselben Fachgruppe (FGR), Stammraum laut UV, freier Ausweichraum (zuerst
+  derselbe Bereich, sonst Reihenfolge im Blatt „Räume“). Ohne Raumangabe bei genau einer Sek-I-Klasse: deren
+  Stammraum aus den übrigen UV-Zeilen („abgeleitet“). Reihenfolge der Verteilung je Stunde: Sonderräume, Fachräume
+  mit Fachgruppe, übrige Fachräume, Stammräume, Zusatzräume; bei Gleichstand Doppelstunde/mehr Wochenstunden/
+  kleinere UNr. Eine Doppelstunde bleibt im Raum der Vorstunde, wenn er nicht der Wunschraum eines anderen
+  Unterrichts ist. Team-Teaching (gleiche UNr, gleicher Raum) teilt den Raum; A- und B-Woche dürfen denselben
+  Raum belegen. Pseudofächer (UV, VBer, PSF, ufrei, NuHo) bekommen keinen Raum.
+- **Schwimmen:** Ein **Sonderraum** (Schwimmbad) wird nie ersetzt und nie als Ausweich genommen. Steht daneben
+  ein Fachraum (`RSh1~RSb1`), ist dieser **Zusatzraum** (Halle zum gelegentlichen Ausweichen): er wird nach dem
+  übrigen Sportunterricht verteilt – Wunschhalle, sonst jede freie Halle.
+- **Blatt „Raumplan“:** `Plan | WTag | Stunde | UNr | Lehrer | Fach | Klasse(n) | Raum | Wunschraum | Herkunft |
+  Fix (X) | Hinweis` – eine Zeile je Raumbelegung; Zeilen anderer Pläne bleiben beim Speichern stehen.
+  Herkunft: Fachraum, Stammraum, abgeleitet, Fachgruppe, Zusatzraum, Ausweich, fest, ohne Raum.
+  **Von Hand ändern:** in Excel „Raum“ ändern und in „Fix (X)“ ein X setzen – solche Zeilen bleiben bei jedem Lauf.
+- **Blatt „Räume“** (Raumverzeichnis): `Raum | Art | Fachgruppe | als Ausweich | Bereich | Bemerkung`; Art =
+  Klassenraum, Kursraum, Fachraum oder Sonderraum. Fehlt es, wird es beim Speichern (oder mit „Blatt „Räume“
+  anlegen“) aus der UV angelegt – danach in Excel prüfen. Räume aus der UV, die im Blatt fehlen, werden unten
+  angehängt; vorhandene Zeilen ändert das Programm nie. Zusätzliche Räume (z. B. ein freier Raum ohne Klasse)
+  dürfen eingetragen werden und dienen dann als Ausweichraum.
+- **Später:** R2 Räume im Planeditor anzeigen/ändern; R3 Vertretungsmodul (Raumvertretung, Raumsperre) und App
+  (echter Raum statt „Fachraum vor Stammraum“, braucht eine EF-Migration).
+
 ## Nächste Schritte
 
 1. **Schülerkonten aus SchILD** (Phase 5): Import statt Pseudodaten, Zuordnung über `ExtId`.

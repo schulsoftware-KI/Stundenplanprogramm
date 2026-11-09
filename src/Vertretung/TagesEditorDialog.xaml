@@ -52,6 +52,9 @@
                     Margin="16,0,6,0" Click="BtnOnlinePush_Click"/>
             <Button x:Name="BtnGrundplanPush" Content="Grundplan veröffentlichen…" Padding="10,3"
                     Margin="0,0,6,0" Click="BtnGrundplanPush_Click"/>
+            <Button x:Name="BtnSchild" Content="SchILD-Daten…" Padding="10,3"
+                    Margin="0,0,6,0" Click="BtnSchild_Click"
+                    ToolTip="SchILD-NRW-3-Export prüfen oder einen Pseudo-Export erzeugen (liest nur, sendet nichts)"/>
             <Button x:Name="BtnOnlineEinst" Content="Online-Einstellungen…" Padding="10,3"
                     Click="BtnOnlineEinst_Click"/>
         </WrapPanel>

@@ -697,7 +697,9 @@ namespace Stundenplan_V2.Vertretung
             public string? GewaehlterVertreter { get; set; }
             public string Bemerkung { get; set; } = "";
 
-            public Array AlleArten => Enum.GetValues(typeof(Vertretungsart));
+            // Einmal erzeugt (F1): jede Zeile und jedes Lesen bekommt dieselbe Liste.
+            private static readonly Array ArtenListe = Enum.GetValues(typeof(Vertretungsart));
+            public Array AlleArten => ArtenListe;
 
             private Vertretungsart _art = Vertretungsart.Vertretung;
             public Vertretungsart Art

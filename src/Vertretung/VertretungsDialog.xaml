@@ -89,8 +89,12 @@
                             <DataGridTemplateColumn Header="Art" Width="150">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
+                                        <!-- F1 (09.11.2026): UpdateSourceTrigger=PropertyChanged ist nötig. Die Combo
+                                             sitzt im CellTemplate (kein Bearbeitungsmodus); ohne den Zusatz schreibt
+                                             die BindingGroup der Zeile die Auswahl erst beim Zeilen-Commit zurück –
+                                             der nie stattfindet, „Buchen“ las dann die alte Art. -->
                                         <ComboBox ItemsSource="{Binding AlleArten}"
-                                                  SelectedItem="{Binding Art, Mode=TwoWay}"/>
+                                                  SelectedItem="{Binding Art, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>

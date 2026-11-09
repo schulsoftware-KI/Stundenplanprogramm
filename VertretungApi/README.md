@@ -666,6 +666,38 @@ pg_restore -U vertretung --no-owner --no-privileges -d vertretung C:\Temp\rueck\
 (Linux: `gpg --decrypt datei.dump.gpg > sicherung.dump`, dann dieselben drei Befehle.) Danach die Datei
 `sicherung.dump` löschen und die API starten.
 
+## SchILD-Daten prüfen und Pseudo-Export (Phase 5.2a, Desktop)
+
+Nur Desktop, **keine API- und keine Schemaänderung, es wird nichts gesendet.** Im Vertretungs-Wocheneditor
+(Button 24) öffnet **„SchILD-Daten…“** (neben „Grundplan veröffentlichen…“) das Fenster „SchILD-Daten prüfen“.
+Es nutzt die oben unter „Plan“ gewählte Plan-Spalte. Code: `src/Vertretung/Schild/`.
+
+- **Prüflauf:** Ordner mit einem Export aus SchILD-NRW 3 wählen (Textdateien `.dat`, Trennzeichen `|`,
+  Kopfzeile, ANSI oder UTF-8 mit BOM). Gelesen werden nur die Spalten aus `Phase5_Vorschlag` §2.2; alles
+  andere (Noten, Adressen, Konfession, Kennwörter, Lehrkräfte-Adressen …) wird beim Lesen verworfen, Dateien
+  wie `SchuelerZusatzdaten.dat` werden gar nicht geöffnet. Reiter **Übersicht** (Schüler je Status und
+  Jahrgang, Klassen, Kurse, Zugehörigkeiten, Abgleich der Klassen mit dem Plan) und **Probleme** (Datei,
+  Zeile, Spalte, Grund – bei Schülerdateien nie ein Inhalt; gleichartige Meldungen zusammengefasst).
+  **„Bericht kopieren“** liefert einen Text ohne Schülerdaten (Zahlen, Zeilennummern, Klassen-, Kurs- und
+  Fachbezeichnungen, Lehrkräftekürzel). Abschnitt wählbar (Standard: häufigster Abschnitt der aktiven Schüler).
+- **Pseudo-Export erzeugen…:** schreibt aus dem Grundplan `Klassen.dat`, `Kurse.dat` (neues Format),
+  `SchuelerBasisdaten.dat` (50 Spalten), `SchuelerLeistungsdaten.dat` (19), `Lehrkraefte.dat`, `Faecher.dat`,
+  `Jahrgaenge.dat` und optional `SchuelerLernplattformen.dat` (SchILD-ID) mit fiktiven Personen; Standardordner
+  `SchILD-Pseudo_<Datum>` neben der Plandatei. Oberstufe: Kurswahl wie beim bisherigen Seed; Sek-I-Gruppen
+  (Religion, WP) überschneidungsfrei aufgeteilt, Variante „gemischt“ (Jg. 05–07 ohne Kurs, 08–10 mit Kurs).
+  Absichtliche Stolpersteine für die Zuordnung (Fach-/Kürzelabweichungen, SchILD-Kursbezeichnungen,
+  Kooperationskurs, `#Klasse`-Paar, Status 0/1/3/6/9) zeigt das Programm nach dem Erzeugen an.
+  **`PSEUDODATEN.json`** trägt die SHA-256-Prüfsumme jeder Datei: Nur wenn alle stimmen und keine weitere
+  `.dat` im Ordner liegt, gilt er als Pseudodaten. Ein Ordner mit fremden `.dat`-Dateien wird nie überschrieben.
+- **Formatprofil:** Standard = amtliche Beschreibung. Weicht ein echter Export ab, mit „Formatprofil als Datei
+  anlegen…“ die Vorlage `schild_profil.json` neben die Plandatei legen und dort nur Dateinamen,
+  Spaltenüberschriften, Trennzeichen oder Zeichensatz (`auto` | `utf-8` | `windows-1252`) ändern – ohne
+  Neukompilieren.
+- **Echte Exporte** nur auf dem Verwaltungsrechner ablegen (nicht in OneDrive/Teams) und nach Gebrauch löschen.
+  `*.dat` steht in der `.gitignore` (greift beim Hochladen im Browser nicht!).
+- Kommt in **5.2a-2:** Zuordnung SchILD-Kurse/Sek-I-Gruppen/Kürzel/Fächer ↔ Plan mit `schild_zuordnung.json`;
+  danach 5.2b Import.
+
 ## Nächste Schritte
 
 1. **Schülerkonten aus SchILD** (Phase 5): Import statt Pseudodaten, Zuordnung über `ExtId`.

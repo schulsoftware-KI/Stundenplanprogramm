@@ -702,11 +702,13 @@ Es nutzt die oben unter „Plan“ gewählte Plan-Spalte. Code: `src/Vertretung/
   SchILD-Fach kann mehreren Plan-Fächern entsprechen, z. B. `PH` = `P` + `PH`). Automatik je Kurs: Stufe/Jahrgang →
   Fach → Kursart → Lehrkraft (Kursleiter, Zusatzkräfte); passen mehrere, entscheiden nacheinander der **Stundenplan der
   Teilnehmer** (niemand sitzt zur selben Zeit in zwei Kursen), die **Nummer** in der Kursbezeichnung („D-G2“ → 2), bei
-  Sek-I-Kursen die **Klassen der Teilnehmer**, zuletzt das übrig gebliebene Paar. Kürzel/Fächer, die es nur auf einer
+  Sek-I-Kursen die **Klassen der Teilnehmer**, zuletzt das übrig gebliebene Paar (nur, wenn es zum Stundenplan der
+  Teilnehmer passt – sonst bleibt der Kurs offen). Kürzel/Fächer, die es nur auf einer
   Seite gibt, werden **vorgeschlagen** und gelten erst nach „Vorschläge übernehmen“ (Warnung, solange die Zuordnung
   davon abhängt; sonst Hinweis). Zustände: automatisch · von Hand · keine Zuordnung · Vorschlag · offen · Konflikt ·
   veraltet. Zusätzliche Prüfungen: Teilnehmer passen zur Gruppe/Stufe, **Zeitkonflikte** (ein Schüler in zwei
-  zugeordneten Kursen zur selben Stunde), Plan-Kurse ohne SchILD-Kurs, Klassenleitungen ohne Kürzel im Plan.
+  zugeordneten Kursen zur selben Stunde – beide Zeilen stehen im Reiter „Zuordnung“ mit „⚠ Zeitkonflikt“ und gelten als
+  offen), Plan-Kurse ohne SchILD-Kurs, Klassenleitungen ohne Kürzel im Plan.
   Zuordnungsprobleme sind Warnungen, nie Fehler; Meldungen nennen nur Kurs-/Klassen-/Fachbezeichnungen und Kürzel.
   **Festlegen von Hand:** Zeile wählen → „Festlegen auf“ → „Festlegen“ (wirkt sofort im Prüflauf); erst
   **„Zuordnungen speichern“** schreibt die Datei **`schild_zuordnung.json`** neben die Plandatei (für Pseudodaten

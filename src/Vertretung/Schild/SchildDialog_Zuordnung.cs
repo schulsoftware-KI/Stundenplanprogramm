@@ -233,7 +233,7 @@ namespace Stundenplan_V2.Vertretung
                     }
                     Spalte("Teiln.", nameof(SchildZuordnungZeile.Teilnehmer), 48);
                     Spalte("Plan-Kurs", nameof(SchildZuordnungZeile.PlanText), 190);
-                    Spalte("Status", nameof(SchildZuordnungZeile.StatusText), 150);
+                    Spalte("Status", nameof(SchildZuordnungZeile.StatusText), 185);
                     Spalte("Begründung", nameof(SchildZuordnungZeile.Begruendung), 0, true);
                     liste = z.Zeilen.Where(x => x.Art == art && (!nurOffen || x.IstOffen)).ToList();
                     break;
@@ -278,6 +278,9 @@ namespace Stundenplan_V2.Vertretung
                 {
                     TxtZuAuswahl.Text = $"SchILD: {zz.Schild}" + (zz.Art != SchildZuordnungArt.OhneKurs ? $" ({zz.JahrgangAnzeige})" : "") +
                                         $" · {zz.Teilnehmer} Teilnehmer → Plan: {zz.PlanText} ({zz.StatusText}). " +
+                                        (zz.Zeitkonflikt != null
+                                            ? $"⚠ {zz.Zeitkonflikt} – eine der beteiligten Zuordnungen stimmt vermutlich nicht. "
+                                            : "") +
                                         "✓ = passt nach Fach, Kursart und Lehrkraft.";
                     CbZuPlan.Items.Add(new ZuWahl { Text = "(automatisch – Festlegung entfernen)", Art = 0 });
                     CbZuPlan.Items.Add(new ZuWahl { Text = "(keine Zuordnung – gehört zu keinem Plan-Kurs)", Art = 1 });

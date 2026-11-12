@@ -69,8 +69,13 @@ namespace Stundenplan_V2.Vertretung
         public string JahrgangAnzeige => Art == SchildZuordnungArt.OhneKurs ? Klasse
             : Klasse.Length > 0 ? $"{JahrgangText} · Klasse {Klasse}" : JahrgangText;
         public string PlanText => Plan ?? "—";
-        public string StatusText => SchildZuordnung.Text(Status);
-        public bool IstOffen => Status is SchildZuordnungStatus.Vorschlag or SchildZuordnungStatus.Offen
+        /// <summary>
+        /// Zeitkonflikt mit anderen zugeordneten Kursen/Gruppen („mit „KU-G1 (Q2)“ (Di 5.)“), sonst null.
+        /// Eine Zeile mit Zeitkonflikt gilt als offen – egal ob automatisch oder von Hand zugeordnet (Nachtrag 5.2a-2).
+        /// </summary>
+        public string? Zeitkonflikt { get; set; }
+        public string StatusText => SchildZuordnung.Text(Status) + (Zeitkonflikt != null ? " · ⚠ Zeitkonflikt" : "");
+        public bool IstOffen => Zeitkonflikt != null || Status is SchildZuordnungStatus.Vorschlag or SchildZuordnungStatus.Offen
             or SchildZuordnungStatus.Konflikt or SchildZuordnungStatus.Veraltet or SchildZuordnungStatus.OhneGegenstueck;
         public bool HatFestlegung => Status is SchildZuordnungStatus.VonHand or SchildZuordnungStatus.KeineZuordnung
             or SchildZuordnungStatus.Veraltet;
@@ -522,6 +527,12 @@ namespace Stundenplan_V2.Vertretung
                 }
                 int Zeitkonflikte(SchildZuordnungZeile u, SchildPlanKurs p)
                     => u.Teiln.Keys.Count(pk => belegt.TryGetValue(pk, out var l) && l.Any(q => q != p && q.Zeiten.Overlaps(p.Zeiten)));
+                // Plan-Kurse, mit denen sich p für die Teilnehmer von u überschneiden würde (für die Begründung)
+                List<string> Ueberschneidungen(SchildZuordnungZeile u, SchildPlanKurs p)
+                    => u.Teiln.Keys.Where(pk => belegt.ContainsKey(pk))
+                                   .SelectMany(pk => belegt[pk].Where(q => q != p && q.Zeiten.Overlaps(p.Zeiten)))
+                                   .Select(q => q.Schluessel).Distinct(StringComparer.Ordinal)
+                                   .OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
                 List<SchildZuordnungZeile> Rest() => offen.Where(u => !zu.ContainsKey(u)).ToList();
 
                 while (true)
@@ -566,11 +577,12 @@ namespace Stundenplan_V2.Vertretung
                             if (ein.Count == 1) { Setze(u, ein[0], "Gruppe nur dieser Klasse"); fort = true; }
                         }
                     }
-                    // E: als einziger übrig
+                    // E: als einziger übrig – nur, wenn der Stundenplan der Teilnehmer dagegen nichts einwendet
+                    //    (sonst bliebe z. B. nach einer falschen Festlegung von Hand der Nachbarkurs still vertauscht)
                     foreach (var u in Sortiert(Rest()))
                     {
                         var r = Frei(u);
-                        if (r.Count == 1) { Setze(u, r[0], "als einziger übrig"); fort = true; }
+                        if (r.Count == 1 && Zeitkonflikte(u, r[0]) == 0) { Setze(u, r[0], "als einziger übrig"); fort = true; }
                     }
                     if (!fort) break;
                 }
@@ -608,11 +620,20 @@ namespace Stundenplan_V2.Vertretung
                         };
                     }
                     else
+                    {
+                        var frei = Frei(u);
+                        int nz = frei.Count == 1 ? Zeitkonflikte(u, frei[0]) : 0;
+                        var mit = nz > 0 ? Ueberschneidungen(u, frei[0]) : new List<string>();
                         res[u] = new Treffer
                         {
                             Status = alt != null ? SchildZuordnungStatus.Veraltet : SchildZuordnungStatus.Offen, Kand = kand,
-                            Grund = pre + "mehrdeutig: " + string.Join(", ", Frei(u).Select(p => p.Schluessel))
+                            Grund = pre + (nz > 0
+                                ? $"einziger freier Plan-Kurs „{frei[0].Schluessel}“ passt nicht zum Stundenplan der Teilnehmer " +
+                                  $"({nz} Teilnehmer hätten dann zur selben Zeit auch {string.Join(", ", mit.Take(3))}" +
+                                  (mit.Count > 3 ? " …" : "") + ") – vermutlich stimmt eine dieser Zuordnungen nicht"
+                                : "mehrdeutig: " + string.Join(", ", frei.Select(p => p.Schluessel)))
                         };
+                    }
                 }
 
                 // ---- Sek I ohne Kurs ----
@@ -995,20 +1016,31 @@ namespace Stundenplan_V2.Vertretung
                     }
                 }
 
-                // Zeitkonflikte (114): ein Schüler zur selben Stunde in zwei zugeordneten Kursen/Gruppen
-                var mitglied = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
+                // Zeitkonflikte (114): ein Schüler zur selben Stunde in zwei zugeordneten Kursen/Gruppen.
+                // Nachtrag 5.2a-2: beide beteiligten Zeilen werden im Reiter „Zuordnung“ markiert und gelten als offen.
+                string Lab(SchildZuordnungZeile x)
+                    => x.Art == SchildZuordnungArt.OhneKurs ? $"{x.Klasse} {x.FachText} {x.Fachlehrer}" : $"{x.KursBez} ({x.JahrgangText})";
+                string ZeitText((int Tag, int Stunde) zt)
+                    => (_plan.TagNamen.TryGetValue(zt.Tag, out var tn) ? tn : zt.Tag.ToString(CultureInfo.InvariantCulture)) + $" {zt.Stunde}.";
+                var mitglied = new Dictionary<string, Dictionary<string, SchildZuordnungZeile>>(StringComparer.Ordinal);
                 foreach (var u in _kurse.Concat(_ohne))
                 {
                     var r = res[u];
                     if (r.Plan == null || !Zugeordnet(r.Status)) continue;
-                    string lab = u.Art == SchildZuordnungArt.OhneKurs ? $"{u.Klasse} {u.FachText} {u.Fachlehrer}" : $"{u.KursBez} ({u.JahrgangText})";
                     foreach (var pk in u.Teiln.Keys)
                     {
-                        if (!mitglied.TryGetValue(pk, out var d)) mitglied[pk] = d = new Dictionary<string, string>(StringComparer.Ordinal);
-                        d.TryAdd(r.Plan, lab);
+                        if (!mitglied.TryGetValue(pk, out var d))
+                            mitglied[pk] = d = new Dictionary<string, SchildZuordnungZeile>(StringComparer.Ordinal);
+                        d.TryAdd(r.Plan, u);
                     }
                 }
-                var paare = new Dictionary<(string A, string B), (int N, string La, string Lb, (int Tag, int Stunde) Z)>();
+                var paare = new Dictionary<(string A, string B), (int N, SchildZuordnungZeile Ua, SchildZuordnungZeile Ub, (int Tag, int Stunde) Z)>();
+                var beteiligt = new Dictionary<SchildZuordnungZeile, List<(SchildZuordnungZeile Mit, (int Tag, int Stunde) Z)>>();
+                void Merke(SchildZuordnungZeile wer, SchildZuordnungZeile mit, (int Tag, int Stunde) zt)
+                {
+                    if (!beteiligt.TryGetValue(wer, out var bl)) beteiligt[wer] = bl = new();
+                    if (!bl.Any(e => e.Mit == mit)) bl.Add((mit, zt));
+                }
                 foreach (var d in mitglied.Values)
                 {
                     var ks = d.Keys.OrderBy(x => x, StringComparer.Ordinal).ToList();
@@ -1017,25 +1049,33 @@ namespace Stundenplan_V2.Vertretung
                         {
                             var z = _plan.Kurse[ks[i]].Zeiten.Intersect(_plan.Kurse[ks[j]].Zeiten).ToList();
                             if (z.Count == 0) continue;
+                            var zm = z.Min();
                             var key = (ks[i], ks[j]);
                             paare[key] = paare.TryGetValue(key, out var alt)
-                                ? (alt.N + 1, alt.La, alt.Lb, alt.Z)
-                                : (1, d[ks[i]], d[ks[j]], z.Min());
+                                ? (alt.N + 1, alt.Ua, alt.Ub, alt.Z)
+                                : (1, d[ks[i]], d[ks[j]], zm);
+                            Merke(d[ks[i]], d[ks[j]], zm);
+                            Merke(d[ks[j]], d[ks[i]], zm);
                         }
                 }
                 _e.Zeitkonflikte = paare.Count;
+                foreach (var (wz, wl) in beteiligt)
+                {
+                    var texte = wl.OrderBy(e => Lab(e.Mit), StringComparer.Ordinal).Select(e => $"„{Lab(e.Mit)}“ ({ZeitText(e.Z)})").ToList();
+                    wz.Zeitkonflikt = "Zeitkonflikt mit " + string.Join(", ", texte.Take(3)) + (texte.Count > 3 ? $" (+{texte.Count - 3})" : "");
+                    wz.Begruendung = (wz.Begruendung.Length > 0 ? wz.Begruendung + "; " : "") + "⚠ " + wz.Zeitkonflikt;
+                }
                 int nr = 0;
-                foreach (var ((a, b), (n, la, lb, z)) in paare.OrderBy(kv => kv.Key.A, StringComparer.Ordinal).ThenBy(kv => kv.Key.B, StringComparer.Ordinal))
+                foreach (var ((a, b), (n, ua, ub, z)) in paare.OrderBy(kv => kv.Key.A, StringComparer.Ordinal).ThenBy(kv => kv.Key.B, StringComparer.Ordinal))
                 {
                     if (++nr > MaxKonfliktMeldungen)
                     {
                         P(SchildProblemArt.Warnung, "Zuordnung", $"… und {paare.Count - MaxKonfliktMeldungen} weitere Kurspaare mit Zeitkonflikt.");
                         break;
                     }
-                    string tag = _plan.TagNamen.TryGetValue(z.Tag, out var t) ? t : z.Tag.ToString(CultureInfo.InvariantCulture);
                     P(SchildProblemArt.Warnung, "Zuordnung",
-                      $"Zeitkonflikt: „{la}“ → {_plan.Kurse[a].Schluessel} und „{lb}“ → {_plan.Kurse[b].Schluessel} liegen beide " +
-                      $"{tag} {z.Stunde}. – {n} Schüler wären in beiden. Eine der beiden Zuordnungen stimmt vermutlich nicht.");
+                      $"Zeitkonflikt: „{Lab(ua)}“ → {_plan.Kurse[a].Schluessel} und „{Lab(ub)}“ → {_plan.Kurse[b].Schluessel} liegen beide " +
+                      $"{ZeitText(z)} – {n} Schüler wären in beiden. Eine der beiden Zuordnungen stimmt vermutlich nicht.");
                 }
 
                 // Kürzel/Fächer ohne Gegenstück, Klassenleitung (Hinweise)
@@ -1064,6 +1104,8 @@ namespace Stundenplan_V2.Vertretung
                     var teile = Enum.GetValues<SchildZuordnungStatus>()
                                     .Select(st => (st, n: liste.Count(u => res[u].Status == st)))
                                     .Where(x => x.n > 0).Select(x => $"{x.n} {Text(x.st)}").ToList();
+                    int mitZk = liste.Count(u => u.Zeitkonflikt != null);
+                    if (mitZk > 0) teile.Add($"davon {mitZk} mit Zeitkonflikt");
                     return $"{liste.Count}" + (teile.Count > 0 ? ": " + string.Join(" · ", teile) : "");
                 }
                 Z("Oberstufenkurse", Zaehl(_kurse.Where(u => u.Art == SchildZuordnungArt.Oberstufe)));

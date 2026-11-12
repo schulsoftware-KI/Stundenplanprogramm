@@ -172,6 +172,10 @@ namespace Stundenplan_V2.Vertretung
         public string Dateiname { get; set; } = "";
         public bool Pflicht { get; set; }
         public bool Vorhanden { get; set; }
+        /// <summary>Datei wurde ausgewertet. Vorhanden, aber nicht gelesen → NichtGelesen nennt den Grund (5.2a-2).</summary>
+        public bool Gelesen { get; set; }
+        /// <summary>„Kopfzeile fehlerhaft“, „Datei leer“ oder „nicht lesbar“.</summary>
+        public string NichtGelesen { get; set; } = "";
         public string Zeichensatz { get; set; } = "";
         public int Datenzeilen { get; set; }
         public int Spalten { get; set; }
@@ -198,7 +202,10 @@ namespace Stundenplan_V2.Vertretung
         public List<SchildJahrgang> Jahrgaenge { get; } = new();
 
         public SchildDateiInfo? Info(SchildDateiArt art) => Dateien.FirstOrDefault(d => d.Art == art);
-        public bool Hat(SchildDateiArt art) => Info(art)?.Vorhanden == true;
+        /// <summary>Datei ist vorhanden UND wurde gelesen (seit 5.2a-2: eine Datei mit fehlerhafter Kopfzeile zählt als fehlend).</summary>
+        public bool Hat(SchildDateiArt art) => Info(art)?.Gelesen == true;
+        /// <summary>Datei liegt im Ordner, konnte aber nicht ausgewertet werden.</summary>
+        public bool NichtGelesen(SchildDateiArt art) => Info(art) is { Vorhanden: true, Gelesen: false };
 
         public void Problem(SchildProblemArt art, string datei, int? zeile, string? spalte, string grund)
             => Probleme.Add(new SchildProblem { Art = art, Datei = datei, Zeile = zeile, Spalte = spalte, Grund = grund });

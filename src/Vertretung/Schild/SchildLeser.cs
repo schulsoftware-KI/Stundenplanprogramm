@@ -147,6 +147,7 @@ namespace Stundenplan_V2.Vertretung
             {
                 ex.Problem(SchildProblemArt.Fehler, dp.Datei, null, null,
                     "Datei kann nicht gelesen werden (" + e.GetType().Name + "; in einem anderen Programm geöffnet?).");
+                info.NichtGelesen = "nicht lesbar";
                 return null;
             }
 
@@ -158,6 +159,7 @@ namespace Stundenplan_V2.Vertretung
             if (zeilen.Count == 0)
             {
                 ex.Problem(SchildProblemArt.Fehler, dp.Datei, null, null, "Datei ist leer (keine Kopfzeile).");
+                info.NichtGelesen = "Datei leer";
                 return null;
             }
 
@@ -168,6 +170,7 @@ namespace Stundenplan_V2.Vertretung
             {
                 ex.Problem(SchildProblemArt.Fehler, dp.Datei, 1, null,
                     $"Kopfzeile enthält kein Trennzeichen „{trenn}“ – falsches Format oder Trennzeichen?");
+                info.NichtGelesen = "Kopfzeile fehlerhaft";
                 return null;
             }
 
@@ -198,7 +201,7 @@ namespace Stundenplan_V2.Vertretung
                 }
                 else { index[feld] = i; tab.Kopf[feld] = kopf[i].Trim(); }
             }
-            if (!ok) return null;
+            if (!ok) { info.NichtGelesen = "Kopfzeile fehlerhaft"; return null; }
 
             foreach (var feld in optional)
             {
@@ -274,6 +277,7 @@ namespace Stundenplan_V2.Vertretung
             }
 
             info.Datenzeilen = tab.Zeilen.Count;
+            info.Gelesen = true;
             if (leer > 0)
                 ex.Problem(SchildProblemArt.Hinweis, dp.Datei, null, null, $"{leer} leere Zeile(n) übersprungen.");
             if (kurz > 0)
@@ -378,6 +382,8 @@ namespace Stundenplan_V2.Vertretung
             {
                 ex.Problem(SchildProblemArt.Fehler, t.Datei, 1, "Klasse",
                     "Spalte fehlt in der Kopfzeile (neues Format) – und „Klassenunterricht“ (altes Format) fehlt auch.");
+                var info = ex.Info(SchildDateiArt.Kurse);
+                if (info != null) { info.Gelesen = false; info.NichtGelesen = "Kopfzeile fehlerhaft"; }
                 return;
             }
             if (alt)
@@ -425,6 +431,7 @@ namespace Stundenplan_V2.Vertretung
                     Abschnitt = OptZahl(t, z, "Abschnitt", m), Jahrgang = z.W("Jahrgang")
                 };
                 ex.KursLehrkraefte.Add(kl);
+                if (!ex.Hat(SchildDateiArt.Kurse)) continue;   // Kurse.dat nicht gelesen: keine Folgemeldungen (5.2a-2)
 
                 var treffer = ex.Kurse.Where(k => SchildText.Gleich(k.KursBez, bez)
                                                   && (kl.Jahr == null || k.Jahr == kl.Jahr)

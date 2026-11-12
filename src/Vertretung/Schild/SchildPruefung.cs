@@ -9,35 +9,19 @@ using System.Text;
 namespace Stundenplan_V2.Vertretung
 {
     // =====================================================================
-    //  SchildPruefung – Phase 5.2a-1: Prüflauf über einen gelesenen Export.
+    //  SchildPruefung – Phase 5.2a: Prüflauf über einen gelesenen Export.
     //  Zahlen (Schüler je Status/Jahrgang, Klassen, Kurse, Zugehörigkeiten)
     //  und Probleme (Verweise ins Leere, doppelte Schüler, Abgleich der
-    //  Klassen mit dem Plan). Die Zuordnung Kurse/Kürzel/Fächer ↔ Plan folgt
-    //  in 5.2a-2.
+    //  Klassen mit dem Plan). Seit 5.2a-2 zusätzlich die Zuordnung
+    //  Kurse/Sek-I-Gruppen/Kürzel/Fächer ↔ Plan (SchildZuordnung). Konnte eine
+    //  Datei nicht gelesen werden, entfallen die Prüfungen, die sie brauchen –
+    //  statt vieler Folgemeldungen ein Hinweis.
     //
     //  Meldungen (Entscheidungen 87, 91): zu Schülern nur Datei + Zeile +
     //  Grund; Klassen-, Kurs- und Fachbezeichnungen sowie Lehrkräftekürzel
     //  dürfen genannt werden. Der Bericht enthält keine Schülerdaten.
     //  Sendet nichts.
     // =====================================================================
-
-    public sealed class SchildPlanInfo
-    {
-        public string Bezeichnung { get; set; } = "";
-        public HashSet<string> Klassen { get; } = new(StringComparer.OrdinalIgnoreCase);
-        public HashSet<string> Stufen { get; } = new(StringComparer.OrdinalIgnoreCase);
-
-        public static SchildPlanInfo Aus(GrundplanPushDto dto)
-        {
-            var p = new SchildPlanInfo { Bezeichnung = dto.Bezeichnung ?? "" };
-            foreach (var s in dto.Slots.Where(s2 => s2.Art == "Unterricht"))
-            {
-                if (s.LerngruppeTyp == "Klasse" && s.LerngruppeKey.Length > 0) p.Klassen.Add(s.LerngruppeKey);
-                else if (s.LerngruppeTyp == "Kurs" && !string.IsNullOrWhiteSpace(s.Klasse)) p.Stufen.Add(s.Klasse!.Trim());
-            }
-            return p;
-        }
-    }
 
     public sealed class SchildZahl
     {
@@ -60,6 +44,8 @@ namespace Stundenplan_V2.Vertretung
         public int Abschnitt { get; set; }
         public List<SchildZahl> Zahlen { get; } = new();
         public List<SchildProblem> Probleme { get; } = new();
+        /// <summary>Zuordnung SchILD ↔ Plan (5.2a-2); null, wenn kein Plan oder keine Kurse.dat.</summary>
+        public SchildZuordnungErgebnis? Zuordnung { get; set; }
 
         public int Anzahl(SchildProblemArt art) => Probleme.Count(p => p.Art == art);
 
@@ -157,7 +143,8 @@ namespace Stundenplan_V2.Vertretung
 
         // ---- Prüflauf ----
 
-        public static SchildPruefErgebnis Pruefe(SchildExport ex, int jahr, int abschnitt, SchildPlanInfo? plan)
+        public static SchildPruefErgebnis Pruefe(SchildExport ex, int jahr, int abschnitt, SchildPlanInfo? plan,
+                                                 SchildZuordnungDatei? zuordnung = null)
         {
             var e = new SchildPruefErgebnis { Jahr = jahr, Abschnitt = abschnitt };
             var s = new Sammler();
@@ -173,9 +160,27 @@ namespace Stundenplan_V2.Vertretung
             // ---------- Dateien ----------
             Z("Dateien", "Art der Daten", ex.IstPseudo ? "Pseudodaten" : "echte Daten");
             foreach (var d in ex.Dateien)
-                Z("Dateien", d.Dateiname, d.Vorhanden
-                    ? $"{d.Datenzeilen} Zeilen · {d.Spalten} Spalten · {d.Zeichensatz}"
-                    : d.Pflicht ? "FEHLT" : "nicht vorhanden (optional)");
+                Z("Dateien", d.Dateiname,
+                    !d.Vorhanden ? (d.Pflicht ? "FEHLT" : "nicht vorhanden (optional)")
+                    : d.Gelesen ? $"{d.Datenzeilen} Zeilen · {d.Spalten} Spalten · {d.Zeichensatz}"
+                    : $"nicht gelesen – {(d.NichtGelesen.Length > 0 ? d.NichtGelesen : "fehlerhaft")}");
+
+            // Nicht gelesene Dateien: die Prüfungen, die sie brauchen, entfallen (ein Hinweis statt Folgemeldungen).
+            bool basisOk = ex.Hat(SchildDateiArt.Basisdaten), kurseOk = ex.Hat(SchildDateiArt.Kurse);
+            bool leistOk = ex.Hat(SchildDateiArt.Leistungsdaten), klassenOk = ex.Hat(SchildDateiArt.Klassen);
+            void Entfaellt(string datei, string was)
+                => e.Probleme.Add(new SchildProblem
+                {
+                    Art = SchildProblemArt.Hinweis, Datei = datei,
+                    Grund = $"{was} entfallen, weil {datei} nicht gelesen werden konnte."
+                });
+            if (!basisOk) Entfaellt(fBa, "Weitere Prüfungen der Schülerdaten");
+            if (!klassenOk) Entfaellt(fKl, "Prüfungen der Klassen und der Abgleich der Klassen mit dem Plan");
+            if (!kurseOk) Entfaellt(fKu, "Prüfungen der Kurse, die Kurszugehörigkeit der Leistungsdaten und die Zuordnung");
+            if (!leistOk) Entfaellt(fLe, "Prüfungen der Kursteilnahme");
+            foreach (var art in new[] { SchildDateiArt.KurseLehrkraefte, SchildDateiArt.Lernplattformen, SchildDateiArt.Lehrkraefte,
+                                        SchildDateiArt.Faecher, SchildDateiArt.Jahrgaenge })
+                if (ex.NichtGelesen(art)) Entfaellt(Name(ex, art), "Prüfungen mit dieser Datei");
 
             var lehrkraefte = ex.Hat(SchildDateiArt.Lehrkraefte)
                 ? new HashSet<string>(ex.Lehrkraefte.Select(l => l.Kuerzel), StringComparer.OrdinalIgnoreCase) : null;
@@ -188,54 +193,59 @@ namespace Stundenplan_V2.Vertretung
             var imAbschnitt = ex.Schueler.Where(x => x.Jahr == null || x.Abschnitt == null ||
                                                      (x.Jahr == jahr && x.Abschnitt == abschnitt)).ToList();
             int andere = ex.Schueler.Count - imAbschnitt.Count;
-            Z("Schüler", "Zeilen in den Basisdaten", ex.Schueler.Count);
-            Z("Schüler", "davon im gewählten Abschnitt", imAbschnitt.Count);
-            if (andere > 0)
-                e.Probleme.Add(new SchildProblem
-                {
-                    Art = SchildProblemArt.Hinweis, Datei = fBa,
-                    Grund = $"{andere} Schüler stehen in einem anderen Abschnitt (z. B. Abgänge früherer Halbjahre) – " +
-                            "sie werden nicht berücksichtigt."
-                });
+            if (!basisOk) Z("Schüler", fBa, "nicht gelesen – Prüfungen der Schülerdaten entfallen");
+            else
+            {
+                Z("Schüler", "Zeilen in den Basisdaten", ex.Schueler.Count);
+                Z("Schüler", "davon im gewählten Abschnitt", imAbschnitt.Count);
+                if (andere > 0)
+                    e.Probleme.Add(new SchildProblem
+                    {
+                        Art = SchildProblemArt.Hinweis, Datei = fBa,
+                        Grund = $"{andere} Schüler stehen in einem anderen Abschnitt (z. B. Abgänge früherer Halbjahre) – " +
+                                "sie werden nicht berücksichtigt."
+                    });
 
-            (int Status, string Text)[] statusTexte =
-            {
-                (2, "aktiv (Status 2)"), (3, "beurlaubt (3)"), (0, "Neuaufnahme (0) – ab Aufnahmedatum"),
-                (6, "extern (6) – nur in Kursen"), (1, "Warteliste (1) – wird nicht übernommen"),
-                (8, "Abschluss (8) – Abgang"), (9, "Abgang ohne Abschluss (9)")
-            };
-            foreach (var (st, text) in statusTexte)
-            {
-                int n = imAbschnitt.Count(x => x.Status == st);
-                if (n > 0 || st == 2) Z("Schüler", text, n);
+                (int Status, string Text)[] statusTexte =
+                {
+                    (2, "aktiv (Status 2)"), (3, "beurlaubt (3)"), (0, "Neuaufnahme (0) – ab Aufnahmedatum"),
+                    (6, "extern (6) – nur in Kursen"), (1, "Warteliste (1) – wird nicht übernommen"),
+                    (8, "Abschluss (8) – Abgang"), (9, "Abgang ohne Abschluss (9)")
+                };
+                foreach (var (st, text) in statusTexte)
+                {
+                    int n = imAbschnitt.Count(x => x.Status == st);
+                    if (n > 0 || st == 2) Z("Schüler", text, n);
+                }
+
+                var klassenSchueler = imAbschnitt.Where(x => x.Status is 0 or 2 or 3).ToList();
+                foreach (var g in klassenSchueler.GroupBy(x => x.Jahrgang.Length > 0 ? x.Jahrgang : "(ohne Jahrgang)", StringComparer.OrdinalIgnoreCase)
+                                                 .OrderBy(gr => JahrgangRang(gr.Key, jahrgaengeDatei)).ThenBy(gr => gr.Key))
+                    Z("Schüler je Jahrgang (Status 0/2/3)", $"Jahrgang {g.Key}", g.Count());
+
+                foreach (var x in klassenSchueler.Where(x2 => x2.Klasse.Length == 0))
+                    s.Add(SchildProblemArt.Warnung, fBa, "Klasse", "Schüler (Status 0/2/3) ohne Klasse", x.Zeile);
+
+                foreach (var g in imAbschnitt.GroupBy(x => x.PersonSchluessel).Where(g2 => g2.Count() > 1))
+                {
+                    var zeilen = g.Select(x => x.Zeile).OrderBy(z => z).ToList();
+                    e.Probleme.Add(new SchildProblem
+                    {
+                        Art = SchildProblemArt.Fehler, Datei = fBa, Zeile = zeilen[0],
+                        Grund = $"gleicher Name und Geburtsdatum wie in Zeile {string.Join(", ", zeilen.Skip(1))} – " +
+                                "SchILD unterscheidet solche Schüler mit „#Klasse“ am Nachnamen."
+                    });
+                }
+                foreach (var g in imAbschnitt.GroupBy(x => SchildText.PersonSchluessel(x.Nachname, "", x.Vorname, x.Geburtsdatum))
+                                             .Where(gr => gr.Count() > 1 && gr.Select(x => x.Zusatz.ToUpperInvariant()).Distinct().Count() == gr.Count()))
+                    e.Probleme.Add(new SchildProblem
+                    {
+                        Art = SchildProblemArt.Hinweis, Datei = fBa, Zeile = g.Min(x => x.Zeile),
+                        Grund = $"{g.Count()} Schüler mit gleichem Namen und Geburtsdatum werden durch „#Klasse“ unterschieden " +
+                                $"(Zeilen {string.Join(", ", g.Select(x => x.Zeile).OrderBy(z => z))})."
+                    });
             }
-
-            var klassenSchueler = imAbschnitt.Where(x => x.Status is 0 or 2 or 3).ToList();
-            foreach (var g in klassenSchueler.GroupBy(x => x.Jahrgang.Length > 0 ? x.Jahrgang : "(ohne Jahrgang)", StringComparer.OrdinalIgnoreCase)
-                                             .OrderBy(gr => JahrgangRang(gr.Key, jahrgaengeDatei)).ThenBy(gr => gr.Key))
-                Z("Schüler je Jahrgang (Status 0/2/3)", $"Jahrgang {g.Key}", g.Count());
-
-            foreach (var x in klassenSchueler.Where(x2 => x2.Klasse.Length == 0))
-                s.Add(SchildProblemArt.Warnung, fBa, "Klasse", "Schüler (Status 0/2/3) ohne Klasse", x.Zeile);
-
-            foreach (var g in imAbschnitt.GroupBy(x => x.PersonSchluessel).Where(g2 => g2.Count() > 1))
-            {
-                var zeilen = g.Select(x => x.Zeile).OrderBy(z => z).ToList();
-                e.Probleme.Add(new SchildProblem
-                {
-                    Art = SchildProblemArt.Fehler, Datei = fBa, Zeile = zeilen[0],
-                    Grund = $"gleicher Name und Geburtsdatum wie in Zeile {string.Join(", ", zeilen.Skip(1))} – " +
-                            "SchILD unterscheidet solche Schüler mit „#Klasse“ am Nachnamen."
-                });
-            }
-            foreach (var g in imAbschnitt.GroupBy(x => SchildText.PersonSchluessel(x.Nachname, "", x.Vorname, x.Geburtsdatum))
-                                         .Where(gr => gr.Count() > 1 && gr.Select(x => x.Zusatz.ToUpperInvariant()).Distinct().Count() == gr.Count()))
-                e.Probleme.Add(new SchildProblem
-                {
-                    Art = SchildProblemArt.Hinweis, Datei = fBa, Zeile = g.Min(x => x.Zeile),
-                    Grund = $"{g.Count()} Schüler mit gleichem Namen und Geburtsdatum werden durch „#Klasse“ unterschieden " +
-                            $"(Zeilen {string.Join(", ", g.Select(x => x.Zeile).OrderBy(z => z))})."
-                });
+            var klassenSchuelerAlle = imAbschnitt.Where(x => x.Status is 0 or 2 or 3).ToList();
 
             // ---------- Klassen ----------
             var klassen = ex.Klassen.Where(k => (k.Jahr == null || k.Jahr == jahr) &&
@@ -255,14 +265,14 @@ namespace Stundenplan_V2.Vertretung
                 });
             var klassenSet = new HashSet<string>(klassen.Select(k => k.InternBez), StringComparer.OrdinalIgnoreCase);
 
-            if (ex.Hat(SchildDateiArt.Klassen))
+            if (klassenOk && basisOk)
             {
-                foreach (var g in klassenSchueler.Where(x => x.Klasse.Length > 0 && !klassenSet.Contains(x.Klasse))
+                foreach (var g in klassenSchuelerAlle.Where(x => x.Klasse.Length > 0 && !klassenSet.Contains(x.Klasse))
                                                  .GroupBy(x => x.Klasse, StringComparer.OrdinalIgnoreCase))
                     foreach (var x in g)
                         s.Add(SchildProblemArt.Fehler, fBa, "Klasse", $"Klasse „{g.Key}“ fehlt in Klassen.dat", x.Zeile);
 
-                var mitSchuelern = new HashSet<string>(klassenSchueler.Select(x => x.Klasse), StringComparer.OrdinalIgnoreCase);
+                var mitSchuelern = new HashSet<string>(klassenSchuelerAlle.Select(x => x.Klasse), StringComparer.OrdinalIgnoreCase);
                 var leer = klassen.Where(k => !mitSchuelern.Contains(k.InternBez)).Select(k => k.InternBez).ToList();
                 if (leer.Count > 0)
                     e.Probleme.Add(new SchildProblem
@@ -341,31 +351,40 @@ namespace Stundenplan_V2.Vertretung
 
             foreach (var l in ld)
             {
-                if (!schuelerNach.TryGetValue(l.PersonSchluessel, out var sch))
+                SchildSchueler? sch = null;
+                if (basisOk)
                 {
-                    s.Add(SchildProblemArt.Fehler, fLe, null,
-                        alleNach.ContainsKey(l.PersonSchluessel)
-                            ? "Schüler steht in den Basisdaten in einem anderen Abschnitt"
-                            : "Schüler nicht in SchuelerBasisdaten.dat gefunden (Name, Vorname, Geburtsdatum)", l.Zeile);
-                    continue;
+                    if (!schuelerNach.TryGetValue(l.PersonSchluessel, out sch))
+                    {
+                        s.Add(SchildProblemArt.Fehler, fLe, null,
+                            alleNach.ContainsKey(l.PersonSchluessel)
+                                ? "Schüler steht in den Basisdaten in einem anderen Abschnitt"
+                                : "Schüler nicht in SchuelerBasisdaten.dat gefunden (Name, Vorname, Geburtsdatum)", l.Zeile);
+                        continue;
+                    }
+                    if (sch.Status == 1) continue;   // Warteliste: nicht übernehmen
+                    mitLeistung.Add(sch);
                 }
-                if (sch.Status == 1) continue;   // Warteliste: nicht übernehmen
-                mitLeistung.Add(sch);
 
                 if (!gesehen.Add($"{l.PersonSchluessel}|{l.Fach.ToUpperInvariant()}|{l.Kurs.ToUpperInvariant()}"))
                     s.Add(SchildProblemArt.Warnung, fLe, null, "doppelte Zeile (gleicher Schüler, gleiches Fach, gleicher Kurs)", l.Zeile);
 
                 if (l.Kurs.Length > 0)
                 {
-                    var kand = kursNachBez.TryGetValue(l.Kurs, out var kl)
-                        ? kl.Where(k => k.PasstZuJahrgang(sch.Jahrgang)).ToList() : new List<SchildKurs>();
-                    if (kand.Count == 1) zugehoerig.Add((sch, kand[0]));
-                    else if (kand.Count == 0)
-                        s.Add(SchildProblemArt.Fehler, fLe, "Kurs",
-                            $"Kurs „{l.Kurs}“ für Jahrgang {(sch.Jahrgang.Length > 0 ? sch.Jahrgang : "(leer)")} nicht in Kurse.dat", l.Zeile);
-                    else
-                        s.Add(SchildProblemArt.Fehler, fLe, "Kurs",
-                            $"Kurs „{l.Kurs}“ für Jahrgang {sch.Jahrgang} ist in Kurse.dat mehrdeutig", l.Zeile);
+                    // Ohne Basisdaten (Jahrgang unbekannt) oder ohne Kurse.dat keine Kursprüfung – sonst nur Folgemeldungen.
+                    if (sch != null && kurseOk)
+                    {
+                        string jg = sch.Jahrgang;
+                        var kand = kursNachBez.TryGetValue(l.Kurs, out var kl)
+                            ? kl.Where(k => k.PasstZuJahrgang(jg)).ToList() : new List<SchildKurs>();
+                        if (kand.Count == 1) zugehoerig.Add((sch, kand[0]));
+                        else if (kand.Count == 0)
+                            s.Add(SchildProblemArt.Fehler, fLe, "Kurs",
+                                $"Kurs „{l.Kurs}“ für Jahrgang {(jg.Length > 0 ? jg : "(leer)")} nicht in Kurse.dat", l.Zeile);
+                        else
+                            s.Add(SchildProblemArt.Fehler, fLe, "Kurs",
+                                $"Kurs „{l.Kurs}“ für Jahrgang {jg} ist in Kurse.dat mehrdeutig", l.Zeile);
+                    }
                 }
                 else klassenverband++;
 
@@ -377,19 +396,20 @@ namespace Stundenplan_V2.Vertretung
 
             // Kurse für eine ganze Klasse (KursBez + Klasse): alle Schüler der Klasse gehören dazu.
             foreach (var k in echteKurse.Where(k2 => k2.Klasse.Length > 0))
-                foreach (var x in klassenSchueler.Where(x2 => SchildText.Gleich(x2.Klasse, k.Klasse)))
+                foreach (var x in klassenSchuelerAlle.Where(x2 => SchildText.Gleich(x2.Klasse, k.Klasse)))
                     zugehoerig.Add((x, k));
 
             Z("Leistungsdaten", "Zeilen im Abschnitt", ld.Count);
             if (ldAndere > 0) Z("Leistungsdaten", "Zeilen anderer Abschnitte (übersprungen)", ldAndere);
             Z("Leistungsdaten", "Unterricht im Klassenverband (Zeilen ohne Kurs)", klassenverband);
-            Z("Zugehörigkeiten", "Klassen (Schüler mit Klasse, Status 0/2/3)", klassenSchueler.Count(x => x.Klasse.Length > 0));
+            Z("Zugehörigkeiten", "Klassen (Schüler mit Klasse, Status 0/2/3)", klassenSchuelerAlle.Count(x => x.Klasse.Length > 0));
             Z("Zugehörigkeiten", "Kurse (Schüler × Kurs)", zugehoerig.Count);
             Z("Zugehörigkeiten", "Schüler mit mindestens einem Kurs", zugehoerig.Select(z => z.Item1).Distinct().Count());
             var genutzt = new HashSet<SchildKurs>(zugehoerig.Select(z => z.Item2));
             var leereKurse = echteKurse.Where(k => !genutzt.Contains(k)).ToList();
-            Z("Zugehörigkeiten", "Kurse ohne Teilnehmer", leereKurse.Count);
-            if (leereKurse.Count > 0)
+            bool teilnahmeOk = basisOk && leistOk && kurseOk;
+            Z("Zugehörigkeiten", "Kurse ohne Teilnehmer", teilnahmeOk ? leereKurse.Count.ToString(CultureInfo.CurrentCulture) : "– (nicht prüfbar)");
+            if (teilnahmeOk && leereKurse.Count > 0)
                 e.Probleme.Add(new SchildProblem
                 {
                     Art = SchildProblemArt.Hinweis, Datei = fKu, Zeile = leereKurse[0].Zeile,
@@ -397,7 +417,7 @@ namespace Stundenplan_V2.Vertretung
                             Kurzliste(leereKurse.Select(k => $"{k.KursBez} ({k.JahrgangText})").ToList())
                 });
 
-            if (ex.Hat(SchildDateiArt.Leistungsdaten))
+            if (leistOk && basisOk)
             {
                 foreach (var x in imAbschnitt.Where(x2 => x2.Status == 2 && !mitLeistung.Contains(x2)))
                     s.Add(SchildProblemArt.Warnung, fBa, null, "aktiver Schüler (Status 2) ohne Leistungsdaten im Abschnitt", x.Zeile);
@@ -410,11 +430,12 @@ namespace Stundenplan_V2.Vertretung
             if (ex.Hat(SchildDateiArt.Lernplattformen))
             {
                 var mitId = new HashSet<SchildSchueler>();
-                foreach (var lp in ex.Lernplattformen)
-                {
-                    if (alleNach.TryGetValue(lp.PersonSchluessel, out var x)) mitId.Add(x);
-                    else s.Add(SchildProblemArt.Warnung, fLp, null, "Schüler nicht in SchuelerBasisdaten.dat gefunden", lp.Zeile);
-                }
+                if (basisOk)
+                    foreach (var lp in ex.Lernplattformen)
+                    {
+                        if (alleNach.TryGetValue(lp.PersonSchluessel, out var x)) mitId.Add(x);
+                        else s.Add(SchildProblemArt.Warnung, fLp, null, "Schüler nicht in SchuelerBasisdaten.dat gefunden", lp.Zeile);
+                    }
                 foreach (var g in ex.Lernplattformen.GroupBy(lp => lp.Id).Where(g2 => g2.Count() > 1))
                     e.Probleme.Add(new SchildProblem
                     {
@@ -423,22 +444,37 @@ namespace Stundenplan_V2.Vertretung
                     });
                 int aktiv = imAbschnitt.Count(x => x.Status is 0 or 2 or 3 or 6);
                 int mit = imAbschnitt.Count(x => x.Status is 0 or 2 or 3 or 6 && mitId.Contains(x));
-                Z("SchILD-ID", "Schüler (Status 0/2/3/6) mit SchILD-ID", $"{mit} von {aktiv}");
+                if (basisOk) Z("SchILD-ID", "Schüler (Status 0/2/3/6) mit SchILD-ID", $"{mit} von {aktiv}");
             }
 
             // ---------- Abgleich mit dem Plan ----------
             if (plan != null)
             {
+                // Klassen „5a“ in SchILD = „05A“ im Plan (führende Null, Groß/klein; 5.2a-2)
                 var schildSek1 = klassen.Where(k => !Oberstufe.Contains(k.InternBez) && !Oberstufe.Contains(k.Jahrgang))
                                         .Select(k => k.InternBez).ToList();
-                var nichtImPlan = schildSek1.Where(k => !plan.Klassen.Contains(k)).OrderBy(k => k).ToList();
-                var fehltInSchild = plan.Klassen.Where(k => !klassenSet.Contains(k)).OrderBy(k => k).ToList();
-                var jahrgaengeMitSchuelern = new HashSet<string>(klassenSchueler.Select(x => x.Jahrgang), StringComparer.OrdinalIgnoreCase);
-                var stufenFehlen = plan.Stufen.Where(st => !jahrgaengeMitSchuelern.Contains(st)).OrderBy(st => st).ToList();
+                var klassenNorm = new HashSet<string>(klassen.Select(k => SchildText.KlasseNorm(k.InternBez)), StringComparer.OrdinalIgnoreCase);
+                var nichtImPlan = klassenOk ? schildSek1.Where(k => !plan.Klassen.Contains(SchildText.KlasseNorm(k))).OrderBy(k => k).ToList()
+                                            : new List<string>();
+                var fehltInSchild = klassenOk ? plan.Klassen.Where(k => !klassenNorm.Contains(SchildText.KlasseNorm(k))).OrderBy(k => k).ToList()
+                                              : new List<string>();
+                var ohneNull = schildSek1.Where(k => SchildText.KlasseNorm(k) != k.Trim().ToUpperInvariant()
+                                                     && plan.Klassen.Contains(SchildText.KlasseNorm(k))).OrderBy(k => k).ToList();
+                if (ohneNull.Count > 0)
+                    e.Probleme.Add(new SchildProblem
+                    {
+                        Art = SchildProblemArt.Hinweis, Datei = fKl,
+                        Grund = $"{ohneNull.Count} Klasse(n) in SchILD ohne führende Null bzw. in Kleinbuchstaben (z. B. „{ohneNull[0]}“) – " +
+                                $"werden den Klassen im Plan zugeordnet („{SchildText.KlasseNorm(ohneNull[0])}“)."
+                    });
+                var jahrgaengeMitSchuelern = new HashSet<string>(klassenSchuelerAlle.Select(x => x.Jahrgang), StringComparer.OrdinalIgnoreCase);
+                var stufenFehlen = basisOk ? plan.Stufen.Where(st => !jahrgaengeMitSchuelern.Contains(st)).OrderBy(st => st).ToList()
+                                           : new List<string>();
 
                 Z("Abgleich mit dem Plan", "Plan", plan.Bezeichnung);
                 Z("Abgleich mit dem Plan", "Klassen im Plan", plan.Klassen.Count);
-                Z("Abgleich mit dem Plan", "davon in SchILD", plan.Klassen.Count - fehltInSchild.Count);
+                Z("Abgleich mit dem Plan", "davon in SchILD", klassenOk ? (plan.Klassen.Count - fehltInSchild.Count).ToString(CultureInfo.CurrentCulture)
+                                                                        : "– (Klassen.dat nicht gelesen)");
                 if (fehltInSchild.Count > 0)
                     e.Probleme.Add(new SchildProblem
                     {
@@ -462,8 +498,12 @@ namespace Stundenplan_V2.Vertretung
                 e.Probleme.Add(new SchildProblem
                 {
                     Art = SchildProblemArt.Hinweis, Datei = "",
-                    Grund = "Kein Plan verfügbar – der Abgleich der Klassen mit dem Stundenplan entfällt."
+                    Grund = "Kein Plan verfügbar – der Abgleich mit dem Stundenplan und die Zuordnung entfallen."
                 });
+
+            // ---------- Zuordnung SchILD ↔ Plan (5.2a-2) ----------
+            if (plan != null && zuordnung != null && kurseOk)
+                e.Zuordnung = SchildZuordnung.Berechne(ex, jahr, abschnitt, plan, zuordnung, e.Probleme, e.Zahlen);
 
             s.Ausgeben(e.Probleme);
             // Fehler zuerst, innerhalb der Art in Entstehungsreihenfolge.

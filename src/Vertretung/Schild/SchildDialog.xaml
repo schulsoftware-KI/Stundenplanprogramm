@@ -2,12 +2,13 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="SchILD-Daten prüfen"
-        Width="1040" Height="720"
-        MinWidth="780" MinHeight="500"
+        Width="1120" Height="760"
+        MinWidth="860" MinHeight="560"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResizeWithGrip">
 
-    <!-- Phase 5.2a-1: Prüflauf eines SchILD-NRW-3-Exports (nur lesen, nichts senden) und Pseudo-Export. -->
+    <!-- Phase 5.2a: Prüflauf eines SchILD-NRW-3-Exports (nur lesen, nichts senden), Pseudo-Export und (5.2a-2)
+         Zuordnung SchILD ↔ Plan mit Festlegungen von Hand (schild_zuordnung.json). -->
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -81,6 +82,65 @@
                         </DataGrid.Columns>
                     </DataGrid>
                 </DockPanel>
+            </TabItem>
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock x:Name="TxtZuordnungKopf" Text="Zuordnung"/>
+                </TabItem.Header>
+                <Grid Margin="0,4,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Border Grid.Row="0" x:Name="BrdZuHinweis" Visibility="Collapsed" Background="#FDE2E1" Padding="8,4"
+                            Margin="0,0,0,6" CornerRadius="3">
+                        <TextBlock x:Name="TxtZuHinweis" TextWrapping="Wrap"/>
+                    </Border>
+                    <WrapPanel Grid.Row="1" Margin="0,0,0,4">
+                        <TextBlock Text="Anzeigen:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <ComboBox x:Name="CbZuAnsicht" Width="360" VerticalAlignment="Center" Margin="0,0,12,0"
+                                  SelectionChanged="CbZuAnsicht_SelectionChanged"/>
+                        <CheckBox x:Name="ChkZuNurOffene" Content="nur offene und Vorschläge" VerticalAlignment="Center"
+                                  Margin="0,0,12,0" Checked="ZuFilter_Changed" Unchecked="ZuFilter_Changed"/>
+                        <TextBlock x:Name="TxtZuAnzahl" VerticalAlignment="Center" Foreground="DimGray"/>
+                    </WrapPanel>
+                    <DataGrid Grid.Row="2" x:Name="DgZuordnung" AutoGenerateColumns="False" IsReadOnly="True"
+                              HeadersVisibility="Column" CanUserAddRows="False" GridLinesVisibility="Horizontal"
+                              SelectionMode="Single" SelectionChanged="DgZuordnung_SelectionChanged"/>
+                    <Border Grid.Row="3" BorderBrush="#DDDDDD" BorderThickness="0,1,0,0" Padding="0,6,0,0" Margin="0,6,0,0">
+                        <StackPanel>
+                            <TextBlock x:Name="TxtZuAuswahl" TextWrapping="Wrap" Margin="0,0,0,4"
+                                       Text="Zeile wählen, um die Zuordnung von Hand festzulegen."/>
+                            <WrapPanel>
+                                <TextBlock Text="Festlegen auf:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <ComboBox x:Name="CbZuPlan" Width="520" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <ListBox x:Name="LbZuFaecher" SelectionMode="Multiple" Width="520" Height="96" Margin="0,0,8,0"
+                                         Visibility="Collapsed" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                    <ListBox.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel/>
+                                        </ItemsPanelTemplate>
+                                    </ListBox.ItemsPanel>
+                                </ListBox>
+                                <Button x:Name="BtnZuFestlegen" Content="Festlegen" Padding="10,3" Margin="0,0,6,0"
+                                        VerticalAlignment="Center" IsEnabled="False" Click="BtnZuFestlegen_Click"/>
+                                <Button x:Name="BtnZuEntfernen" Content="Festlegung entfernen" Padding="10,3"
+                                        VerticalAlignment="Center" IsEnabled="False" Click="BtnZuEntfernen_Click"/>
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+                    <DockPanel Grid.Row="4" Margin="0,8,0,0" LastChildFill="True">
+                        <Button DockPanel.Dock="Left" x:Name="BtnZuVorschlaege" Content="Vorschläge übernehmen" Padding="10,3"
+                                Margin="0,0,6,0" IsEnabled="False" Click="BtnZuVorschlaege_Click"/>
+                        <Button DockPanel.Dock="Left" x:Name="BtnZuSpeichern" Content="Zuordnungen speichern" Padding="10,3"
+                                Margin="0,0,12,0" IsEnabled="False" Click="BtnZuSpeichern_Click"/>
+                        <TextBlock x:Name="TxtZuStatus" VerticalAlignment="Center" Foreground="DimGray"
+                                   TextTrimming="CharacterEllipsis"/>
+                    </DockPanel>
+                </Grid>
             </TabItem>
             <TabItem Header="Welche Dateien?">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">

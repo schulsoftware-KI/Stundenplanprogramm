@@ -197,6 +197,15 @@ namespace Stundenplan_V2.Vertretung
         public static bool Gleich(string? a, string? b)
             => string.Equals((a ?? "").Trim(), (b ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
 
+        private static readonly Regex KlasseOhneNull = new(@"^\d[A-Z]{1,2}$", RegexOptions.Compiled);
+
+        /// <summary>Klasse für den Vergleich mit dem Plan (5.2a-2): Großbuchstaben, führende Null ergänzt („5a“ → „05A“).</summary>
+        public static string KlasseNorm(string? klasse)
+        {
+            string t = (klasse ?? "").Trim().ToUpperInvariant();
+            return KlasseOhneNull.IsMatch(t) ? "0" + t : t;
+        }
+
         /// <summary>Zelle für eine SchILD-Datei: Trennzeichen und Zeilenumbrüche entfernen.</summary>
         public static string Zelle(string? s, string trenn)
             => (s ?? "").Replace(trenn, " ").Replace("\r", " ").Replace("\n", " ").Trim();

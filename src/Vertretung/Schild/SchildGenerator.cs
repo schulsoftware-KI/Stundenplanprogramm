@@ -30,7 +30,8 @@ namespace Stundenplan_V2.Vertretung
     //  - Absichtliche Stolpersteine für die Zuordnung (5.2a-2): abweichende
     //    Fachkürzel, ein abweichendes Lehrkräftekürzel, Kursbezeichnungen in
     //    SchILD-Art, ein Kooperationskurs ohne Kursleiter, ein #Klasse-Paar,
-    //    einzelne Status 0/1/3/6/9.
+    //    einzelne Status 0/1/3/6/9; seit 5.2a-2 ein Projektkurs ohne
+    //    Gegenstück im Plan (testet „keine Zuordnung“).
     //  - Markerdatei PSEUDODATEN.json mit Prüfsummen (Entscheidung 90).
     // =====================================================================
 
@@ -596,6 +597,26 @@ namespace Stundenplan_V2.Vertretung
             }
             erg.KurseSek2 = kurse.Count;
 
+            // ---------- Projektkurs ohne Gegenstück im Plan (Stolperstein 5.2a-2: „keine Zuordnung“) ----------
+            (string KursBez, string Fach, string Leiter, string Stufe)? projekt = null;
+            string? pjStufe = kurse.Values.Any(k => k.Stufe == "Q1") ? "Q1"
+                            : kurse.Values.Select(k => k.Stufe).Distinct().OrderBy(x => x, StringComparer.Ordinal).FirstOrDefault();
+            var pjBasis = pjStufe == null ? null
+                : kurse.Values.Where(k => k.Stufe == pjStufe && !k.Kooperation && k.Art == "GK")
+                              .OrderBy(k => k.KursBez, StringComparer.OrdinalIgnoreCase).FirstOrDefault();
+            if (pjBasis != null)
+            {
+                var pj = (KursBez: $"{pjBasis.SchildFach}-PJ1", Fach: pjBasis.SchildFach, Leiter: K(pjBasis.Lehrer.Haupt()), Stufe: pjBasis.Stufe);
+                projekt = pj;
+                foreach (var teilnehmer in schueler.Where(x => x.Klasse == pj.Stufe && x.Status == 2).Take(12))
+                    teilnehmer.Leistungen.Add(new PLeistung
+                    {
+                        Fach = pj.Fach, Lehrer = pj.Leiter, Kursart = "PJK", Kurs = pj.KursBez, Wst = 2, Jahrgang = pj.Stufe
+                    });
+                erg.Stolpersteine.Add($"Projektkurs „{pj.KursBez}“ ({pj.Stufe}, Kursart PJK) ohne Gegenstück im Plan – im Reiter " +
+                                      "„Zuordnung“ auf „keine Zuordnung“ setzen.");
+            }
+
             // ---------- #Klasse-Paar ----------
             var paarJg = klassenListe.GroupBy(kl => kl.JgNum).FirstOrDefault(gr => gr.Count() >= 2);
             if (paarJg != null)
@@ -681,6 +702,9 @@ namespace Stundenplan_V2.Vertretung
                                         k.Zeiten.Count.ToString(CultureInfo.InvariantCulture), "",
                                         k.Kooperation ? "" : K(k.Lehrer.Haupt()), "N", k.Kooperation ? "165432" : "" },
                                 k.Kooperation ? new List<(string, int)>() : k.Lehrer.Rest().Select(x => (K(x), k.Zeiten.Count)).ToList()));
+            if (projekt is { } pkurs)
+                kursZeilen.Add((new[] { pkurs.KursBez, "", J, A, pkurs.Stufe, pkurs.Fach, "PJK", "2", "", pkurs.Leiter, "N", "" },
+                                new List<(string, int)>()));
             int maxZk = Math.Max(1, kursZeilen.Select(z => z.Zk.Count).DefaultIfEmpty(0).Max());
             var kursKopf = new List<string> { "KursBez", "Klasse", "Jahr", "Abschnitt", "Jahrgang", "Fach", "Kursart", "Wochenstd.",
                                               "Wochenstd. KL", "Kursleiter", "Epochenunterricht", "Schulnr", "Wochenstd. ZK", "Zusatzkraft" };

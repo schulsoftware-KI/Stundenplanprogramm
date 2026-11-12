@@ -686,7 +686,8 @@ Es nutzt die oben unter „Plan“ gewählte Plan-Spalte. Code: `src/Vertretung/
   `SchILD-Pseudo_<Datum>` neben der Plandatei. Oberstufe: Kurswahl wie beim bisherigen Seed; Sek-I-Gruppen
   (Religion, WP) überschneidungsfrei aufgeteilt, Variante „gemischt“ (Jg. 05–07 ohne Kurs, 08–10 mit Kurs).
   Absichtliche Stolpersteine für die Zuordnung (Fach-/Kürzelabweichungen, SchILD-Kursbezeichnungen,
-  Kooperationskurs, `#Klasse`-Paar, Status 0/1/3/6/9) zeigt das Programm nach dem Erzeugen an.
+  Kooperationskurs, `#Klasse`-Paar, Status 0/1/3/6/9, seit 5.2a-2 ein Projektkurs ohne Gegenstück im Plan) zeigt das
+  Programm nach dem Erzeugen an.
   **`PSEUDODATEN.json`** trägt die SHA-256-Prüfsumme jeder Datei: Nur wenn alle stimmen und keine weitere
   `.dat` im Ordner liegt, gilt er als Pseudodaten. Ein Ordner mit fremden `.dat`-Dateien wird nie überschrieben.
 - **Formatprofil:** Standard = amtliche Beschreibung. Weicht ein echter Export ab, mit „Formatprofil als Datei
@@ -695,8 +696,31 @@ Es nutzt die oben unter „Plan“ gewählte Plan-Spalte. Code: `src/Vertretung/
   Neukompilieren.
 - **Echte Exporte** nur auf dem Verwaltungsrechner ablegen (nicht in OneDrive/Teams) und nach Gebrauch löschen.
   `*.dat` steht in der `.gitignore` (greift beim Hochladen im Browser nicht!).
-- Kommt in **5.2a-2:** Zuordnung SchILD-Kurse/Sek-I-Gruppen/Kürzel/Fächer ↔ Plan mit `schild_zuordnung.json`;
-  danach 5.2b Import.
+- **Zuordnung (5.2a-2), Reiter „Zuordnung“:** ordnet dem Plan zu – Oberstufenkurse (`Kurse.dat`, EF/Q1/Q2) ↔
+  Plan-Kurs (`MG3_Q2_L11`), Sek-I-Kurse ↔ Sek-I-Gruppe (`PP3_06A06B06D_L85`), Sek I ohne Kurs über Klasse + Fach +
+  Fachlehrer (05A + ER + L88 → `ER_05A05B05C05D_L88`; sonst Klassenunterricht), Lehrkräftekürzel und Fächer (ein
+  SchILD-Fach kann mehreren Plan-Fächern entsprechen, z. B. `PH` = `P` + `PH`). Automatik je Kurs: Stufe/Jahrgang →
+  Fach → Kursart → Lehrkraft (Kursleiter, Zusatzkräfte); passen mehrere, entscheiden nacheinander der **Stundenplan der
+  Teilnehmer** (niemand sitzt zur selben Zeit in zwei Kursen), die **Nummer** in der Kursbezeichnung („D-G2“ → 2), bei
+  Sek-I-Kursen die **Klassen der Teilnehmer**, zuletzt das übrig gebliebene Paar. Kürzel/Fächer, die es nur auf einer
+  Seite gibt, werden **vorgeschlagen** und gelten erst nach „Vorschläge übernehmen“ (Warnung, solange die Zuordnung
+  davon abhängt; sonst Hinweis). Zustände: automatisch · von Hand · keine Zuordnung · Vorschlag · offen · Konflikt ·
+  veraltet. Zusätzliche Prüfungen: Teilnehmer passen zur Gruppe/Stufe, **Zeitkonflikte** (ein Schüler in zwei
+  zugeordneten Kursen zur selben Stunde), Plan-Kurse ohne SchILD-Kurs, Klassenleitungen ohne Kürzel im Plan.
+  Zuordnungsprobleme sind Warnungen, nie Fehler; Meldungen nennen nur Kurs-/Klassen-/Fachbezeichnungen und Kürzel.
+  **Festlegen von Hand:** Zeile wählen → „Festlegen auf“ → „Festlegen“ (wirkt sofort im Prüflauf); erst
+  **„Zuordnungen speichern“** schreibt die Datei **`schild_zuordnung.json`** neben die Plandatei (für Pseudodaten
+  **`schild_zuordnung_pseudo.json`**, damit Testfestlegungen nie in die echte Zuordnung geraten). Sie enthält nur
+  Festlegungen von Hand – Kürzel, Fächer, Kurs- und Klassenbezeichnungen, keine Personendaten; Kurse gelten je Schuljahr +
+  Jahrgang + KursBez, `"Plan": null` = bewusst keine Zuordnung. Beim Schließen bzw. neuen Prüflauf fragt das Fenster
+  nach ungespeicherten Festlegungen. Ohne lesbare Schülergruppen in der Plandatei (Excel offen) ist keine Zuordnung möglich.
+  Der Bericht enthält die Zahlen der Zuordnung und abweichende Kürzel/Fächer.
+- **Nicht gelesene Dateien (seit 5.2a-2):** Eine Datei mit fehlerhafter Kopfzeile steht in der Übersicht als „nicht
+  gelesen – Kopfzeile fehlerhaft“ (bzw. „Datei leer“, „nicht lesbar“) und zählt für alle Prüfungen als fehlend. Statt
+  vieler Folgemeldungen erscheint ein Hinweis, z. B. „Weitere Prüfungen der Schülerdaten entfallen, weil
+  SchuelerBasisdaten.dat nicht gelesen werden konnte.“ Klassen in SchILD ohne führende Null („5a“) werden den Klassen im
+  Plan („05A“) zugeordnet.
+- Danach **5.2b** Import.
 
 ## Räume zuweisen – Raumplan (Schritt R1, Desktop)
 

@@ -11,10 +11,11 @@ using System.Windows.Media;
 namespace Stundenplan_V2.Vertretung
 {
     /// <summary>
-    /// Phase 5.2a-1: Fenster „SchILD-Daten prüfen“ (Knopf „SchILD-Daten…“ im Wocheneditor).
-    /// Prüflauf eines Ordners mit SchILD-NRW-3-Dateien – liest nur, sendet nichts, speichert nichts
-    /// (außer auf Wunsch die Formatprofil-Vorlage und einen Pseudo-Export). Die gelesenen Daten
-    /// liegen nur im Arbeitsspeicher und werden beim Schließen freigegeben.
+    /// Phase 5.2a: Fenster „SchILD-Daten prüfen“ (Knopf „SchILD-Daten…“ im Wocheneditor).
+    /// Prüflauf eines Ordners mit SchILD-NRW-3-Dateien – liest nur, sendet nichts. Gespeichert wird nur auf
+    /// Wunsch: die Formatprofil-Vorlage, ein Pseudo-Export und (5.2a-2) die Festlegungen der Zuordnung
+    /// (schild_zuordnung.json, ohne Personendaten; Reiter „Zuordnung“ in SchildDialog_Zuordnung.cs).
+    /// Die gelesenen Daten liegen nur im Arbeitsspeicher und werden beim Schließen freigegeben.
     /// </summary>
     public partial class SchildDialog : Window
     {
@@ -48,6 +49,12 @@ namespace Stundenplan_V2.Vertretung
             "Kennwörter der Lernplattform, Adressen und Geburtsdaten der Lehrkräfte – wird beim Lesen verworfen.\n\n" +
             "Ablage: Echte Exporte nur auf dem Verwaltungsrechner speichern – nicht in OneDrive, Teams oder einem " +
             "anderen Cloud-Ordner – und löschen, wenn sie nicht mehr gebraucht werden.\n\n" +
+            "Zuordnung (Reiter „Zuordnung“): Das Programm ordnet SchILD-Kurse, Sek-I-Gruppen (auch ohne Kurs über Klasse + " +
+            "Fach + Fachlehrer), Lehrkräftekürzel und Fächer dem Stundenplan zu – meist automatisch. Kürzel und Fächer, die es " +
+            "nur auf einer Seite gibt, werden vorgeschlagen („Vorschläge übernehmen“). Was offen bleibt, dort festlegen und mit " +
+            "„Zuordnungen speichern“ sichern: schild_zuordnung.json neben der Plandatei (für Pseudodaten " +
+            "schild_zuordnung_pseudo.json). Die Datei enthält nur Kürzel, Fächer, Kurs- und Klassenbezeichnungen – keine " +
+            "Personendaten.\n\n" +
             "Der Bericht („Bericht kopieren“) enthält keine Schülerdaten: nur Zahlen, Zeilennummern, Klassen-, Kurs- " +
             "und Fachbezeichnungen sowie Lehrkräftekürzel.";
 
@@ -110,6 +117,7 @@ namespace Stundenplan_V2.Vertretung
 
         private async void BtnOrdner_Click(object sender, RoutedEventArgs e)
         {
+            if (_laeuft || !ZuordnungUngespeichertKlaeren("Wechsel des Ordners")) return;
             var dlg = new Microsoft.Win32.OpenFolderDialog { Title = "Ordner mit den SchILD-Dateien (.dat) wählen" };
             if (Directory.Exists(TxtOrdner.Text)) dlg.InitialDirectory = TxtOrdner.Text;
             else if (Directory.Exists(_planOrdner)) dlg.InitialDirectory = _planOrdner;
@@ -131,13 +139,16 @@ namespace Stundenplan_V2.Vertretung
                 return;
             }
 
+            if (!ZuordnungUngespeichertKlaeren("neuen Prüflauf")) return;
+
             LadeProfil();
-            // Plan für den Abgleich der Klassen (auf dem UI-Thread, nutzt die Auswahl im Wocheneditor).
+            // Plan für Abgleich und Zuordnung (auf dem UI-Thread, nutzt die Auswahl im Wocheneditor). Der Hinweis ist
+            // gesetzt, wenn die Schülergruppen der UV nicht lesbar waren – dann ist keine Zuordnung möglich.
             _planInfo = null;
             try
             {
-                var (plan, _) = _planHolen();
-                if (plan != null) _planInfo = SchildPlanInfo.Aus(plan);
+                var (plan, hinweis) = _planHolen();
+                if (plan != null) _planInfo = SchildPlanInfo.Aus(plan, hinweis);
             }
             catch { _planInfo = null; }
 
@@ -163,6 +174,8 @@ namespace Stundenplan_V2.Vertretung
 
             _export = export;
             if (_export == null) { TxtStatus.Text = "Prüflauf fehlgeschlagen."; return; }
+            LadeZuordnung(_export.IstPseudo);
+            _zuErsteAnzeige = true;
 
             TxtArt.Text = _export.PseudoText;
             BrdArt.Background = new SolidColorBrush(_export.IstPseudo
@@ -194,7 +207,7 @@ namespace Stundenplan_V2.Vertretung
             if (CbAbschnitt.SelectedItem is SchildAbschnitt a) { jahr = a.Jahr; abschnitt = a.Abschnitt; }
             else { jahr = SchildGenerator.Jahr(_schuljahr); abschnitt = 1; }
 
-            _ergebnis = SchildPruefung.Pruefe(_export, jahr, abschnitt, _planInfo);
+            _ergebnis = SchildPruefung.Pruefe(_export, jahr, abschnitt, _planInfo, _zuordnung);
             DgZahlen.ItemsSource = _ergebnis.Zahlen;
             FiltereProbleme();
 
@@ -206,6 +219,7 @@ namespace Stundenplan_V2.Vertretung
                            : w > 0 ? $"Prüflauf ohne Fehler, {w} Warnung(en)."
                            : "Prüflauf ohne Fehler und Warnungen.";
             BtnBericht.IsEnabled = true;
+            ZeigeZuordnung();
         }
 
         private void Filter_Changed(object sender, RoutedEventArgs e) => FiltereProbleme();
@@ -454,6 +468,9 @@ namespace Stundenplan_V2.Vertretung
             BtnProfil.IsEnabled = an;
             CbAbschnitt.IsEnabled = an;
             BtnBericht.IsEnabled = an && _ergebnis != null;
+            BtnZuSpeichern.IsEnabled = an && _zuordnungGeaendert;
+            BtnZuVorschlaege.IsEnabled = an && (_ergebnis?.Zuordnung?.VorschlagTexte.Count ?? 0) > 0;
+            if (!an) { BtnZuFestlegen.IsEnabled = false; BtnZuEntfernen.IsEnabled = false; }
         }
 
         private void BtnSchliessen_Click(object sender, RoutedEventArgs e) => Close();
@@ -465,6 +482,7 @@ namespace Stundenplan_V2.Vertretung
                 e.Cancel = true;
                 TxtStatus.Text = "Bitte warten, bis der Vorgang fertig ist …";
             }
+            else if (!ZuordnungUngespeichertKlaeren("Schließen")) e.Cancel = true;
             base.OnClosing(e);
         }
 
@@ -473,6 +491,7 @@ namespace Stundenplan_V2.Vertretung
             // Gelesene Daten freigeben (nur Arbeitsspeicher, nichts wurde gespeichert).
             DgZahlen.ItemsSource = null;
             DgProbleme.ItemsSource = null;
+            DgZuordnung.ItemsSource = null;
             CbAbschnitt.ItemsSource = null;
             _ergebnis = null;
             _export = null;

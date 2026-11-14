@@ -22,3 +22,8 @@ sicherung.einstellungen.ps1
 # SchILD-Exporte (Phase 5.2): echte .dat-Dateien enthalten Schülerdaten – nie ins Repo.
 *.dat
 PSEUDODATEN.json
+# Untis-Vertretungen (U-1b): eine echte GPU014.TXT enthält Absenzgründe von Lehrkräften – nie ins Repo.
+GPU014*.TXT
+GPU014*.txt
+UNTIS_DEMO.json
+untis_import.json

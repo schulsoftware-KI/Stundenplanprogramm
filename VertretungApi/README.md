@@ -753,6 +753,60 @@ Es nutzt die oben unter „Plan“ gewählte Plan-Spalte. Code: `src/Vertretung/
   Plan („05A“) zugeordnet.
 - Danach **5.2b** Import.
 
+## Vertretungen aus Untis (U-1b, Desktop)
+
+Übergangsphase: Die Schule plant die Vertretungen weiter in Untis; App und Klassenbuch zeigen sie trotzdem. Nur
+Desktop, **keine API- und keine Schemaänderung** (die Schnittstelle kam mit U-1a). Im Vertretungs-Wocheneditor
+(Button 24) öffnet **„Untis-Vertretungen…“** (neben „SchILD-Daten…“) das Fenster „Vertretungen aus Untis“. Es nutzt die
+oben unter „Plan“ gewählte Plan-Spalte. Code: `src/Vertretung/Untis/`, Konzept und Entscheidungen 117–135:
+`claude/Untis_Vorschlag.md` (Claude-Projekt).
+
+- **Datei:** Untis-Export „Export Vertretungen“ **`GPU014.TXT`** (DIF, 22 Felder je Zeile). Trennzeichen `;` oder `,`
+  und Zeichensatz UTF-8 (mit/ohne BOM) oder ANSI werden erkannt; Zeilen mit anderer Feldanzahl, ungültigem Datum oder
+  einer Stunde außerhalb des Zeitrasters sind Fehler für die Zeile. **Absenzgrund (Feld 16) und Text zur Vertretung
+  (Feld 17) werden nie gelesen**, angezeigt, gespeichert oder gesendet – gezählt wird nur, ob sie gefüllt sind. Eine
+  echte Datei enthält Absenzgründe: nur lokal ablegen (z. B. `C:\Vertretung\`), nicht in OneDrive/Teams (das Fenster
+  warnt), nach dem Veröffentlichen löschen. `GPU014*.TXT` steht in der `.gitignore` (greift beim Hochladen im Browser nicht!).
+- **Prüfen:** Reiter **Übersicht** (Datei, Tage, Untis-Arten, Übernahme, Wechsel, offene Vertretungen), **Probleme**
+  (Zeile, Spalte, Grund; gleichartige zusammengefasst), **Vorschau** (je Schultag des Zeitraums: Stunde, Klassen, Fach,
+  Lehrkraft, Raum jeweils „alt → neu“, wie es in der App ankommt, Untis-Art, Zeile, Gegenstück; Farben wie im
+  Wocheneditor, Klausur pink, ohne Gegenstück grau), **So geht’s**.
+- **Zuordnung:** Datum → Wochentag, Stunde, U-Nr (Feld 5) und absente Lehrkraft (Feld 6) → Grundplan-Stunde
+  (`grundUNr` + `originalLehrer`). Ohne Gegenstück → Warnung; gesendet wird trotzdem (die App zeigt eine zusätzliche
+  Stunde bzw. Entfall/Raumvertretung haben keine Wirkung). Viele Zeilen ohne Gegenstück → Hinweis „GPU001 neu
+  importieren (Knopf 3) und Grundplan neu veröffentlichen“. Weitere Prüfungen: unbekannte Kürzel/Klassen (Warnung),
+  doppelte Zeilen (Hinweis, nur einmal gesendet), Tage, die laut Kalender keine Schultage sind (Hinweis, nicht gesendet).
+- **Übersetzung** (Buchstabe Feld 20 entscheidet, Bits Feld 18 als Rückfall, Bits 21/22 ignoriert): Vertretung,
+  Lehrertausch `~`, Teil-Vertretung `P`, Sondereinsatz `A` mit U-Nr → Vertretung; offene Vertretung (kein Vertreter) →
+  Lehrkraft `???`; Entfall `C`, Freisetzung `L`, „unterrichtsfrei“ → Entfall; Plus als Vertreter (Bit 5) → EVA (Lehrkraft
+  leer, abwesende Lehrkraft gestrichen); Betreuung `S`; Verlegung als Zeilenpaar (`C`+Bit 3 bzw. `T` = alte Stelle
+  `VerlegtWeg`, `F` = neue Stelle `VerlegtHin` mit der U-Nr der verlegten Stunde); Raumvertretung `R`; Klausur `E` →
+  Status `Klausur` (Kurs aus Feld 10, Stufe aus Feld 19, Aufsicht = Lehrkraft, U-Nr und Lehrkraft des Plan-Kurses
+  gleichen Namens); Sondereinsatz ohne U-Nr → zusätzliche Stunde der Klasse. **Nicht übernommen:** Pausenaufsicht `B`,
+  Sondereinsatz ohne Klasse bzw. „Klau“ (Klausuraufsicht), „nicht drucken“ (Bit 20). Raum-, Fach- und Klassenwechsel
+  setzen die Merker `raumGeaendert` (Feld 13 ≠ 12), `fachGeaendert` (Feld 10 ≠ 8) und `klassenGeaendert` (Feld 19 ≠ 15);
+  den Raum sendet ein zugeordneter Eintrag nur bei echtem Wechsel. Zwei Vertretungen derselben Stunde mit
+  verschiedenen Klassen = geteilte Stunde (U-1a).
+- **Veröffentlichen:** Zeitraum (Vorgabe: erster bis letzter Tag der Datei, änderbar). **Jeder Schultag im Zeitraum wird
+  in der App komplett ersetzt** – auch Tage ohne Zeilen (dann leer), damit in Untis gelöschte Vertretungen verschwinden;
+  Ferien/Feiertage laut Kalender werden übersprungen. Tag für Tag über `POST /api/plan/push`, mit Fortschritt und
+  „Abbrechen“. Die Rückfrage nennt Tage mit Buchungen im Vertretungsmodul, Fehlerzeilen und Zeilen ohne Gegenstück.
+- **Eine Quelle je Tag:** „Online-Einstellungen…“ hat den Schalter **„Vertretungen kommen aus: Vertretungsmodul |
+  Untis“** (`"Quelle"` in `vertretung_online.json`). Bei „Untis“ fragt „Online veröffentlichen“ im Wocheneditor nach,
+  bevor ein Tag aus dem Vertretungsmodul die Untis-Vertretungen ersetzt; steht die Quelle auf „Vertretungsmodul“, bietet
+  das Untis-Fenster beim Veröffentlichen an, sie umzustellen.
+- **Protokoll `untis_import.json`** neben der Plandatei: zuletzt gewählter Ordner, je Lauf Zeit, Datei, Zeitraum, Zahl der
+  Tage und Einträge, je Tag Zeitpunkt und Prüfsumme des zuletzt gesendeten Stands – keine Inhalte (für U-2 „nur geänderte
+  Tage senden“).
+- **„Demo-Datei erzeugen…“:** schreibt aus dem gewählten Plan eine `GPU014.TXT` für eine Woche (Standardordner
+  `Untis-Demo_<Datum>` neben der Plandatei) mit allen Fällen (Liste nach dem Erzeugen und in `UNTIS_DEMO.json`, dort mit
+  SHA-256-Prüfsumme – nur dann gilt die Datei als Demo). In Feld 16/17 stehen die Testwerte `GEHEIM-ABSENZGRUND` und
+  `GEHEIM-TEXT`, die nirgends erscheinen dürfen. Gleicher Startwert + gleicher Plan = gleiche Datei. Eine GPU014.TXT ohne
+  passende Markierung wird nie überschrieben.
+- **„Bericht kopieren“:** Zahlen und Probleme als Text (Kürzel, Klassen, Fächer, Zeilennummern – keine Absenzgründe,
+  keine Texte).
+- Danach **R3-D** (Räume im Vertretungsmodul) und **U-2** („Ordner beobachten“, nur geänderte Tage senden).
+
 ## Räume zuweisen – Raumplan (Schritt R1, Desktop)
 
 Nur Desktop, **keine API- und keine Schemaänderung, es wird nichts gesendet.** Knopf **„25. Räume zuweisen

@@ -242,6 +242,25 @@ namespace Stundenplan_V2.Vertretung
             if (!tp.IstSchultag) { SetzeInfo($"{tag:dd.MM.} ist kein Schultag."); return; }
 
             int anz = tp.Zellen.Count(z => z.IstGeaendert);
+
+            // U-1b (Entscheidung 120): Kommen die Vertretungen aus Untis, ersetzt dieser Tag die Untis-Vertretungen.
+            if (einst.QuelleIstUntis)
+            {
+                string? stand = UntisImportProtokoll.TagText(_ordner, tag);
+                string frage =
+                    "In den Online-Einstellungen ist „Untis“ als Quelle der Vertretungen eingestellt.\n\n" +
+                    (stand != null ? stand + "\n\n" : "") +
+                    $"„Online veröffentlichen“ ersetzt den {tag:dd.MM.yyyy} in der App durch die Buchungen des " +
+                    $"Vertretungsmoduls ({anz} Änderung(en)) – die Untis-Vertretungen dieses Tages verschwinden dort.\n\n" +
+                    "Trotzdem veröffentlichen?";
+                if (MessageBox.Show(this, frage, "Online veröffentlichen", MessageBoxButton.YesNo, MessageBoxImage.Warning,
+                        MessageBoxResult.No) != MessageBoxResult.Yes)
+                {
+                    SetzeInfo("Nicht veröffentlicht (Quelle: Untis).");
+                    return;
+                }
+            }
+
             var sync = new OnlineSync { BaseUrl = einst.BaseUrl, ApiKey = einst.ApiKey };
 
             try
@@ -268,7 +287,7 @@ namespace Stundenplan_V2.Vertretung
             if (neu != null)
             {
                 OnlineSync.SpeichereEinstellungen(_ordner, neu);
-                SetzeInfo($"Online-Einstellungen gespeichert: {OnlineSync.EinstellungsPfad(_ordner)}");
+                SetzeInfo($"Online-Einstellungen gespeichert (Quelle: {neu.Quelle}): {OnlineSync.EinstellungsPfad(_ordner)}");
             }
         }
 

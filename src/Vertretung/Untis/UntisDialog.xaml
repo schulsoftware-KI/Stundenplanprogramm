@@ -1,0 +1,156 @@
+<Window x:Class="Stundenplan_V2.Vertretung.UntisDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Vertretungen aus Untis"
+        Width="1180" Height="780"
+        MinWidth="900" MinHeight="580"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResizeWithGrip">
+
+    <!-- U-1b: Untis-Übergangsschnittstelle. Liest die Untis-Exportdatei GPU014.TXT (Absenzgrund und Text werden nie
+         gelesen), prüft sie gegen den Grundplan der gewählten Plan-Spalte, zeigt eine Vorschau je Tag und
+         veröffentlicht Tag für Tag über POST /api/plan/push. Konzept: claude/Untis_Vorschlag.md. -->
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" TextWrapping="Wrap" Margin="0,0,0,8" Foreground="DimGray"
+                   Text="Liest die Untis-Exportdatei GPU014.TXT („Export Vertretungen“) nur auf diesem Rechner und prüft sie gegen den Plan, der im Wocheneditor unter „Plan“ gewählt ist. Absenzgründe (Feld 16) und Texte zur Vertretung (Feld 17) werden nicht gelesen. Gesendet wird erst mit „Veröffentlichen“."/>
+
+        <DockPanel Grid.Row="1" Margin="0,0,0,6" LastChildFill="True">
+            <TextBlock DockPanel.Dock="Left" Text="Datei:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+            <Button DockPanel.Dock="Right" x:Name="BtnPruefen" Content="Prüfen" Padding="14,3" Margin="6,0,0,0"
+                    Click="BtnPruefen_Click"/>
+            <Button DockPanel.Dock="Right" x:Name="BtnDatei" Content="Datei wählen…" Padding="10,3" Margin="6,0,0,0"
+                    Click="BtnDatei_Click"/>
+            <TextBox x:Name="TxtDatei" IsReadOnly="True" VerticalContentAlignment="Center"/>
+        </DockPanel>
+
+        <WrapPanel Grid.Row="2" Margin="0,0,0,8">
+            <Border x:Name="BrdArt" Background="#EEEEEE" Padding="8,3" Margin="0,0,12,0" CornerRadius="3">
+                <TextBlock x:Name="TxtArt" Text="Noch keine Datei geprüft." TextWrapping="Wrap" MaxWidth="620"/>
+            </Border>
+            <TextBlock x:Name="TxtPlan" VerticalAlignment="Center" Margin="0,0,16,0" Foreground="DimGray"/>
+            <TextBlock x:Name="TxtQuelle" VerticalAlignment="Center" Foreground="DimGray"/>
+        </WrapPanel>
+
+        <TabControl Grid.Row="3" x:Name="Tabs">
+            <TabItem Header="Übersicht">
+                <DataGrid x:Name="DgZahlen" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column"
+                          CanUserAddRows="False" GridLinesVisibility="Horizontal">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Bereich" Binding="{Binding Bereich}" Width="190"/>
+                        <DataGridTextColumn Header="Angabe" Binding="{Binding Angabe}" Width="420"/>
+                        <DataGridTextColumn Header="Wert" Binding="{Binding Wert}" Width="*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock x:Name="TxtProblemeKopf" Text="Probleme"/>
+                </TabItem.Header>
+                <DockPanel>
+                    <WrapPanel DockPanel.Dock="Top" Margin="0,4,0,4">
+                        <TextBlock Text="Anzeigen:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <CheckBox x:Name="ChkFehler" Content="Fehler" IsChecked="True" Margin="0,0,12,0"
+                                  VerticalAlignment="Center" Checked="Filter_Changed" Unchecked="Filter_Changed"/>
+                        <CheckBox x:Name="ChkWarnungen" Content="Warnungen" IsChecked="True" Margin="0,0,12,0"
+                                  VerticalAlignment="Center" Checked="Filter_Changed" Unchecked="Filter_Changed"/>
+                        <CheckBox x:Name="ChkHinweise" Content="Hinweise" IsChecked="True"
+                                  VerticalAlignment="Center" Checked="Filter_Changed" Unchecked="Filter_Changed"/>
+                    </WrapPanel>
+                    <DataGrid x:Name="DgProbleme" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column"
+                              CanUserAddRows="False" GridLinesVisibility="Horizontal">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Art" Binding="{Binding ArtText}" Width="75"/>
+                            <DataGridTextColumn Header="Zeile" Binding="{Binding ZeileText}" Width="55"/>
+                            <DataGridTextColumn Header="Spalte" Binding="{Binding Spalte}" Width="170"/>
+                            <DataGridTemplateColumn Header="Grund" Width="*">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Grund}" TextWrapping="Wrap"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock x:Name="TxtVorschauKopf" Text="Vorschau"/>
+                </TabItem.Header>
+                <DockPanel>
+                    <WrapPanel DockPanel.Dock="Top" Margin="0,4,0,4">
+                        <TextBlock Text="Tag:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <Button x:Name="BtnTagZurueck" Content="◀" Width="30" Padding="0,2" Click="BtnTagZurueck_Click"/>
+                        <ComboBox x:Name="CbTag" Width="280" VerticalAlignment="Center" Margin="2,0,2,0"
+                                  DisplayMemberPath="Anzeige" SelectionChanged="CbTag_SelectionChanged"/>
+                        <Button x:Name="BtnTagVor" Content="▶" Width="30" Padding="0,2" Margin="0,0,12,0" Click="BtnTagVor_Click"/>
+                        <TextBlock x:Name="TxtVorschauInfo" VerticalAlignment="Center" Foreground="DimGray" TextWrapping="Wrap"
+                                   MaxWidth="640"/>
+                    </WrapPanel>
+                    <DataGrid x:Name="DgVorschau" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column"
+                              CanUserAddRows="False" GridLinesVisibility="Horizontal">
+                        <DataGrid.RowStyle>
+                            <Style TargetType="DataGridRow">
+                                <Setter Property="Background" Value="{Binding Farbe}"/>
+                            </Style>
+                        </DataGrid.RowStyle>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Std." Binding="{Binding Stunde}" Width="42"/>
+                            <DataGridTextColumn Header="Klassen" Binding="{Binding KlassenText}" Width="150"/>
+                            <DataGridTextColumn Header="Fach" Binding="{Binding FachText}" Width="110"/>
+                            <DataGridTextColumn Header="Lehrkraft" Binding="{Binding LehrerText}" Width="170"/>
+                            <DataGridTextColumn Header="Raum" Binding="{Binding RaumText}" Width="140"/>
+                            <DataGridTextColumn Header="In der App" Binding="{Binding AppText}" Width="200"/>
+                            <DataGridTextColumn Header="Untis-Art" Binding="{Binding UntisArt}" Width="190"/>
+                            <DataGridTextColumn Header="Zeile" Binding="{Binding Zeile}" Width="50"/>
+                            <DataGridTextColumn Header="Gegenstück" Binding="{Binding Gegenstueck}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </TabItem>
+            <TabItem Header="So geht’s">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <TextBlock x:Name="TxtHilfe" TextWrapping="Wrap" Margin="8" LineHeight="20"/>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+
+        <Border Grid.Row="4" BorderBrush="#DDDDDD" BorderThickness="0,1,0,0" Padding="0,8,0,0" Margin="0,8,0,0">
+            <WrapPanel>
+                <TextBlock Text="Veröffentlichen von" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                <DatePicker x:Name="DpVon" Width="130" VerticalAlignment="Center" SelectedDateChanged="Zeitraum_Changed"/>
+                <TextBlock Text="bis" VerticalAlignment="Center" Margin="6,0,6,0"/>
+                <DatePicker x:Name="DpBis" Width="130" VerticalAlignment="Center" SelectedDateChanged="Zeitraum_Changed"
+                            Margin="0,0,10,0"/>
+                <TextBlock x:Name="TxtTage" VerticalAlignment="Center" Foreground="DimGray" Margin="0,0,12,0"/>
+                <Button x:Name="BtnVeroeffentlichen" Content="Veröffentlichen" Padding="14,3" Margin="0,0,10,0"
+                        IsEnabled="False" Click="BtnVeroeffentlichen_Click"/>
+                <ProgressBar x:Name="PbFortschritt" Width="180" Height="16" VerticalAlignment="Center" Margin="0,0,8,0"
+                             Visibility="Collapsed"/>
+                <Button x:Name="BtnAbbrechen" Content="Abbrechen" Padding="10,3" Margin="0,0,8,0" Visibility="Collapsed"
+                        Click="BtnAbbrechen_Click"/>
+                <TextBlock x:Name="TxtFortschritt" VerticalAlignment="Center" Foreground="DimGray"/>
+            </WrapPanel>
+        </Border>
+
+        <DockPanel Grid.Row="5" Margin="0,10,0,0" LastChildFill="True">
+            <Button DockPanel.Dock="Left" x:Name="BtnDemo" Content="Demo-Datei erzeugen…" Padding="10,3"
+                    Margin="0,0,6,0" Click="BtnDemo_Click"/>
+            <Button DockPanel.Dock="Left" x:Name="BtnBericht" Content="Bericht kopieren" Padding="10,3"
+                    Margin="0,0,12,0" Click="BtnBericht_Click" IsEnabled="False"/>
+            <Button DockPanel.Dock="Right" x:Name="BtnSchliessen" Content="Schließen" Width="110" IsCancel="True"
+                    Click="BtnSchliessen_Click"/>
+            <TextBlock x:Name="TxtStatus" VerticalAlignment="Center" Foreground="DimGray" TextTrimming="CharacterEllipsis"
+                       Margin="0,0,12,0"/>
+        </DockPanel>
+    </Grid>
+</Window>

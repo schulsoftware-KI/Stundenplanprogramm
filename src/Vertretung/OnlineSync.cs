@@ -65,8 +65,19 @@ namespace Stundenplan_V2.Vertretung
 
     public class OnlineEinstellungen
     {
+        public const string QuelleVertretungsmodul = "Vertretungsmodul";
+        public const string QuelleUntis = "Untis";
+
         public string BaseUrl { get; set; } = "";
         public string ApiKey { get; set; } = "";
+        /// <summary>
+        /// U-1b (Entscheidung 120): Woher kommen die Vertretungen? „Vertretungsmodul“ (Standard) oder „Untis“
+        /// (Datei GPU014.TXT, Knopf „Untis-Vertretungen…“). Bei „Untis“ fragt „Online veröffentlichen“ nach.
+        /// </summary>
+        public string Quelle { get; set; } = QuelleVertretungsmodul;
+
+        [JsonIgnore]
+        public bool QuelleIstUntis => string.Equals(Quelle, QuelleUntis, StringComparison.OrdinalIgnoreCase);
     }
 
     public class OnlineSync
@@ -88,15 +99,25 @@ namespace Stundenplan_V2.Vertretung
             if (string.IsNullOrWhiteSpace(BaseUrl))
                 throw new InvalidOperationException("Keine Server-URL konfiguriert (Online-Einstellungen).");
 
-            var dto = BaueDto(schuljahr, datum, tp);
+            return await PushAsync(BaueDto(schuljahr, datum, tp));
+        }
+
+        /// <summary>
+        /// U-1b: pusht einen fertigen Tag (z. B. aus der Untis-Datei). Der Tag wird in der API komplett ersetzt –
+        /// ein Tag ohne Einträge wird dort leer.
+        /// </summary>
+        public async Task<string> PushAsync(PlanPushDto dto, System.Threading.CancellationToken abbruch = default)
+        {
+            if (string.IsNullOrWhiteSpace(BaseUrl))
+                throw new InvalidOperationException("Keine Server-URL konfiguriert (Online-Einstellungen).");
             var url = BaseUrl.TrimEnd('/') + "/api/plan/push";
 
             using var req = new HttpRequestMessage(HttpMethod.Post, url);
             if (!string.IsNullOrWhiteSpace(ApiKey)) req.Headers.Add("X-Api-Key", ApiKey);
             req.Content = JsonContent.Create(dto);
 
-            using var resp = await _http.SendAsync(req);
-            string body = await resp.Content.ReadAsStringAsync();
+            using var resp = await _http.SendAsync(req, abbruch);
+            string body = await resp.Content.ReadAsStringAsync(abbruch);
             if (!resp.IsSuccessStatusCode)
                 throw new HttpRequestException($"Server {(int)resp.StatusCode}: {body}");
             return body;
@@ -212,7 +233,7 @@ namespace Stundenplan_V2.Vertretung
             var grid = new Grid { Margin = new Thickness(14) };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            for (int i = 0; i < 5; i++) grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            for (int i = 0; i < 6; i++) grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             TextBlock Label(string t, int r)
             {
@@ -228,6 +249,30 @@ namespace Stundenplan_V2.Vertretung
             var txtKey = new TextBox { Text = vorgabe.ApiKey, Margin = new Thickness(0, 6, 0, 6) };
             Grid.SetRow(txtKey, 1); Grid.SetColumn(txtKey, 1); grid.Children.Add(txtKey);
 
+            // U-1b (Entscheidung 120): eine Quelle je Tag – Vertretungsmodul oder Untis.
+            Label("Vertretungen\nkommen aus:", 2);
+            var quelle = new StackPanel { Margin = new Thickness(0, 6, 0, 6) };
+            var rbModul = new RadioButton
+            {
+                Content = "Vertretungsmodul (Wocheneditor, „Vertretung erfassen“)", GroupName = "quelle",
+                IsChecked = !vorgabe.QuelleIstUntis, Margin = new Thickness(0, 0, 0, 2)
+            };
+            var rbUntis = new RadioButton
+            {
+                Content = "Untis (Datei GPU014.TXT, Knopf „Untis-Vertretungen…“)", GroupName = "quelle",
+                IsChecked = vorgabe.QuelleIstUntis
+            };
+            quelle.Children.Add(rbModul);
+            quelle.Children.Add(rbUntis);
+            quelle.Children.Add(new TextBlock
+            {
+                Text = "Bei „Untis“ fragt „Online veröffentlichen“ nach, bevor ein Tag aus dem Vertretungsmodul die " +
+                       "Untis-Vertretungen in der App ersetzt.",
+                Foreground = System.Windows.Media.Brushes.DimGray, TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 4, 0, 0)
+            });
+            Grid.SetRow(quelle, 2); Grid.SetColumn(quelle, 1); grid.Children.Add(quelle);
+
             var hinweis = new TextBlock
             {
                 Text = "Beispiel-URL (Entwicklung): http://localhost:5080\nDer API-Key muss mit Api:PushKey im Backend übereinstimmen.",
@@ -235,13 +280,13 @@ namespace Stundenplan_V2.Vertretung
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 4, 0, 10)
             };
-            Grid.SetRow(hinweis, 3); Grid.SetColumn(hinweis, 1); grid.Children.Add(hinweis);
+            Grid.SetRow(hinweis, 4); Grid.SetColumn(hinweis, 1); grid.Children.Add(hinweis);
 
             // V2 (Nutzer 09.11.2026): zeigen, welche Datei benutzt wird – jede Plandatei-Kopie hat ihre eigene.
             if (!string.IsNullOrWhiteSpace(ordner))
             {
                 string pfad = EinstellungsPfad(ordner);
-                Label("Gespeichert in:", 2);
+                Label("Gespeichert in:", 3);
                 var ort = new StackPanel { Margin = new Thickness(0, 6, 0, 6) };
                 var zeile = new DockPanel();
                 var oeffnen = new Button { Content = "Ordner öffnen", Padding = new Thickness(8, 1, 8, 1), Margin = new Thickness(8, 0, 0, 0) };
@@ -275,14 +320,14 @@ namespace Stundenplan_V2.Vertretung
                 }
                 catch { /* nur Hinweis */ }
 
-                Grid.SetRow(ort, 2); Grid.SetColumn(ort, 1); grid.Children.Add(ort);
+                Grid.SetRow(ort, 3); Grid.SetColumn(ort, 1); grid.Children.Add(ort);
             }
 
             var panel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
             var ok = new Button { Content = "OK", Width = 90, Margin = new Thickness(0, 0, 8, 0), IsDefault = true };
             var cancel = new Button { Content = "Abbrechen", Width = 90, IsCancel = true };
             panel.Children.Add(ok); panel.Children.Add(cancel);
-            Grid.SetRow(panel, 4); Grid.SetColumn(panel, 1); grid.Children.Add(panel);
+            Grid.SetRow(panel, 5); Grid.SetColumn(panel, 1); grid.Children.Add(panel);
 
             win.Content = grid;
 
@@ -290,7 +335,12 @@ namespace Stundenplan_V2.Vertretung
             ok.Click += (_, __) => { bestaetigt = true; win.DialogResult = true; };
 
             return win.ShowDialog() == true && bestaetigt
-                ? new OnlineEinstellungen { BaseUrl = txtUrl.Text.Trim(), ApiKey = txtKey.Text.Trim() }
+                ? new OnlineEinstellungen
+                {
+                    BaseUrl = txtUrl.Text.Trim(),
+                    ApiKey = txtKey.Text.Trim(),
+                    Quelle = rbUntis.IsChecked == true ? OnlineEinstellungen.QuelleUntis : OnlineEinstellungen.QuelleVertretungsmodul
+                }
                 : null;
         }
     }

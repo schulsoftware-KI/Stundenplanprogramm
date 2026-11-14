@@ -56,8 +56,8 @@ namespace Stundenplan_V2.Vertretung
         public int? GrundUNr { get; set; }
 
         // U-1a: ausdrücklich gemeldete Abweichungen vom Grundplan (für den Untis-Import, U-1b).
-        // Das Vertretungsmodul setzt sie nicht – die API zeigt dann wie bisher den Raum nur bei
-        // „Raumvertretung“ und das Fach nur bei „verlegt hin“.
+        // Ohne Merker zeigt die API den Raum nur bei „Raumvertretung“ und das Fach nur bei „verlegt hin“.
+        // R3-D: Das Vertretungsmodul setzt RaumGeaendert, wenn eine Buchung den Raum ändert.
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public bool? RaumGeaendert { get; set; }
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public bool? FachGeaendert { get; set; }
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public bool? KlassenGeaendert { get; set; }
@@ -141,7 +141,9 @@ namespace Stundenplan_V2.Vertretung
                     Fach = z.Fach,
                     Lehrer = string.IsNullOrWhiteSpace(z.Lehrer) ? null : z.Lehrer,
                     OriginalLehrer = string.IsNullOrWhiteSpace(z.OriginalLehrer) ? null : z.OriginalLehrer,
-                    Raum = z.Raum,
+                    // R3-D: Raum laut Raumplan (wie im Grundplan der App) bzw. der neue Raum der Buchung.
+                    Raum = string.IsNullOrWhiteSpace(z.Raum) ? null : z.Raum,
+                    RaumGeaendert = z.RaumGeaendert ? true : null,
                     Art = ArtText(z.Status),
                     Status = z.Status.ToString(),
                     Grund = z.Eintrag?.Grund.ToString(),

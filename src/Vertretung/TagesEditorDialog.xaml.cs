@@ -140,6 +140,7 @@ namespace Stundenplan_V2.Vertretung
             }
 
             _maxStunde = _plan.Belegung.Count > 0 ? _plan.Belegung.Keys.Max(k => k.Stunde) : 1;
+            LadeRaeume();   // R3-D: Raumplan + Raumverzeichnis der Plan-Spalte
 
             _laedt = true;
             CbPlan.ItemsSource = _plan.PlanSpalten;
@@ -214,6 +215,8 @@ namespace Stundenplan_V2.Vertretung
                 }
                 catch { /* alten Plan behalten */ }
             }
+            // R3-D: Räume immer neu lesen (z. B. nach Knopf 25 „Speichern“).
+            LadeRaeume();
             Zeichne();
         }
 
@@ -539,7 +542,17 @@ namespace Stundenplan_V2.Vertretung
             var sp = new StackPanel { Margin = new Thickness(3, 2, 3, 2) };
             var tbKopf = new TextBlock { Text = kopf, FontWeight = FontWeights.Bold, FontSize = 11, TextWrapping = TextWrapping.Wrap };
             if (z.Status == ZellStatus.Entfall) tbKopf.TextDecorations = TextDecorations.Strikethrough;
-            sp.Children.Add(tbKopf);
+            // R3-D: Raum rechts oben (geändert orange „→“, gesperrt rot „⚠“).
+            var tbRaum = RaumAnzeige(z, datum);
+            if (tbRaum != null)
+            {
+                var kopfZeile = new DockPanel();
+                DockPanel.SetDock(tbRaum, Dock.Right);
+                kopfZeile.Children.Add(tbRaum);
+                kopfZeile.Children.Add(tbKopf);
+                sp.Children.Add(kopfZeile);
+            }
+            else sp.Children.Add(tbKopf);
             if (zeile2.Length > 0) sp.Children.Add(new TextBlock { Text = zeile2, FontSize = 11, TextWrapping = TextWrapping.Wrap });
             if (zeile3.Length > 0) sp.Children.Add(new TextBlock { Text = zeile3, FontSize = 10, Foreground = Brushes.DimGray, TextWrapping = TextWrapping.Wrap });
 
@@ -653,6 +666,9 @@ namespace Stundenplan_V2.Vertretung
                 var miReset = new MenuItem { Header = "Verlegung zurücknehmen" };
                 miReset.Click += (_, __) => Entferne(z, datum);
                 menu.Items.Add(miReset);
+                // R3-D: Raum der hierher verlegten Stunde ändern (die weg verlegte Stunde ist frei).
+                var miRaumV = BaueRaumMenu(z, datum);
+                if (miRaumV != null) { menu.Items.Add(new Separator()); menu.Items.Add(miRaumV); }
                 return menu;
             }
 
@@ -681,6 +697,10 @@ namespace Stundenplan_V2.Vertretung
             var miEva = new MenuItem { Header = "Eigenverantw. Arbeiten (EVA)" };
             miEva.Click += (_, __) => Buche(z, datum, Vertretungsart.EVA, null);
             menu.Items.Add(miEva);
+
+            // R3-D: Raumvertretung bzw. Raum der Buchung ändern.
+            var miRaum = BaueRaumMenu(z, datum);
+            if (miRaum != null) { menu.Items.Add(new Separator()); menu.Items.Add(miRaum); }
 
             if (z.IstGeaendert && z.Eintrag != null)
             {
@@ -757,6 +777,11 @@ namespace Stundenplan_V2.Vertretung
             if (brauchtVertreter && vertreter != null && IstUvEinsatz(vertreter, datum, z.Stunde))
                 zaehlwert = 0;
 
+            // R3-D: Eine schon gebuchte Raumänderung (z. B. Raumvertretung) bleibt bei der neuen Art
+            // erhalten – außer bei Entfall.
+            string? raumNeu = art != Vertretungsart.Entfall && !string.IsNullOrWhiteSpace(z.Eintrag?.VertretungsRaum)
+                ? z.Eintrag!.VertretungsRaum!.Trim() : null;
+
             var eintrag = new VertretungsEintrag
             {
                 Datum = datum.Date, Stunde = z.Stunde, UNr = z.UNr,
@@ -766,6 +791,8 @@ namespace Stundenplan_V2.Vertretung
                 Klassen = new List<string>(z.Klassen), Fach = z.Fach,
                 Fachgerecht = (art == Vertretungsart.Vertretung && vertreter != null)
                     ? _plan.Fachnah(vertreter, z.Fach) : (bool?)null,
+                OriginalRaum = z.GrundRaum,
+                VertretungsRaum = raumNeu,
                 ZaehlwertSnapshot = zaehlwert
             };
 

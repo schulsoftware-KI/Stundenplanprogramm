@@ -96,6 +96,12 @@ namespace Stundenplan_V2.Vertretung
 
         public List<string> RasterTage { get; set; } = new();
 
+        /// <summary>
+        /// R3-D: Räume der Plan-Spalte (Raumplan + Raumverzeichnis). Setzen die Vertretungsfenster nach dem
+        /// Lesen über <see cref="PlanRaeume.Lade"/>; null = Fachraum vor Stammraum laut UV.
+        /// </summary>
+        public PlanRaeume? Raeume { get; set; }
+
         // NuHo-Grenzen (wie NuHoAnalyse: Stunden 2..5).
         public const int ErsterNuHoSlot = 2;
         public const int LetzterNuHoSlot = 5;

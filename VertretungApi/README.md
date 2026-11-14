@@ -139,8 +139,8 @@ Vorbereitung für die Untis-Übergangsschnittstelle (`claude/Untis_Vorschlag.md`
   `klassenGeaendert` = true, übernimmt die API Raum (alter Raum rot gestrichen), Fach bzw. Klassen (weggefallene
   Klassen verlieren Plan und Klassenbuch-Quelle, neue bekommen sie) – bei jeder Art. Ohne Merker bleibt alles wie
   vorher: Raum nur bei „Raumvertretung“, Fach nur bei „verlegt hin“, Klassen unverändert. Das Vertretungsmodul
-  setzt die Merker (noch) nicht – sein Raum (Stammraum vor Fachraum) erzeugt so keine Schein-Raumwechsel; das
-  ändert sich mit R3-D.
+  setzt seit R3-D `raumGeaendert`, wenn eine Buchung den Raum ändert (siehe „Räume im Vertretungsmodul“); Fach und
+  Klassen meldet nur der Untis-Import.
 - **Geteilte Stunde:** Bekommt eine Grundplan-Stunde zwei Vertretungen mit verschiedenen Lehrkräften (Gruppe
   geteilt), wird die zweite eine eigene Stunde mit ihren Klassen; im Klassenbuch hat sie einen eigenen Schlüssel
   (GrundLehrer = vertretende Lehrkraft, ohne Lehrkraft „Kürzel·2“).
@@ -907,6 +907,48 @@ Meldungen) sind unverändert – die Räume sperren und warnen nie.
   verschoben wurde. Wurde der Plan verändert, schreibt **„Uebernehmen“** die Räume für die neue Lösung `X_manN`
   mit – nur bei eingeschalteter Raum-Ansicht. Bei offenen Stunden fragt es vorher: verteilen, mit „Raum offen“
   speichern oder abbrechen. Beim Schließen warnt der Editor vor nicht gespeicherten Raumänderungen.
+
+## Räume im Vertretungsmodul (Schritt R3-D, Desktop)
+
+Code: `src/Vertretung/PlanRaeume.cs` (Raum je Stunde, Raumverzeichnis, freie Räume, Raumsperren),
+`src/Vertretung/TagesEditorDialog_Raeume.cs` (Wocheneditor), dazu `TagesplanBerechnung`, `VertretungsService`,
+`VertretungsDialog`, `VertretungsplanPdfExporter` und `OnlineSync`. **Keine API- und keine Schemaänderung**; die
+Plandatei wird nur gelesen, gebucht wird wie bisher in die Vertretungsdatei (Spalten `OriginalRaum` und
+`VertretungsRaum` im Blatt „Vertretungen“ gab es schon).
+
+- **Raum einer Stunde:** aus dem Blatt „Raumplan“ der im Wocheneditor bzw. in „Vertretung erfassen“ gewählten
+  Plan-Spalte (Knopf 25, Planeditor, Knopf 3 „aus Untis“) – dieselbe Zuordnung wie beim „Grundplan
+  veröffentlichen…“ (Wochentag, Stunde, UNr, Lehrkraft, Fach). Ohne passende Zeile **Fachraum vor Stammraum**
+  laut UV – einheitlich mit der App (vorher zeigte der Desktop Stammraum vor Fachraum). Der Wocheneditor nennt die
+  Quelle in der Legendenzeile („Räume: Raumplan „oT_1“ …“) und liest die Räume bei „Aktualisieren“ neu (z. B. nach
+  Knopf 25 „Speichern“); „Vertretung erfassen“ liest sie neu, wenn die Plandatei seitdem gespeichert wurde.
+- **Wocheneditor:** Jede Stunde zeigt rechts oben ihren Raum; **orange „→ R199“** = durch eine Buchung geändert,
+  **rot „⚠“** = Raum gesperrt (Abwesenheit „Raum“ an diesem Tag/in dieser Stunde). Klick → **„Raum ändern
+  (jetzt …) …“** zeigt die freien Räume dieser Stunde: Fachraum laut UV, Räume derselben Fachgruppe, Stammraum laut
+  UV, allgemeine Räume (Klassen-/Kursräume, „als Ausweich“) aus demselben Bereich, übrige allgemeine Räume, unter
+  „weitere Räume“ der Rest (z. B. Fachräume anderer Fächer); Sonderräume (Schwimmbad) nur, wenn die UV sie für den
+  Unterricht nennt. Frei = von keiner anderen Stunde belegt (entfallene und weg verlegte Stunden geben ihren Raum
+  frei) und nicht gesperrt. Eine Stunde ohne Buchung wird zur **Raumvertretung** (Lehrkraft bleibt, Zähler 0);
+  bei Vertretung, Betreuung, EVA, Zusammenlegung und „hierher verlegt“ bekommt die Buchung den neuen Raum.
+  „Raum wie im Plan“ nimmt die Änderung zurück (eine reine Raumvertretung verschwindet). Team-Teaching (Teile
+  derselben UNr im selben Raum) zieht gemeinsam um. Eine neue Art für eine Stunde mit Raumänderung (z. B.
+  Raumvertretung → Vertretung durch …) behält den neuen Raum, außer bei Entfall. Verlegung auf eine freie Stunde:
+  Raum der verlegten Stunde; auf eine belegte Stunde: Raum dieser Stunde (wie in der App).
+- **„Vertretung erfassen“ (Button 23):** Spalten **„Raum“** (laut Plan) und **„neuer Raum“** (Auswahl der freien
+  Räume, „(wie bisher)“ = kein Wechsel; nicht bei Entfall und Verlegung). Abwesenheit **„Raum“ = Raumsperre:** Nach
+  „Betroffene Stunden ermitteln“ stehen die Stunden, die laut Raumplan in dem Raum liegen, auf **Raumvertretung**
+  mit dem ersten freien Raum – je Tag und Stunde jeder Raum nur einmal. Raumvertretung braucht keine
+  Vertretungskraft, aber einen neuen Raum (sonst „übersprungen (kein neuer Raum gewählt)“). Vor dem Buchen fragt das
+  Fenster, wenn derselbe neue Raum in einer Stunde für verschiedene Unterrichte gewählt ist. Gebuchte Stunden (V1,
+  jetzt kräftig gelb) zeigen den gebuchten Raum in „gebucht“ und „neuer Raum“. Die gebuchte Raumsperre sperrt den
+  Raum auch für die Vorschläge im Wocheneditor (löschen lässt sie sich bisher nur im Blatt „Abwesenheiten“ der
+  Vertretungsdatei).
+- **Tagesübersicht und PDF** (Lehrer-Sicht und Aushang): neue Spalte „Raum“ – Raum der Stunde, bei einer
+  Raumänderung „alt → neu“, leer bei Entfall.
+- **Online veröffentlichen:** Jeder Eintrag sendet den Raum laut Raumplan bzw. den neuen Raum; ändert eine Buchung
+  den Raum, zusätzlich `raumGeaendert = true` – die App zeigt dann bei jeder Art „alter Raum gestrichen → neuer
+  Raum“ (Raumvertretung wie bisher als „Raumwechsel“). Ohne Raumänderung bleibt der Raum in der App der des
+  Grundplans.
 
 ## Nächste Schritte
 

@@ -70,9 +70,17 @@
             <Border Background="#FFE0B2" Padding="6,1" Margin="0,0,6,0"><TextBlock Text="Verlegung"/></Border>
             <Border Background="#BBDEFB" Padding="6,1" Margin="0,0,6,0"><TextBlock Text="Betreuung/EVA"/></Border>
             <Border Background="#FFF9C4" Padding="6,1" Margin="0,0,6,0"><TextBlock Text="Raumvertretung"/></Border>
-            <TextBlock Text="  ·  Klick = Aktionen; eine Klassenstunde auf eine freie Stunde ziehen = Verlegung."
+            <!-- R3-D: Raum rechts oben in jeder Stunde -->
+            <TextBlock Text="Raum:" VerticalAlignment="Center" Margin="6,0,4,0" Foreground="DimGray"/>
+            <TextBlock Text="→ R199" VerticalAlignment="Center" Foreground="#E65100" FontWeight="SemiBold"/>
+            <TextBlock Text=" geändert," VerticalAlignment="Center" Margin="0,0,4,0" Foreground="DimGray"/>
+            <TextBlock Text="R05a ⚠" VerticalAlignment="Center" Foreground="Red" FontWeight="SemiBold"/>
+            <TextBlock Text=" gesperrt" VerticalAlignment="Center" Foreground="DimGray"/>
+            <TextBlock Text="  ·  Klick = Aktionen (auch „Raum ändern“); eine Klassenstunde auf eine freie Stunde ziehen = Verlegung."
                        VerticalAlignment="Center" Foreground="DimGray"/>
             <TextBlock x:Name="TxtInfo" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="DimGray"/>
+            <TextBlock x:Name="TxtRaumInfo" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="DimGray"
+                       TextTrimming="CharacterEllipsis" MaxWidth="520"/>
         </WrapPanel>
 
         <!-- 2×2-Anordnung: Spalten = Lehrer/Klasse, Zeilen = Woche 1 / Woche 2.

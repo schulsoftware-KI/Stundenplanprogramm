@@ -15,6 +15,7 @@ namespace Stundenplan_V2.Vertretung
     //  Zwei Sichten:
     //   - Lehrer-Sicht (mitGrund = true): enthält "entfällt bei" und den Grund.
     //   - Aushang-/Schüler-Sicht (mitGrund = false): OHNE Grund (Datenschutz).
+    //  Spalte „Raum“ (R3-D): Raum der Stunde, bei einer Raumänderung „alt → neu“.
     //
     //  QuestPDF ist über die Community-Lizenz für Schulen kostenlos; sie wird im
     //  statischen Konstruktor gesetzt, damit am Programmstart nichts nötig ist.
@@ -32,11 +33,15 @@ namespace Stundenplan_V2.Vertretung
         /// Schreibt den Tagesvertretungsplan für <paramref name="tag"/> nach
         /// <paramref name="zielPfad"/>. <paramref name="mitGrund"/> = true liefert
         /// die Lehrer-Sicht (mit Grund), false die Aushang-Sicht (ohne Grund).
+        /// <paramref name="raumText"/> (R3-D) liefert je Eintrag den Text der Spalte „Raum“
+        /// (z. B. aus dem effektiven Tagesplan); ohne: aus OriginalRaum/VertretungsRaum des Eintrags.
         /// </summary>
         public static void Erzeuge(
             IEnumerable<VertretungsEintrag> eintraege, DateTime tag, bool mitGrund,
-            string zielPfad, string schuljahr = "")
+            string zielPfad, string schuljahr = "", Func<VertretungsEintrag, string>? raumText = null)
         {
+            Func<VertretungsEintrag, string> raum = RaumText;
+            if (raumText != null) raum = raumText;
             var tages = eintraege
                 .Where(v => v.Datum.Date == tag.Date)
                 .OrderBy(v => v.Stunde)
@@ -70,7 +75,7 @@ namespace Stundenplan_V2.Vertretung
                     });
 
                     // Inhalt
-                    page.Content().PaddingTop(8).Element(c => Tabelle(c, tages, mitGrund));
+                    page.Content().PaddingTop(8).Element(c => Tabelle(c, tages, mitGrund, raum));
 
                     // Fuß
                     page.Footer().AlignRight().Text(txt =>
@@ -85,7 +90,17 @@ namespace Stundenplan_V2.Vertretung
             }).GeneratePdf(zielPfad);
         }
 
-        private static void Tabelle(IContainer container, List<VertretungsEintrag> tages, bool mitGrund)
+        /// <summary>Raumtext aus dem Eintrag allein: „alt → neu“ bei einer Raumänderung, sonst der Raum laut Plan.</summary>
+        public static string RaumText(VertretungsEintrag v)
+        {
+            if (v.Art == Vertretungsart.Entfall || v.VerlegtNachStunde.HasValue) return "";
+            string alt = (v.OriginalRaum ?? "").Trim(), neu = (v.VertretungsRaum ?? "").Trim();
+            if (neu.Length > 0 && !PlanRaeume.GleicherRaum(alt, neu)) return (alt.Length > 0 ? alt : "–") + " → " + neu;
+            return alt;
+        }
+
+        private static void Tabelle(IContainer container, List<VertretungsEintrag> tages, bool mitGrund,
+                                    Func<VertretungsEintrag, string> raumText)
         {
             if (tages.Count == 0)
             {
@@ -101,6 +116,7 @@ namespace Stundenplan_V2.Vertretung
                     c.ConstantColumn(34);   // Std
                     c.RelativeColumn(1.4f); // Klasse(n)
                     c.RelativeColumn(1.1f); // Fach
+                    c.RelativeColumn(1.4f); // Raum (R3-D)
                     if (mitGrund) c.RelativeColumn(1.1f); // entfällt bei
                     c.RelativeColumn(1.3f); // Vertretung
                     c.RelativeColumn(1.4f); // Art
@@ -113,6 +129,7 @@ namespace Stundenplan_V2.Vertretung
                     HeaderZelle(h.Cell(), "Std");
                     HeaderZelle(h.Cell(), "Klasse(n)");
                     HeaderZelle(h.Cell(), "Fach");
+                    HeaderZelle(h.Cell(), "Raum");
                     if (mitGrund) HeaderZelle(h.Cell(), "entfällt bei");
                     HeaderZelle(h.Cell(), "Vertretung");
                     HeaderZelle(h.Cell(), "Art");
@@ -130,6 +147,7 @@ namespace Stundenplan_V2.Vertretung
                     Zelle(table.Cell(), v.Stunde.ToString(), entfall);
                     Zelle(table.Cell(), string.Join(", ", v.Klassen), entfall);
                     Zelle(table.Cell(), v.Fach, entfall);
+                    Zelle(table.Cell(), raumText(v) ?? "", entfall);
                     if (mitGrund) Zelle(table.Cell(), v.OriginalLehrer, entfall);
                     Zelle(table.Cell(), vertretung, entfall);
                     Zelle(table.Cell(), ArtText(v.Art), entfall);

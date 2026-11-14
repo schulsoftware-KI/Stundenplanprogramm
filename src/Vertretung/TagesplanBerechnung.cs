@@ -17,6 +17,11 @@ namespace Stundenplan_V2.Vertretung
     //  PDF, damit alle drei konsistent sind. Zuordnung Buchung → Grundplan-Zelle
     //  immer über (Stunde, UNr, OriginalLehrer).
     //
+    //  Räume (R3-D): Der Raum einer Grundplan-Zelle kommt aus dem Raumplan der
+    //  Plan-Spalte (PlanDaten.Raeume), sonst wie in der App Fachraum vor
+    //  Stammraum laut UV (GrundRaum). Eine Buchung mit VertretungsRaum ändert
+    //  den Raum – bei jeder Art außer Entfall/verlegt weg (RaumGeaendert).
+    //
     //  Verlegung (tagesübergreifend):
     //    - Quell-Eintrag  (an Stunde b): Art=Verlegung, VerlegtNach* gesetzt →
     //      L2s Stunde wird von b WEG verlegt (b wird frei).  Status VerlegtWeg.
@@ -53,7 +58,10 @@ namespace Stundenplan_V2.Vertretung
 
         public string Fach { get; set; } = "";
         public List<string> Klassen { get; set; } = new();
+        /// <summary>Effektiver Raum (bei einer Buchung mit Raumänderung der neue; mehrere mit „, “).</summary>
         public string? Raum { get; set; }
+        /// <summary>R3-D: Raum laut Grundplan (Raumplan, sonst Fachraum vor Stammraum); null bei Zellen ohne Grundplan-Stunde.</summary>
+        public string? GrundRaum { get; set; }
 
         public ZellStatus Status { get; set; } = ZellStatus.Normal;
         /// <summary>Kurztext für die Anzeige, z. B. „verlegt von Mi 15.10. Std 5".</summary>
@@ -64,6 +72,13 @@ namespace Stundenplan_V2.Vertretung
 
         public bool IstGeaendert => Status != ZellStatus.Normal;
         public bool IstFrei => Status == ZellStatus.Entfall || Status == ZellStatus.VerlegtWeg;
+
+        /// <summary>
+        /// R3-D: Die Buchung ändert den Raum (VertretungsRaum gesetzt und anders als der Raum laut Grundplan).
+        /// Wird beim „Online veröffentlichen“ als <c>raumGeaendert</c> gemeldet.
+        /// </summary>
+        public bool RaumGeaendert => !IstFrei && !string.IsNullOrWhiteSpace(Eintrag?.VertretungsRaum)
+                                     && !PlanRaeume.GleicherRaum(Raum, GrundRaum);
     }
 
     /// <summary>Der effektive Tagesplan (alle Zellen des Tages + Hilfszugriffe).</summary>
@@ -153,6 +168,8 @@ namespace Stundenplan_V2.Vertretung
                     if (!plan.Unterrichte.TryGetValue(unr, out var teile)) continue;
                     foreach (var teil in teile)
                     {
+                        // R3-D: Raumplan der Plan-Spalte, sonst Fachraum vor Stammraum (wie die App).
+                        string? raum = PlanRaeume.RaumVon(plan, kv.Key.WTag, stunde, unr, teil);
                         ergebnis.Zellen.Add(new TagesZelle
                         {
                             Stunde = stunde,
@@ -161,7 +178,8 @@ namespace Stundenplan_V2.Vertretung
                             OriginalLehrer = teil.Lehrer,
                             Fach = teil.Fach,
                             Klassen = new List<string>(teil.Klassen),
-                            Raum = teil.Stammraum ?? teil.Fachraum,
+                            Raum = raum,
+                            GrundRaum = raum,
                             Status = ZellStatus.Normal
                         });
                     }
@@ -176,8 +194,10 @@ namespace Stundenplan_V2.Vertretung
                     string.Equals(z.OriginalLehrer, e.OriginalLehrer, StringComparison.OrdinalIgnoreCase));
 
                 // Ziel einer Verlegung ohne passende Grundzelle: trotzdem anzeigen.
+                bool neueZelle = false;
                 if (zelle == null && e.Art == Vertretungsart.Verlegung && e.VerlegtVonStunde.HasValue)
                 {
+                    neueZelle = true;
                     zelle = new TagesZelle
                     {
                         Stunde = e.Stunde,
@@ -225,8 +245,7 @@ namespace Stundenplan_V2.Vertretung
 
                     case Vertretungsart.Raumvertretung:
                         zelle.Status = ZellStatus.Raumvertretung;
-                        if (!string.IsNullOrWhiteSpace(e.VertretungsRaum)) zelle.Raum = e.VertretungsRaum;
-                        zelle.Info = "Raumwechsel";
+                        zelle.Info = "Raumwechsel";   // Raum: unten (R3-D, für alle Arten)
                         break;
 
                     case Vertretungsart.Verlegung:
@@ -246,11 +265,19 @@ namespace Stundenplan_V2.Vertretung
                                 zelle.Fach = partner.Fach;
                                 if (partner.Klassen.Count > 0) zelle.Klassen = new List<string>(partner.Klassen);
                                 zelle.UNr = partner.UNr;
+                                // R3-D: Verlegung auf eine freie Stunde – Raum der verlegten Stunde
+                                // (auf eine belegte Stunde bleibt der Raum dieser Stunde, wie in der App).
+                                if (neueZelle) zelle.Raum = RaumDerStunde(plan, partner);
                             }
                             zelle.Info = "verlegt von " + SlotText(e.VerlegtVonDatum, e.VerlegtVonStunde, datum);
                         }
                         break;
                 }
+
+                // R3-D: Raumänderung der Buchung (Raumvertretung, aber auch Vertretung, Betreuung, EVA,
+                // Zusammenlegung, hierher verlegt). Entfall/verlegt weg: kein Raum.
+                if (!zelle.IstFrei && !string.IsNullOrWhiteSpace(e.VertretungsRaum))
+                    zelle.Raum = e.VertretungsRaum!.Trim();
             }
 
             ergebnis.Zellen = ergebnis.Zellen
@@ -258,6 +285,15 @@ namespace Stundenplan_V2.Vertretung
                 .ThenBy(z => string.Join(",", z.Klassen))
                 .ToList();
             return ergebnis;
+        }
+
+        /// <summary>Raum einer Buchung an ihrer Grundplan-Stelle (Wochentag aus dem Datum, Teil über UNr + Lehrkraft).</summary>
+        private static string? RaumDerStunde(PlanDaten plan, VertretungsEintrag e)
+        {
+            var teil = PlanRaeume.TeilFuer(plan, e.UNr, e.OriginalLehrer, e.Fach);
+            if (teil == null) return null;
+            string? wtag = plan.RasterTage.FirstOrDefault(t => SchuljahrKalender.WochentagIndex(t) == (int)e.Datum.DayOfWeek);
+            return wtag == null ? PlanRaeume.Rueckfall(teil) : PlanRaeume.RaumVon(plan, wtag, e.Stunde, e.UNr, teil);
         }
 
         private static string SlotText(DateTime? d, int? stunde, DateTime bezugstag)

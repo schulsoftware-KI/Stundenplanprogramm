@@ -12,7 +12,9 @@ namespace Stundenplan_V2.Vertretung
     //     Raum, von–bis) und dem Grundplan × Kalender die konkreten
     //     Stunden-Instanzen bilden, die zu vertreten/entfallen sind. Bei
     //     gekoppelten Kursen ist nur der Teil der betroffenen Lehrkraft
-    //     betroffen – die Parallelkurse laufen weiter.
+    //     betroffen – die Parallelkurse laufen weiter. Raum (R3-D): betroffen
+    //     sind die Stunden, die laut Raumplan in dem Raum liegen (ohne Raumplan:
+    //     Fachraum vor Stammraum laut UV) – „Raumsperre“.
     //
     //  2) Vorschlaege: Für eine Instanz die geeigneten Vertretungslehrkräfte
     //     ranken. Es gibt DREI Gruppen, in dieser Reihenfolge:
@@ -139,7 +141,9 @@ namespace Stundenplan_V2.Vertretung
                         {
                             // Pseudofächer (PSF…) müssen nicht vertreten werden.
                             if (teil.IstPseudo) continue;
-                            if (!Betrifft(abw, teil)) continue;
+                            // R3-D: Raum laut Raumplan, sonst Fachraum vor Stammraum (wie die App).
+                            string? raum = PlanRaeume.RaumVon(plan, kv.Key.WTag, stunde, unr, teil);
+                            if (!Betrifft(abw, teil, raum)) continue;
                             result.Add(new StundenInstanz
                             {
                                 Datum = datum,
@@ -148,7 +152,7 @@ namespace Stundenplan_V2.Vertretung
                                 Lehrer = teil.Lehrer,
                                 Fach = teil.Fach,
                                 Klassen = new List<string>(teil.Klassen),
-                                Raum = teil.Stammraum ?? teil.Fachraum
+                                Raum = raum
                             });
                         }
                     }
@@ -162,7 +166,7 @@ namespace Stundenplan_V2.Vertretung
                 .ToList();
         }
 
-        private static bool Betrifft(Abwesenheit abw, TeilInfo teil)
+        private static bool Betrifft(Abwesenheit abw, TeilInfo teil, string? raum)
         {
             switch (abw.Subjekt)
             {
@@ -171,8 +175,9 @@ namespace Stundenplan_V2.Vertretung
                 case AbwesenheitsSubjekt.Klasse:
                     return teil.Klassen.Contains(abw.Name, StringComparer.OrdinalIgnoreCase);
                 case AbwesenheitsSubjekt.Raum:
-                    return string.Equals(teil.Fachraum, abw.Name, StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(teil.Stammraum, abw.Name, StringComparison.OrdinalIgnoreCase);
+                    // R3-D: der Raum, in dem die Stunde liegt (bei „A~B“ jeder der Räume).
+                    var gesperrt = PlanRaeume.Zerlege(abw.Name);
+                    return PlanRaeume.Zerlege(raum).Any(r => gesperrt.Contains(r, StringComparer.OrdinalIgnoreCase));
                 default:
                     return false;
             }

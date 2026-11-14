@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Vertretung erfassen"
-        Width="1120" Height="760"
+        Width="1300" Height="760"
         MinWidth="780" MinHeight="520"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResizeWithGrip">
@@ -27,7 +27,7 @@
                     </Grid.RowDefinitions>
 
                     <TextBlock Grid.Row="0" Margin="0,0,0,8" TextWrapping="Wrap"
-                               Text="Abwesenheit eintragen (mehrere Namen kommagetrennt möglich) und 'Betroffene Stunden ermitteln'. Je Stunde Art und ggf. Vertretung wählen – die Liste ist nach fachgerecht, vertretungsbereit und fairem Zähler sortiert. Mehrere markierte Zeilen lassen sich über die Leiste gemeinsam auf eine Art setzen. 'Buchen' schreibt alles in die Vertretungsdatei."/>
+                               Text="Abwesenheit eintragen (mehrere Namen kommagetrennt möglich) und 'Betroffene Stunden ermitteln'. Je Stunde Art und ggf. Vertretung wählen – die Liste ist nach fachgerecht, vertretungsbereit und fairem Zähler sortiert. 'neuer Raum' wechselt den Raum (bei 'Raum' als Abwesenheit = Raumsperre: Raumvertretung mit freiem Raum vorbelegt). Mehrere markierte Zeilen lassen sich über die Leiste gemeinsam auf eine Art setzen. 'Buchen' schreibt alles in die Vertretungsdatei."/>
 
                     <!-- Eingabe der Abwesenheit -->
                     <StackPanel Grid.Row="1" Margin="0,0,0,8">
@@ -84,7 +84,9 @@
                             <Style TargetType="DataGridRow">
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IstGebucht}" Value="True">
-                                        <Setter Property="Background" Value="#FFF6D5"/>
+                                        <!-- Nachtrag V1 (Nutzer 14.11.2026): kräftigeres Gelb; hebt sich von „Verlegung“
+                                             #FFE0B2 und „Raumvertretung“ #FFF9C4 im Wocheneditor ab -->
+                                        <Setter Property="Background" Value="#FFE082"/>
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -94,6 +96,8 @@
                             <DataGridTextColumn Header="Std" Binding="{Binding Stunde}" IsReadOnly="True" Width="45"/>
                             <DataGridTextColumn Header="Klasse(n)" Binding="{Binding KlassenText}" IsReadOnly="True" Width="110"/>
                             <DataGridTextColumn Header="Fach" Binding="{Binding Fach}" IsReadOnly="True" Width="90"/>
+                            <!-- R3-D: Raum laut Raumplan (sonst Fachraum vor Stammraum) -->
+                            <DataGridTextColumn Header="Raum" Binding="{Binding RaumText}" IsReadOnly="True" Width="80"/>
                             <DataGridTextColumn Header="entfällt bei" Binding="{Binding OrigLehrer}" IsReadOnly="True" Width="90"/>
                             <!-- V1: schon gebuchte Stunden – Zeile gelb, gespeicherte Art/Vertretung vorbelegt -->
                             <DataGridTextColumn Header="gebucht" Binding="{Binding GebuchtText}" IsReadOnly="True" Width="140"/>
@@ -109,7 +113,7 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Header="Vertretung durch" Width="260">
+                            <DataGridTemplateColumn Header="Vertretung durch" Width="230">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <ComboBox ItemsSource="{Binding Vorschlaege}"
@@ -117,6 +121,18 @@
                                                   SelectedValuePath="Lehrer"
                                                   SelectedValue="{Binding GewaehlterVertreter, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                   IsEnabled="{Binding BrauchtVertreter}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <!-- R3-D: freie Räume dieser Stunde; „(wie bisher)“ = Raum laut Plan -->
+                            <DataGridTemplateColumn Header="neuer Raum" Width="200">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <ComboBox ItemsSource="{Binding RaumOptionen}"
+                                                  DisplayMemberPath="Anzeige"
+                                                  SelectedValuePath="Name"
+                                                  SelectedValue="{Binding NeuerRaum, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  IsEnabled="{Binding RaumWaehlbar}"/>
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
@@ -160,6 +176,7 @@
                             <DataGridTextColumn Header="Std" Binding="{Binding Stunde}" Width="45"/>
                             <DataGridTextColumn Header="Klasse(n)" Binding="{Binding Klasse}" Width="110"/>
                             <DataGridTextColumn Header="Fach" Binding="{Binding Fach}" Width="80"/>
+                            <DataGridTextColumn Header="Raum" Binding="{Binding Raum}" Width="110"/>
                             <DataGridTextColumn Header="entfällt bei" Binding="{Binding Orig}" Width="90"/>
                             <DataGridTextColumn Header="Art" Binding="{Binding ArtText}" Width="130"/>
                             <DataGridTextColumn Header="Vertretung" Binding="{Binding Vertreter}" Width="100"/>

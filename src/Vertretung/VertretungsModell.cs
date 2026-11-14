@@ -32,7 +32,7 @@ namespace Stundenplan_V2.Vertretung
         Vertretung,         // reguläre Vertretung (fachgerecht/fachfremd s. VertretungsEintrag)
         BetreuungAufsicht,  // Aufsicht ohne Unterricht
         EVA,                // eigenverantwortliches Arbeiten
-        Raumvertretung,     // nur Raumwechsel (später)
+        Raumvertretung,     // nur Raumwechsel (R3-D: neuer Raum in VertretungsRaum)
         Verlegung,          // Stunde auf anderen Termin geschoben
         Entfall,            // Stunde fällt aus
         Zusammenlegung      // Klassen/Kurse zusammengelegt
@@ -76,7 +76,7 @@ namespace Stundenplan_V2.Vertretung
         public string Fach { get; set; } = "";
         public List<string> Klassen { get; set; } = new();
 
-        // Raumbezug – vorerst leer, Füllung mit späterer Raumverplanung.
+        // R3-D: Raum laut Raumplan der Plan-Spalte, sonst Fachraum vor Stammraum laut UV.
         public string? Raum { get; set; } = null;
 
         public string WochenTag => Datum.DayOfWeek.ToString();
@@ -140,7 +140,9 @@ namespace Stundenplan_V2.Vertretung
         public List<string> Klassen { get; set; } = new();
         public string Fach { get; set; } = "";
 
-        // Raumbezug – vorerst leer (spätere Raumverplanung, Konzept §10).
+        // R3-D: Raum laut Grundplan beim Buchen (Raumplan, sonst Fachraum vor Stammraum) und – bei einer
+        // Raumänderung – der neue Raum. VertretungsRaum gilt bei jeder Art außer Entfall/Verlegung-Quelle
+        // (Raumvertretung = nur der Raum ändert sich, die Lehrkraft bleibt).
         public string? OriginalRaum { get; set; } = null;
         public string? VertretungsRaum { get; set; } = null;
 

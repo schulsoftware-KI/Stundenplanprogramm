@@ -280,6 +280,9 @@ namespace VertretungApi.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("Raum")
+                        .HasColumnType("text");
+
                     b.Property<string>("Schuelergruppe")
                         .HasColumnType("text");
 
@@ -765,6 +768,9 @@ namespace VertretungApi.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<bool?>("FachGeaendert")
+                        .HasColumnType("boolean");
+
                     b.Property<bool?>("Fachgerecht")
                         .HasColumnType("boolean");
 
@@ -781,6 +787,9 @@ namespace VertretungApi.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<bool?>("KlassenGeaendert")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("Lehrer")
                         .HasColumnType("text");
 
@@ -789,6 +798,9 @@ namespace VertretungApi.Data.Migrations
 
                     b.Property<string>("Raum")
                         .HasColumnType("text");
+
+                    b.Property<bool?>("RaumGeaendert")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("Status")
                         .IsRequired()

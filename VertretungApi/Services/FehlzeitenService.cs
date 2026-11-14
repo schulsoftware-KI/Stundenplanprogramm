@@ -890,8 +890,8 @@ public static class FehlzeitenService
 
                 lektionen.TryGetValue(WochenplanService.LektionSchluessel(tag.Datum, st.Stunde, st.GrundUNr, st.GrundLehrer), out var l);
                 bool anwesenheitFehlt = mitAnwesenheit && tag.Datum >= erfassungAb && !l.Erfasst;
-                // Betreuung/Aufsicht braucht kein Thema (Entscheidung 20).
-                bool themaFehlt = mitThema && tag.Datum >= themaAb && st.Status != "Betreuung" && !l.HatThema;
+                // Betreuung/Aufsicht braucht kein Thema (Entscheidung 20), eine Klausur auch nicht (U-1a).
+                bool themaFehlt = mitThema && tag.Datum >= themaAb && st.Status is not ("Betreuung" or "Klausur") && !l.HatThema;
                 if (!anwesenheitFehlt && !themaFehlt) continue;
 
                 bool gruppeFehlt = st.Quellen.Any(q => q.Typ == "Klasse" && q.Schuelergruppe != null

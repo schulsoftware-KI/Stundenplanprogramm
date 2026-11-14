@@ -124,6 +124,33 @@ farbig markiert; auf dem Handy hochkant als Tagesliste, auf breiten Bildschirmen
 quer) als Wochenraster. Zuletzt geladene Wochen bleiben offline lesbar (im Browser, je
 Benutzer getrennt; beim Abmelden gelöscht).
 
+### Räume, Klausuren und geteilte Stunden in Vertretungen (U-1a)
+
+Vorbereitung für die Untis-Übergangsschnittstelle (`claude/Untis_Vorschlag.md`, Entscheidungen 127–133) und R3.
+**Schemaänderung:** `GrundplanSlots.Raum` sowie `Eintraege.RaumGeaendert`, `FachGeaendert`, `KlassenGeaendert`
+(alle optional) – SQLite ergänzt die Spalten beim Start selbst, PostgreSQL braucht die Migration `U1a_RaumUndWechsel`
+(siehe „Migrations“).
+
+- **Raum im Grundplan:** „Grundplan veröffentlichen…“ sendet je Eintrag den Raum aus dem Blatt „Raumplan“ der
+  gewählten Plan-Spalte (Knopf 25, Planeditor oder Knopf 3 „aus Untis“; Zuordnung über Wochentag, Stunde, UNr,
+  Lehrkraft und Fach). Die App zeigt diesen Raum; ohne passende Zeile wie bisher Fachraum vor Stammraum. Die
+  Rückfrage vor dem Veröffentlichen nennt „Räume: n von m Einträgen aus dem Raumplan …“.
+- **Wechsel innerhalb einer Vertretung:** Meldet ein Eintrag `raumGeaendert`, `fachGeaendert` bzw.
+  `klassenGeaendert` = true, übernimmt die API Raum (alter Raum rot gestrichen), Fach bzw. Klassen (weggefallene
+  Klassen verlieren Plan und Klassenbuch-Quelle, neue bekommen sie) – bei jeder Art. Ohne Merker bleibt alles wie
+  vorher: Raum nur bei „Raumvertretung“, Fach nur bei „verlegt hin“, Klassen unverändert. Das Vertretungsmodul
+  setzt die Merker (noch) nicht – sein Raum (Stammraum vor Fachraum) erzeugt so keine Schein-Raumwechsel; das
+  ändert sich mit R3-D.
+- **Geteilte Stunde:** Bekommt eine Grundplan-Stunde zwei Vertretungen mit verschiedenen Lehrkräften (Gruppe
+  geteilt), wird die zweite eine eigene Stunde mit ihren Klassen; im Klassenbuch hat sie einen eigenen Schlüssel
+  (GrundLehrer = vertretende Lehrkraft, ohne Lehrkraft „Kürzel·2“).
+- **Status `Klausur`** (Art `Klausur`): Lehrkraft = Aufsicht, `originalLehrer` = Kurslehrkraft, `grundUNr` = UNr
+  des Kurses. Zuordnung nur exakt (Stunde, UNr, Kurslehrkraft): Fällt die Klausur in eine Stunde des Kurses, wird
+  diese zur Klausur; sonst erscheint eine zusätzliche Stunde mit den Teilnehmern des Kurses. Raum und Fach (Kurs)
+  gelten immer. Klassenbuch ja (Anwesenheit), Thema nicht nötig. App: pink, Abzeichen „Klausur“.
+- **Abwesend, niemand übernimmt** (z. B. EVA ohne Lehrkraft): `originalLehrer` gesetzt, `lehrer` leer → die
+  abwesende Lehrkraft erscheint gestrichen. **Offene Vertretung:** `lehrer` = `???` (wie in Untis).
+
 ## Anmeldung & Rollen (Phase 2, Schritt 4)
 
 | Methode | Pfad | Zweck | Auth |
@@ -532,7 +559,9 @@ Zufälligen Schlüssel erzeugen (PowerShell, zweimal ausführen – je einer fü
 ```powershell
 $b = New-Object byte[] 48; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
 ```
-Den `Api:PushKey` im Desktop unter „Online-Einstellungen…“ eintragen.
+Den `Api:PushKey` im Desktop unter „Online-Einstellungen…“ eintragen. Das Fenster zeigt, in welcher Datei die
+Einstellungen stehen (`vertretung_online.json` neben der geöffneten Plandatei – jede Kopie der Plandatei hat ihre
+eigene), mit Knopf „Ordner öffnen“. Bei „Server 401“ bzw. „Server 404“ nennt die Fehlermeldung diesen Pfad.
 
 ### Migrations (PostgreSQL)
 
@@ -547,8 +576,8 @@ Migration dazu – im Ordner `VertretungApi`:
 dotnet tool install --global dotnet-ef        # nur einmal
 dotnet ef migrations add <Name> -o Data/Migrations
 ```
-(Namen z. B. `Zugehoerigkeit_Gueltigkeit`; „Grundlinie“ ist schon vergeben). Den Ordner `Data/Migrations`
-danach ins Repo übernehmen.
+(Namen z. B. `Zugehoerigkeit_Gueltigkeit`; vergeben sind „Grundlinie“ und – seit U-1a, Raum im Grundplan und
+Wechsel-Merker der Vertretungen – `U1a_RaumUndWechsel`). Den Ordner `Data/Migrations` danach ins Repo übernehmen.
 Fehlt nach einer Modelländerung die Migration, bricht der Start mit „pending changes“ und einem Hinweis
 ab, statt mit unvollständigem Schema zu laufen. SQLite in der Entwicklung bleibt bei EnsureCreated +
 Schema-Nachrüstung und braucht keine Migrations.
@@ -757,8 +786,10 @@ Nur Desktop, **keine API- und keine Schemaänderung, es wird nichts gesendet.** 
   anlegen“) aus der UV angelegt – danach in Excel prüfen. Räume aus der UV, die im Blatt fehlen, werden unten
   angehängt; vorhandene Zeilen ändert das Programm nie. Zusätzliche Räume (z. B. ein freier Raum ohne Klasse)
   dürfen eingetragen werden und dienen dann als Ausweichraum.
-- **Später:** R3 Vertretungsmodul (Raumvertretung, Raumsperre) und App (echter Raum statt „Fachraum vor
-  Stammraum“, braucht eine EF-Migration).
+- **App (seit U-1a):** „Grundplan veröffentlichen…“ sendet den Raum aus dem Blatt „Raumplan“ mit – die App zeigt
+  ihn statt „Fachraum vor Stammraum“ (siehe „Räume, Klausuren und geteilte Stunden in Vertretungen“).
+- **Später (R3-D):** Vertretungsmodul (zugewiesener Raum in Tagesplan/Erfassen/PDF, Raumvertretung mit freien
+  Räumen, Raumsperre).
 
 ### Räume aus Untis übernehmen (Knopf 3, Desktop)
 

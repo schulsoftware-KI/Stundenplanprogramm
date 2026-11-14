@@ -549,20 +549,30 @@ public static class WochenplanService
             .GroupBy(s => UNrSchluessel(s.UNr, s.Lehrer))
             .ToDictionary(g => g.Key, g => QuellenAus(g));
 
+        // U-1a (Entscheidung 133): Grundplan-Stunden, die schon eine Lehrkraft aus einem Eintrag
+        // bekommen haben – mit ihrem Stand davor. Bekommt dieselbe Stunde eine zweite Vertretung
+        // mit anderer Lehrkraft (Gruppe geteilt, z. B. 05B an L88, 05D an L57), wird daraus eine
+        // eigene Stunde, statt die erste zu überschreiben.
+        var vorher = new Dictionary<Std, Std>();
+
         foreach (var e in eintraege)
         {
             string orig = !string.IsNullOrWhiteSpace(e.OriginalLehrer) ? e.OriginalLehrer! : (e.Lehrer ?? "");
             var eKlassen = Liste(e.Klassen);
             string status = string.IsNullOrWhiteSpace(e.Status) ? e.Art.ToString() : e.Status;
+            bool klausur = status == "Klausur";
 
             // Grundplan-Stunde suchen: exakt über die UNr, sonst über die Klassen.
+            // Klausur nur exakt (UNr + Lehrkraft des Kurses) – über die Klassen träfe die
+            // Aufsicht sonst eine eigene Stunde derselben Stufe.
             Std? ziel = null;
             if (e.GrundUNr.HasValue)
                 ziel = stunden.FirstOrDefault(st =>
                     st.Stunde == e.Stunde && st.GrundUNr == e.GrundUNr.Value && Gleich(st.GrundLehrer, orig));
-            ziel ??= stunden.FirstOrDefault(st =>
-                st.Stunde == e.Stunde && Gleich(st.GrundLehrer, orig) &&
-                (eKlassen.Count == 0 || st.Klassen.Overlaps(eKlassen)));
+            if (!klausur)
+                ziel ??= stunden.FirstOrDefault(st =>
+                    st.Stunde == e.Stunde && Gleich(st.GrundLehrer, orig) &&
+                    (eKlassen.Count == 0 || st.Klassen.Overlaps(eKlassen)));
 
             switch (status)
             {
@@ -586,26 +596,43 @@ public static class WochenplanService
 
                 default:
                 {
-                    // Vertreten, Betreuung, EVA, Zusammenlegung, VerlegtHin (und Unbekanntes):
+                    // Vertreten, Betreuung, EVA, Zusammenlegung, Klausur, VerlegtHin (und Unbekanntes):
                     // eine Lehrkraft hält die Stunde – ggf. eine andere als laut Grundplan.
+                    string neuerLehrer = (e.Lehrer ?? "").Trim();
+                    bool verlegtHin = status == "VerlegtHin";
+
+                    // 133: zweite Vertretung derselben Grundplan-Stunde mit anderer Lehrkraft.
+                    if (ziel != null && !verlegtHin && vorher.TryGetValue(ziel, out var basis)
+                        && !Gleich(neuerLehrer, ziel.Lehrer))
+                        ziel = Teilstunde(stunden, basis, neuerLehrer, orig);
+                    else if (ziel != null && !verlegtHin && !vorher.ContainsKey(ziel))
+                        vorher[ziel] = Kopie(ziel);
+
                     bool zusaetzlich = ziel == null;
                     var x = ziel ?? NeueAusEintrag(stunden, e, orig, eKlassen);
 
-                    string neuerLehrer = e.Lehrer ?? "";
                     if (neuerLehrer.Length > 0 && !Gleich(neuerLehrer, x.Lehrer))
                     {
                         x.OriginalLehrer ??= x.Lehrer;
                         x.Lehrer = neuerLehrer;
                     }
+                    else if (neuerLehrer.Length == 0 && !zusaetzlich && !verlegtHin && !string.IsNullOrWhiteSpace(e.OriginalLehrer))
+                    {
+                        // U-1a: ausdrücklich abwesend, aber niemand übernimmt (Untis „Plus“ → EVA,
+                        // Klausur ohne Aufsicht): die abwesende Lehrkraft erscheint gestrichen.
+                        x.OriginalLehrer ??= x.Lehrer;
+                        x.Lehrer = "";
+                    }
 
-                    if (status == "VerlegtHin")
+                    if (verlegtHin)
                     {
                         // Hier wird die (von woanders) verlegte Stunde gehalten.
-                        if (!string.IsNullOrWhiteSpace(e.Fach)) x.Fach = e.Fach;
+                        if (!string.IsNullOrWhiteSpace(e.Fach)) x.Fach = FachNorm(e.Fach);
                         if (e.UNr.HasValue && e.UNr.Value > 0) x.UNr = e.UNr.Value;
                         ErgaenzeGruppen(x, e.UNr, x.Lehrer, eKlassen, gruppenJeUNr);
                         // Teilnehmer sind die der verlegten Stunde.
                         SetzeQuellen(x, e.UNr, x.Lehrer, eKlassen, quellenJeUNr);
+                        UebernimmWechsel(x, e, eKlassen, klausur: false);
                         Markiere(x, status, "verlegt");
                     }
                     else
@@ -614,6 +641,10 @@ public static class WochenplanService
                         {
                             ErgaenzeGruppen(x, e.UNr ?? e.GrundUNr, orig, eKlassen, gruppenJeUNr);
                             SetzeQuellen(x, e.UNr ?? e.GrundUNr, orig, eKlassen, quellenJeUNr);
+                        }
+                        else
+                        {
+                            UebernimmWechsel(x, e, eKlassen, klausur);
                         }
                         Markiere(x, status, InfoText(status));
                     }
@@ -636,8 +667,10 @@ public static class WochenplanService
             Lehrer = f.Lehrer,
             GrundLehrer = f.Lehrer,
             Art = string.IsNullOrWhiteSpace(f.Art) ? "Unterricht" : f.Art,
-            // Fachraum (z. B. Bio-Raum) vor Stammraum der Klasse.
-            Raum = slots.Select(sl => sl.Fachraum).FirstOrDefault(r => !string.IsNullOrWhiteSpace(r))
+            // U-1a (R3): zugewiesener Raum aus dem Raumplan; sonst wie bisher Fachraum
+            // (z. B. Bio-Raum) vor Stammraum der Klasse.
+            Raum = slots.Select(sl => sl.Raum).FirstOrDefault(r => !string.IsNullOrWhiteSpace(r))
+                   ?? slots.Select(sl => sl.Fachraum).FirstOrDefault(r => !string.IsNullOrWhiteSpace(r))
                    ?? slots.Select(sl => sl.Stammraum).FirstOrDefault(r => !string.IsNullOrWhiteSpace(r))
         };
         foreach (var slot in slots)
@@ -692,7 +725,7 @@ public static class WochenplanService
             Stunde = e.Stunde,
             UNr = e.UNr ?? e.GrundUNr ?? 0,
             GrundUNr = e.GrundUNr ?? 0,
-            Fach = e.Fach ?? "",
+            Fach = FachNorm(e.Fach),
             Lehrer = orig,
             GrundLehrer = orig,
             Raum = e.Raum
@@ -701,6 +734,91 @@ public static class WochenplanService
         stunden.Add(x);
         return x;
     }
+
+    /// <summary>
+    /// U-1a (Entscheidung 132): Fach, Klassen und Raum aus dem Eintrag übernehmen – nur, wenn der
+    /// Desktop sie ausdrücklich als geändert meldet (Untis: Vertretungsfach, -klassen, -raum).
+    /// Ältere Desktop-Versionen und das Vertretungsmodul senden die Werte der Grundplan-Zelle mit
+    /// (mit anderer Schreibweise bzw. dem Raum „Stammraum vor Fachraum“); die bleiben unbeachtet.
+    /// Bei einer Klausur gelten Fach (Kurs) und Raum immer.
+    /// </summary>
+    private static void UebernimmWechsel(Std x, VertretungsEintragDb e, List<string> eKlassen, bool klausur)
+    {
+        if ((e.FachGeaendert == true || klausur) && !string.IsNullOrWhiteSpace(e.Fach))
+            x.Fach = FachNorm(e.Fach);
+        if ((e.RaumGeaendert == true || klausur) && !string.IsNullOrWhiteSpace(e.Raum) && !Gleich(e.Raum, x.Raum))
+        {
+            x.OriginalRaum ??= x.Raum;
+            x.Raum = e.Raum!.Trim();
+        }
+        if (e.KlassenGeaendert == true && eKlassen.Count > 0)
+            SetzeKlassen(x, eKlassen);
+    }
+
+    /// <summary>
+    /// Klassen einer Stunde ersetzen (z. B. Untis-Vertretungsklassen): weggefallene Klassen
+    /// verlieren ihren Klassen-Schlüssel und ihre Klassen-Quelle, neue Klassen bekommen beides.
+    /// Kurs- und Gruppenschlüssel bleiben.
+    /// </summary>
+    private static void SetzeKlassen(Std x, List<string> neu)
+    {
+        var soll = new HashSet<string>(neu.Select(k => k.Trim()).Where(k => k.Length > 0), Cmp);
+        if (soll.Count == 0 || soll.SetEquals(x.Klassen)) return;
+
+        foreach (var k in x.Klassen.Where(k => !soll.Contains(k)).ToList())
+        {
+            x.Klassen.Remove(k);
+            if (KlassenMuster.IsMatch(k)) x.Gruppen.Remove(k);
+            x.Quellen.RemoveAll(q => q.Typ == "Klasse" && Gleich(q.Klasse, k));
+        }
+        foreach (var k in soll.Where(k => !x.Klassen.Contains(k)).ToList())
+        {
+            x.Klassen.Add(k);
+            if (!KlassenMuster.IsMatch(k)) continue;
+            x.Gruppen.Add(k.ToUpperInvariant());
+            if (!x.Quellen.Any(q => q.Typ == "Klasse" && Gleich(q.Key, k)))
+                x.Quellen.Add(new PlanQuelle("Klasse", k.ToUpperInvariant(), k, null));
+        }
+    }
+
+    /// <summary>Unabhängige Kopie einer Stunde (Stand vor der ersten Vertretung, Entscheidung 133).</summary>
+    private static Std Kopie(Std s)
+    {
+        var k = new Std
+        {
+            Stunde = s.Stunde, UNr = s.UNr, GrundUNr = s.GrundUNr, Fach = s.Fach,
+            Lehrer = s.Lehrer, GrundLehrer = s.GrundLehrer, OriginalLehrer = s.OriginalLehrer,
+            Raum = s.Raum, OriginalRaum = s.OriginalRaum, Art = s.Art, Status = s.Status,
+            Info = s.Info, Geaendert = s.Geaendert
+        };
+        foreach (var g in s.Gruppen) k.Gruppen.Add(g);
+        foreach (var kl in s.Klassen) k.Klassen.Add(kl);
+        k.Quellen.AddRange(s.Quellen);
+        return k;
+    }
+
+    /// <summary>
+    /// Entscheidung 133: weitere Vertretung derselben Grundplan-Stunde als eigene Stunde (Stand vor
+    /// der ersten Vertretung). Damit das Klassenbuch beide Hälften getrennt führt, bekommt die neue
+    /// Stunde einen eigenen Lektionsschlüssel: als GrundLehrer die vertretende Lehrkraft, sonst
+    /// „Kürzel·2“ (bzw. ·3 …), falls der Schlüssel schon vergeben ist.
+    /// </summary>
+    private static Std Teilstunde(List<Std> stunden, Std basis, string neuerLehrer, string orig)
+    {
+        var t = Kopie(basis);
+        bool Frei(string grundLehrer) => !stunden.Any(st =>
+            st.Stunde == t.Stunde && st.GrundUNr == t.GrundUNr && Gleich(st.GrundLehrer, grundLehrer));
+        string schluessel = neuerLehrer;
+        for (int i = 2; schluessel.Length == 0 || !Frei(schluessel); i++)
+            schluessel = $"{orig.Trim()}·{i}";
+        t.GrundLehrer = schluessel;
+        stunden.Add(t);
+        return t;
+    }
+
+    /// <summary>Fach ohne doppelte Leerzeichen („D  G1“ aus Untis bzw. der UV → „D G1“ wie im Grundplan).</summary>
+    private static string FachNorm(string? fach)
+        => Regex.Replace((fach ?? "").Trim(), @"\s+", " ");
 
     private static void ErgaenzeGruppen(
         Std x, int? unr, string lehrer, List<string> eKlassen, Dictionary<string, List<string>> gruppenJeUNr)
@@ -792,6 +910,7 @@ public static class WochenplanService
         "Betreuung" => "Betreuung/Aufsicht",
         "EVA" => "Eigenverantwortliches Arbeiten",
         "Zusammenlegung" => "Zusammenlegung",
+        "Klausur" => "Klausur",
         _ => "geändert"
     };
 

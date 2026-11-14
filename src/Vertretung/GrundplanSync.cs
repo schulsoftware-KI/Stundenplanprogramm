@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using ClosedXML.Excel;
@@ -38,6 +39,11 @@ namespace Stundenplan_V2.Vertretung
         public string? Bezeichnung { get; set; }
         public KalenderPushDto? Kalender { get; set; }
         public List<GrundplanSlotDto> Slots { get; set; } = new();
+
+        /// <summary>U-1a: Zeile für die Rückfrage vor dem Veröffentlichen (wird nicht gesendet).</summary>
+        [JsonIgnore] public string? RaumInfo { get; set; }
+        /// <summary>U-1a: Anzahl Einträge mit Raum aus dem Raumplan (wird nicht gesendet).</summary>
+        [JsonIgnore] public int MitRaumplanRaum { get; set; }
     }
 
     public class KalenderPushDto
@@ -72,6 +78,12 @@ namespace Stundenplan_V2.Vertretung
         public string? Klasse { get; set; }
         public string? Schuelergruppe { get; set; }
         public string Art { get; set; } = "Unterricht";
+        /// <summary>
+        /// U-1a (R3): zugewiesener Raum aus dem Blatt „Raumplan“ (Knopf 25, Planeditor oder Knopf 3
+        /// „aus Untis“). Leer = die App nimmt wie bisher Fachraum vor Stammraum.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Raum { get; set; }
     }
 
     public static class GrundplanSync
@@ -202,7 +214,71 @@ namespace Stundenplan_V2.Vertretung
                     }
                 }
             }
+
+            SetzeRaeume(dto, plan.PlanPfad, plan.GewaehltePlanSpalte);
             return dto;
+        }
+
+        /// <summary>
+        /// U-1a (R3): Jeder Eintrag bekommt den Raum aus dem Blatt „Raumplan“ des gewählten Plans –
+        /// über Wochentag, Stunde, UNr, Lehrkraft (und Fach, falls eine Lehrkraft in der UNr mehrere
+        /// Teile hat). Braucht ein Teil mehrere Räume (Fachraum „A~B“), werden sie mit „, “ verbunden.
+        /// Ohne Raumplan oder ohne passende Zeile bleibt der Raum leer (die App zeigt dann wie bisher
+        /// Fachraum vor Stammraum). Ergebnis als Zeile für die Rückfrage in <see cref="GrundplanPushDto.RaumInfo"/>.
+        /// </summary>
+        private static void SetzeRaeume(GrundplanPushDto dto, string planPfad, string planSpalte)
+        {
+            List<Stundenplan_V2.Raumplanung.RaumZeile>? zeilen;
+            try { zeilen = Stundenplan_V2.Raumplanung.RaumplanStore.LiesRaumplanFuer(planPfad, planSpalte); }
+            catch (Exception ex)
+            {
+                dto.RaumInfo = "⚠ Räume: Das Blatt „Raumplan“ konnte nicht gelesen werden (ist die Plandatei in Excel " +
+                               "geöffnet?) – die App zeigt Fachraum bzw. Stammraum. Fehler: " + ex.Message;
+                return;
+            }
+            if (zeilen == null || zeilen.Count == 0)
+            {
+                dto.RaumInfo = $"Räume: kein Raumplan für „{planSpalte}“ – die App zeigt Fachraum bzw. Stammraum " +
+                               "(einen Raumplan legen Knopf 25 oder Knopf 3 „aus Untis“ an).";
+                return;
+            }
+
+            static string Norm(string s) => Regex.Replace((s ?? "").Trim(), @"\s+", " ").ToUpperInvariant();
+            string Schluessel(string wtag, int stunde, int unr, string lehrer, string? fach)
+                => $"{Norm(wtag)}|{stunde}|{unr}|{Norm(lehrer)}" + (fach == null ? "" : "|" + Norm(fach));
+
+            var mitFach = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            var ohneFach = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            void Merke(Dictionary<string, List<string>> d, string k, string raum)
+            {
+                if (!d.TryGetValue(k, out var l)) d[k] = l = new List<string>();
+                if (!l.Contains(raum, StringComparer.OrdinalIgnoreCase)) l.Add(raum);
+            }
+            foreach (var z in zeilen)
+            {
+                string raum = (z.Raum ?? "").Trim();
+                if (raum.Length == 0) continue;
+                Merke(mitFach, Schluessel(z.WTag, z.Stunde, z.UNr, z.Lehrer, z.Fach), raum);
+                Merke(ohneFach, Schluessel(z.WTag, z.Stunde, z.UNr, z.Lehrer, null), raum);
+            }
+
+            int mit = 0;
+            foreach (var s in dto.Slots)
+            {
+                if (s.Art is "Sperre") continue;
+                if (!mitFach.TryGetValue(Schluessel(s.WTag, s.Stunde, s.UNr, s.Lehrer, s.Fach), out var raeume)
+                    && !ohneFach.TryGetValue(Schluessel(s.WTag, s.Stunde, s.UNr, s.Lehrer, null), out raeume))
+                    continue;
+                s.Raum = string.Join(", ", raeume);
+                mit++;
+            }
+            dto.MitRaumplanRaum = mit;
+            int gesamt = dto.Slots.Count(s => s.Art is not "Sperre");
+            dto.RaumInfo = mit == 0
+                ? $"Räume: Der Raumplan für „{planSpalte}“ passt zu keinem Eintrag (Plan geändert?) – die App zeigt " +
+                  "Fachraum bzw. Stammraum."
+                : $"Räume: {mit} von {gesamt} Einträgen aus dem Raumplan „{planSpalte}“" +
+                  (mit < gesamt ? " (die übrigen: Fachraum bzw. Stammraum)." : ".");
         }
 
         private static (string typ, string key) Lerngruppe(string token, string fach, string? sg)

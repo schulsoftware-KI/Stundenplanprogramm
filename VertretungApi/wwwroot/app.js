@@ -81,6 +81,7 @@ const STATUS = {
   EVA:            { text: "EVA",             art: "betreuung" },
   Zusammenlegung: { text: "Zusammenlegung",  art: "betreuung" },
   Raumvertretung: { text: "Raumänderung",    art: "raumwechsel" },
+  Klausur:        { text: "Klausur",         art: "klausur" },   // U-1a (Untis-Klausuren)
   Frei:           { text: "frei",            art: "frei",      gestrichen: true },
 };
 
@@ -721,9 +722,11 @@ function zielName() {
   return wert;
 }
 
-/** Korrektur im Stil des Rotstifts: alter Wert gestrichen, neuer daneben. */
+/** Korrektur im Stil des Rotstifts: alter Wert gestrichen, neuer daneben; ohne neuen Wert nur gestrichen
+ *  (U-1a: z. B. EVA ohne Lehrkraft – die abwesende Lehrkraft erscheint durchgestrichen). */
 function korrektur(alt, neu) {
   if (alt && neu && !gleich(alt, neu)) return [h("s", { class: "alt" }, alt), " ", h("span", { class: "neu" }, neu)];
+  if (alt && !neu) return h("s", { class: "alt" }, alt);
   return neu || alt || "";
 }
 

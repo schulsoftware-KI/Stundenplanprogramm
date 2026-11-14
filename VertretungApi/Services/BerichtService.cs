@@ -369,6 +369,7 @@ public static class BerichtService
         "Betreuung" => "Betreuung",
         "EVA" => "EVA",
         "Zusammenlegung" => "Zusammenlegung",
+        "Klausur" => "Klausur",
         "Raumvertretung" => null,
         "Frei" => string.IsNullOrWhiteSpace(info) ? "frei" : $"frei ({info})",
         _ => status

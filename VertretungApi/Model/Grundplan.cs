@@ -46,6 +46,11 @@ public class GrundplanSlot
     public string Fach { get; set; } = "";
     public string? Fachraum { get; set; }
     public string? Stammraum { get; set; }
+    /// <summary>
+    /// U-1a (R3): zugewiesener Raum aus dem Raumplan des Desktops (Blatt „Raumplan“, z. B. aus Untis
+    /// übernommen). Geht in der App vor „Fachraum vor Stammraum“; leer = wie bisher.
+    /// </summary>
+    public string? Raum { get; set; }
 
     /// <summary>Klasse | Kurs | Sonstige (AG, Förder-/Differenzierungsgruppen …).</summary>
     public string LerngruppeTyp { get; set; } = "Klasse";

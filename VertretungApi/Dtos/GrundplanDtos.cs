@@ -34,4 +34,5 @@ public record GrundplanSlotDto(
     string LerngruppeKey,
     string? Klasse,
     string? Schuelergruppe,
-    string Art);
+    string Art,
+    string? Raum = null);     // U-1a: zugewiesener Raum aus dem Raumplan (ältere Desktops senden ihn nicht)

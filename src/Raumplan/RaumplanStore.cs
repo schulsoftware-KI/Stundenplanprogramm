@@ -294,6 +294,20 @@ namespace Stundenplan_V2.Raumplanung
             e.Raumplan.AddRange(LiesRaumplanZeilen(ws));
         }
 
+        /// <summary>
+        /// U-1a (R3): nur die Zeilen des Blatts „Raumplan“ für einen Plan – für den Grundplan-Push
+        /// (die App zeigt dann den zugewiesenen Raum). null, wenn es das Blatt nicht gibt. Wirft, wenn
+        /// die Plandatei nicht lesbar ist (z. B. in Excel geöffnet).
+        /// </summary>
+        public static List<RaumZeile>? LiesRaumplanFuer(string planPfad, string planSpalte)
+        {
+            using var wb = new XLWorkbook(planPfad);
+            if (!wb.Worksheets.TryGetWorksheet(BlattRaumplan, out var ws)) return null;
+            return LiesRaumplanZeilen(ws)
+                .Where(z => string.Equals(z.Plan.Trim(), (planSpalte ?? "").Trim(), StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
         private static List<RaumZeile> LiesRaumplanZeilen(IXLWorksheet ws)
         {
             var liste = new List<RaumZeile>();

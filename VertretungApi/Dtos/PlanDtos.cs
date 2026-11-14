@@ -21,7 +21,10 @@ public record PlanEintragDto(
     bool? Fachgerecht,
     bool IstAenderung,
     int? UNr = null,          // Phase 2, Schritt 2: UNr der gehaltenen Stunde
-    int? GrundUNr = null);    // UNr der ersetzten Grundplan-Stunde
+    int? GrundUNr = null,     // UNr der ersetzten Grundplan-Stunde
+    bool? RaumGeaendert = null,     // U-1a (Entscheidung 132): Raum/Fach/Klassen weichen ausdrücklich
+    bool? FachGeaendert = null,     // vom Grundplan ab (z. B. Untis-Vertretungsraum); null = nichts
+    bool? KlassenGeaendert = null); // gemeldet (ältere Desktops, Vertretungsmodul)
 
 /// <summary>Öffentliche Sicht (Schüler): OHNE Grund/Bemerkung/Fachgerecht.</summary>
 public record PlanEintragOeffentlichDto(

@@ -231,7 +231,7 @@ namespace Stundenplan_V2.Vertretung
             var einst = OnlineSync.LadeEinstellungen(_ordner);
             if (string.IsNullOrWhiteSpace(einst.BaseUrl))
             {
-                var neu = OnlineSync.FrageEinstellungen(this, einst);
+                var neu = OnlineSync.FrageEinstellungen(this, einst, _ordner);
                 if (neu == null) return;
                 OnlineSync.SpeichereEinstellungen(_ordner, neu);
                 einst = neu;
@@ -254,7 +254,7 @@ namespace Stundenplan_V2.Vertretung
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Veröffentlichen fehlgeschlagen:\n\n" + ex.Message,
+                MessageBox.Show("Veröffentlichen fehlgeschlagen:\n\n" + OnlineSync.FehlerText(ex, _ordner),
                     "Online", MessageBoxButton.OK, MessageBoxImage.Warning);
                 SetzeInfo("Online-Veröffentlichung fehlgeschlagen.");
             }
@@ -264,11 +264,11 @@ namespace Stundenplan_V2.Vertretung
         private void BtnOnlineEinst_Click(object sender, RoutedEventArgs e)
         {
             var einst = OnlineSync.LadeEinstellungen(_ordner);
-            var neu = OnlineSync.FrageEinstellungen(this, einst);
+            var neu = OnlineSync.FrageEinstellungen(this, einst, _ordner);
             if (neu != null)
             {
                 OnlineSync.SpeichereEinstellungen(_ordner, neu);
-                SetzeInfo("Online-Einstellungen gespeichert.");
+                SetzeInfo($"Online-Einstellungen gespeichert: {OnlineSync.EinstellungsPfad(_ordner)}");
             }
         }
 

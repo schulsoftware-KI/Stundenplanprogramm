@@ -33,7 +33,7 @@ namespace Stundenplan_V2.Vertretung
             var einst = OnlineSync.LadeEinstellungen(_ordner);
             if (string.IsNullOrWhiteSpace(einst.BaseUrl))
             {
-                var neu = OnlineSync.FrageEinstellungen(this, einst);
+                var neu = OnlineSync.FrageEinstellungen(this, einst, _ordner);
                 if (neu == null) return;
                 OnlineSync.SpeichereEinstellungen(_ordner, neu);
                 einst = neu;
@@ -86,7 +86,8 @@ namespace Stundenplan_V2.Vertretung
                 $"{dto.Slots.Count} Einträge · {nLehrer} Lehrkräfte\n" +
                 $"{nKlassen} Klassen · {nKurse} Kurse · {nSonst} sonstige Gruppen\n" +
                 (nKurseOhneSg > 0 ? $"(davon {nKurseOhneSg} Kurs(e) ohne Schülergruppe in der UV)\n" : "") +
-                $"Kalender {_daten.Schuljahr}: {nFrei} freie Zeiträume\n\n" +
+                $"Kalender {_daten.Schuljahr}: {nFrei} freie Zeiträume\n" +
+                (dto.RaumInfo != null ? dto.RaumInfo + "\n" : "") + "\n" +
                 (hinweis != null ? "⚠ " + hinweis + "\n\n" : "") +
                 "Eine bereits vorhandene Version mit demselben Gültig-ab-Datum wird ersetzt.";
             if (MessageBox.Show(frage, "Grundplan veröffentlichen",
@@ -102,11 +103,11 @@ namespace Stundenplan_V2.Vertretung
                 string art = GrundplanSync.WarVersionErsetzt(antwort) ? "Version ersetzt" : "neue Version";
                 SetzeInfo($"Grundplan veröffentlicht: „{dto.Bezeichnung}\" ab {gueltigAb:dd.MM.yyyy}, {dto.Slots.Count} Einträge ({art}).");
                 _log?.Invoke($"Online: Grundplan '{dto.Bezeichnung}' ab {gueltigAb:dd.MM.yyyy} veröffentlicht " +
-                             $"({dto.Slots.Count} Einträge, {art}).");
+                             $"({dto.Slots.Count} Einträge, davon {dto.MitRaumplanRaum} mit Raum aus dem Raumplan, {art}).");
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Veröffentlichen fehlgeschlagen:\n\n" + ex.Message,
+                MessageBox.Show("Veröffentlichen fehlgeschlagen:\n\n" + OnlineSync.FehlerText(ex, _ordner),
                     "Grundplan", MessageBoxButton.OK, MessageBoxImage.Warning);
                 SetzeInfo("Grundplan-Veröffentlichung fehlgeschlagen.");
             }

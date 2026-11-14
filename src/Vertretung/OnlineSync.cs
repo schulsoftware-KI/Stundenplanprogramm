@@ -1,11 +1,13 @@
 #nullable enable
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -52,6 +54,13 @@ namespace Stundenplan_V2.Vertretung
         public int? UNr { get; set; }
         /// <summary>UNr der Grundplan-Stunde, an deren Stelle die Zelle tritt.</summary>
         public int? GrundUNr { get; set; }
+
+        // U-1a: ausdrücklich gemeldete Abweichungen vom Grundplan (für den Untis-Import, U-1b).
+        // Das Vertretungsmodul setzt sie nicht – die API zeigt dann wie bisher den Raum nur bei
+        // „Raumvertretung“ und das Fach nur bei „verlegt hin“.
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public bool? RaumGeaendert { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public bool? FachGeaendert { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public bool? KlassenGeaendert { get; set; }
     }
 
     public class OnlineEinstellungen
@@ -142,6 +151,28 @@ namespace Stundenplan_V2.Vertretung
 
         // ---- Einstellungen (JSON neben der Plandatei) ----
 
+        /// <summary>V2: vollständiger Pfad der Einstellungsdatei im Ordner der Plandatei.</summary>
+        public static string EinstellungsPfad(string ordner) => Path.Combine(ordner, EinstellungDatei);
+
+        /// <summary>
+        /// V2: Fehlermeldung beim Veröffentlichen, bei 401/404 mit Hinweis, wo die Einstellungen
+        /// liegen (der Schlüssel selbst wird nie angezeigt).
+        /// </summary>
+        public static string FehlerText(Exception ex, string ordner)
+        {
+            string text = ex.Message;
+            if (ex is HttpRequestException)
+            {
+                if (text.StartsWith("Server 401", StringComparison.Ordinal))
+                    text += "\n\nDer API-Key passt nicht zu „Api:PushKey“ der laufenden API." +
+                            "\nEinstellungen: " + EinstellungsPfad(ordner);
+                else if (text.StartsWith("Server 404", StringComparison.Ordinal))
+                    text += "\n\nPrüfe die Server-URL: nur die Adresse ohne Pfad (z. B. https://….trycloudflare.com)." +
+                            "\nEinstellungen: " + EinstellungsPfad(ordner);
+            }
+            return text;
+        }
+
         public static OnlineEinstellungen LadeEinstellungen(string ordner)
         {
             try
@@ -165,12 +196,13 @@ namespace Stundenplan_V2.Vertretung
         /// Kleiner programmatisch gebauter Dialog (kein XAML) für Server-URL und
         /// API-Key. Gibt die bearbeiteten Einstellungen zurück oder null bei Abbruch.
         /// </summary>
-        public static OnlineEinstellungen? FrageEinstellungen(Window? owner, OnlineEinstellungen vorgabe)
+        /// <param name="ordner">V2: Ordner der Einstellungsdatei (Ordner der Plandatei) – wird angezeigt.</param>
+        public static OnlineEinstellungen? FrageEinstellungen(Window? owner, OnlineEinstellungen vorgabe, string? ordner = null)
         {
             var win = new Window
             {
                 Title = "Online-Einstellungen",
-                Width = 460,
+                Width = 560,
                 SizeToContent = SizeToContent.Height,
                 WindowStartupLocation = owner != null ? WindowStartupLocation.CenterOwner : WindowStartupLocation.CenterScreen,
                 Owner = owner,
@@ -180,7 +212,7 @@ namespace Stundenplan_V2.Vertretung
             var grid = new Grid { Margin = new Thickness(14) };
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            for (int i = 0; i < 4; i++) grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            for (int i = 0; i < 5; i++) grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             TextBlock Label(string t, int r)
             {
@@ -203,13 +235,54 @@ namespace Stundenplan_V2.Vertretung
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 4, 0, 10)
             };
-            Grid.SetRow(hinweis, 2); Grid.SetColumn(hinweis, 1); grid.Children.Add(hinweis);
+            Grid.SetRow(hinweis, 3); Grid.SetColumn(hinweis, 1); grid.Children.Add(hinweis);
+
+            // V2 (Nutzer 09.11.2026): zeigen, welche Datei benutzt wird – jede Plandatei-Kopie hat ihre eigene.
+            if (!string.IsNullOrWhiteSpace(ordner))
+            {
+                string pfad = EinstellungsPfad(ordner);
+                Label("Gespeichert in:", 2);
+                var ort = new StackPanel { Margin = new Thickness(0, 6, 0, 6) };
+                var zeile = new DockPanel();
+                var oeffnen = new Button { Content = "Ordner öffnen", Padding = new Thickness(8, 1, 8, 1), Margin = new Thickness(8, 0, 0, 0) };
+                DockPanel.SetDock(oeffnen, Dock.Right);
+                oeffnen.Click += (_, __) =>
+                {
+                    try { Process.Start(new ProcessStartInfo("explorer.exe", $"\"{ordner}\"") { UseShellExecute = true }); }
+                    catch { /* Öffnen ist nur Komfort */ }
+                };
+                zeile.Children.Add(oeffnen);
+                zeile.Children.Add(new TextBlock
+                {
+                    Text = pfad, ToolTip = pfad, TextTrimming = TextTrimming.CharacterEllipsis,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+                ort.Children.Add(zeile);
+
+                // Liegt neben dem Programm noch eine weitere Datei, wird sie NICHT benutzt.
+                try
+                {
+                    string neben = Path.Combine(AppContext.BaseDirectory, EinstellungDatei);
+                    if (File.Exists(neben) &&
+                        !string.Equals(Path.GetFullPath(neben), Path.GetFullPath(pfad), StringComparison.OrdinalIgnoreCase))
+                        ort.Children.Add(new TextBlock
+                        {
+                            Text = "Hinweis: Neben dem Programm liegt eine weitere vertretung_online.json – sie wird nicht benutzt.",
+                            Foreground = System.Windows.Media.Brushes.DarkOrange,
+                            TextWrapping = TextWrapping.Wrap,
+                            Margin = new Thickness(0, 4, 0, 0)
+                        });
+                }
+                catch { /* nur Hinweis */ }
+
+                Grid.SetRow(ort, 2); Grid.SetColumn(ort, 1); grid.Children.Add(ort);
+            }
 
             var panel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
             var ok = new Button { Content = "OK", Width = 90, Margin = new Thickness(0, 0, 8, 0), IsDefault = true };
             var cancel = new Button { Content = "Abbrechen", Width = 90, IsCancel = true };
             panel.Children.Add(ok); panel.Children.Add(cancel);
-            Grid.SetRow(panel, 3); Grid.SetColumn(panel, 1); grid.Children.Add(panel);
+            Grid.SetRow(panel, 4); Grid.SetColumn(panel, 1); grid.Children.Add(panel);
 
             win.Content = grid;
 

@@ -94,8 +94,11 @@ const HI_THEMEN = [
         ["verlegung", "orange – Verlegung"],
         ["betreuung", "blau – Betreuung oder EVA"],
         ["raum", "gelb – Raumänderung"],
+        ["klausur", "pink – Klausur"],
       ] },
       "Der alte Wert ist rot durchgestrichen, der neue steht daneben. „Nur Änderungen“ blendet alles andere aus.",
+      "Ist eine Lehrkraft durchgestrichen und keine neue genannt, übernimmt niemand die Stunde (z. B. EVA). " +
+        "„???“ heißt: Die Vertretung ist noch nicht geplant.",
       "Der Plan lädt sich von selbst neu. Ohne Netz zeigt die App den zuletzt geladenen Stand und unten den " +
         "Hinweis „Offline“.",
       { nur: "schueler", teile: [
@@ -151,6 +154,8 @@ const HI_THEMEN = [
         ["EVA", "eigenverantwortliches Arbeiten."],
         ["Betreuung", "Aufsicht ohne Fachunterricht."],
         ["Verlegung", "Die Stunde wurde auf einen anderen Termin geschoben."],
+        ["Klausur", "Bei einer Klausur steht die Aufsicht als Lehrkraft; der Raum ist der Klausurraum."],
+        ["???", "Vertretung, die noch nicht geplant ist – wer die Stunde übernimmt, steht noch nicht fest."],
       ] },
     ],
   },

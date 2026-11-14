@@ -74,6 +74,7 @@ public class GrundplanController : ControllerBase
                 Fach = s.Fach ?? "",
                 Fachraum = s.Fachraum,
                 Stammraum = s.Stammraum,
+                Raum = string.IsNullOrWhiteSpace(s.Raum) ? null : s.Raum.Trim(),
                 LerngruppeTyp = string.IsNullOrWhiteSpace(s.LerngruppeTyp) ? "Klasse" : s.LerngruppeTyp,
                 LerngruppeKey = s.LerngruppeKey ?? "",
                 Klasse = s.Klasse ?? "",
@@ -193,7 +194,7 @@ public class GrundplanController : ControllerBase
             .Take(Math.Clamp(limit, 1, 5000))
             .Select(s => new
             {
-                s.WTag, s.Stunde, s.UNr, s.Lehrer, s.Fach, s.Fachraum, s.Stammraum,
+                s.WTag, s.Stunde, s.UNr, s.Lehrer, s.Fach, s.Fachraum, s.Stammraum, s.Raum,
                 s.LerngruppeTyp, s.LerngruppeKey, s.Klasse, s.Art
             })
             .ToListAsync();

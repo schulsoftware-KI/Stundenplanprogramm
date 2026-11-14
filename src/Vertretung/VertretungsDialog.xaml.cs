@@ -273,6 +273,7 @@ namespace Stundenplan_V2.Vertretung
 
             // Duplikate entfernen (z. B. gekoppelte Kurse über mehrere gewählte Klassen).
             var gesehen = new HashSet<string>();
+            int schonGebucht = 0;
             _zeilen.Clear();
             foreach (var inst in alleInstanzen
                          .OrderBy(i => i.Datum).ThenBy(i => i.Stunde)
@@ -289,7 +290,7 @@ namespace Stundenplan_V2.Vertretung
                     })
                     .ToList();
 
-                _zeilen.Add(new InstanzZeile
+                var zeile = new InstanzZeile
                 {
                     Inst = inst,
                     DatumText = inst.Datum.ToString("ddd dd.MM.yyyy"),
@@ -301,12 +302,24 @@ namespace Stundenplan_V2.Vertretung
                     Vorschlaege = vorschlaege,
                     GewaehlterVertreter = vorschlaege.FirstOrDefault()?.Lehrer,
                     Bemerkung = ""
-                });
+                };
+
+                // V1: Ist die Stunde schon gebucht, die gespeicherte Art/Vertretung zeigen statt
+                // „Vertretung“ + erstem Vorschlag (sonst überschrieb „Buchen“ die Buchung still).
+                var bestehend = FindeBuchung(inst);
+                if (bestehend != null)
+                {
+                    zeile.UebernimmBuchung(bestehend);
+                    schonGebucht++;
+                }
+                _zeilen.Add(zeile);
             }
 
             SetzeStatus(_zeilen.Count == 0
                 ? "Keine betroffenen Stunden (an Schultagen im Zeitraum) gefunden."
-                : $"{_zeilen.Count} betroffene Stunde(n) für {namen.Count} Name(n). Art/Vertretung prüfen, dann 'Buchen'.");
+                : $"{_zeilen.Count} betroffene Stunde(n) für {namen.Count} Name(n)" +
+                  (schonGebucht > 0 ? $", davon {schonGebucht} schon gebucht (gelb, wie gespeichert vorbelegt)" : "") +
+                  ". Art/Vertretung prüfen, dann 'Buchen'.");
         }
 
         // =====================================================
@@ -351,6 +364,23 @@ namespace Stundenplan_V2.Vertretung
                 return;
             }
 
+            // V1: Was geschieht mit schon gebuchten Stunden? Unverändert = bleibt, wie es ist;
+            // geändert = erst nach Rückfrage; Verlegungen (zwei verknüpfte Einträge) nur im Wocheneditor.
+            var geaenderte = _zeilen.Where(z => z.Bestehend != null && !z.IstVerlegung && !z.Unveraendert()).ToList();
+            bool aenderungenBuchen = true;
+            if (geaenderte.Count > 0)
+            {
+                var liste = string.Join("\n", geaenderte.Take(12).Select(z =>
+                    $"• {z.DatumText}, {z.Stunde}. Std, {z.KlassenText} {z.Fach}: {z.GebuchtText} → {z.NeuText()}"));
+                if (geaenderte.Count > 12) liste += $"\n… und {geaenderte.Count - 12} weitere";
+                var antwort = MessageBox.Show(
+                    $"{geaenderte.Count} schon gebuchte Stunde(n) würden geändert:\n\n{liste}\n\n" +
+                    "Ja = ändern · Nein = nur die neuen Stunden buchen · Abbrechen = nichts buchen",
+                    "Bestehende Buchungen ändern?", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+                if (antwort == MessageBoxResult.Cancel) { SetzeStatus("Nichts gebucht."); return; }
+                aenderungenBuchen = antwort == MessageBoxResult.Yes;
+            }
+
             // Abwesenheiten festhalten (nicht doppelt).
             foreach (var abw in _letzteAbwesenheiten)
             {
@@ -362,12 +392,20 @@ namespace Stundenplan_V2.Vertretung
                 if (!vorhanden) _daten.Abwesenheiten.Add(abw);
             }
 
-            int gebucht = 0, uebersprungen = 0;
+            int gebucht = 0, uebersprungen = 0, geaendert = 0, unveraendert = 0, verlegungen = 0, behalten = 0;
+            var neuGebucht = new List<(InstanzZeile Zeile, VertretungsEintrag Eintrag)>();
             foreach (var z in _zeilen)
             {
                 bool brauchtVertreter = InstanzZeile.ArtBrauchtVertreter(z.Art);
                 string? vertreter = string.IsNullOrWhiteSpace(z.GewaehlterVertreter)
                     ? null : z.GewaehlterVertreter!.Trim();
+
+                if (z.Bestehend != null)
+                {
+                    if (z.IstVerlegung) { if (!z.Unveraendert()) verlegungen++; else unveraendert++; continue; }
+                    if (z.Unveraendert()) { unveraendert++; continue; }
+                    if (!aenderungenBuchen) { behalten++; continue; }
+                }
 
                 if (brauchtVertreter && vertreter == null)
                 {
@@ -405,7 +443,9 @@ namespace Stundenplan_V2.Vertretung
                     string.Equals(v.OriginalLehrer, eintrag.OriginalLehrer, StringComparison.OrdinalIgnoreCase));
 
                 _daten.Vertretungen.Add(eintrag);
+                if (z.Bestehend != null) geaendert++;
                 gebucht++;
+                neuGebucht.Add((z, eintrag));
             }
 
             try { VertretungsStore.Speichern(_daten, _vertretungsPfad); }
@@ -417,11 +457,17 @@ namespace Stundenplan_V2.Vertretung
                 return;
             }
 
+            // V1: Gespeicherte Zeilen gelten ab jetzt als gebucht (kein zweites Nachfragen).
+            foreach (var (zeile, eintrag) in neuGebucht) zeile.UebernimmBuchung(eintrag);
+
             AktualisiereZaehler();
             AktualisiereUebersicht();
-            string msg = uebersprungen > 0
-                ? $"{gebucht} gebucht, {uebersprungen} übersprungen (keine Vertretungskraft gewählt)."
-                : $"{gebucht} Stunde(n) gebucht und gespeichert.";
+            var teile = new List<string> { $"{gebucht} Stunde(n) gebucht und gespeichert" + (geaendert > 0 ? $" (davon {geaendert} geändert)" : "") };
+            if (unveraendert > 0) teile.Add($"{unveraendert} unverändert");
+            if (behalten > 0) teile.Add($"{behalten} Änderung(en) nicht übernommen");
+            if (uebersprungen > 0) teile.Add($"{uebersprungen} übersprungen (keine Vertretungskraft gewählt)");
+            if (verlegungen > 0) teile.Add($"{verlegungen} Verlegung(en) nicht geändert – Verlegungen im Wocheneditor ändern");
+            string msg = string.Join(", ", teile) + ".";
             SetzeStatus(msg);
             _log?.Invoke("Vertretung: " + msg + $" ({Path.GetFileName(_vertretungsPfad)})");
 
@@ -597,6 +643,12 @@ namespace Stundenplan_V2.Vertretung
         //  Hilfsfunktionen
         // =====================================================
 
+        /// <summary>V1: gespeicherte Buchung derselben Stunde (Schlüssel wie beim Buchen: Datum, Stunde, UNr, Lehrkraft).</summary>
+        private VertretungsEintrag? FindeBuchung(StundenInstanz inst)
+            => _daten.Vertretungen.FirstOrDefault(v =>
+                v.Datum.Date == inst.Datum.Date && v.Stunde == inst.Stunde && v.UNr == inst.UNr &&
+                string.Equals(v.OriginalLehrer, inst.Lehrer, StringComparison.OrdinalIgnoreCase));
+
         private static int ParseStunde(string s)
             => int.TryParse((s ?? "").Trim(), out int v) && v > 0 ? v : 0;
 
@@ -696,6 +748,57 @@ namespace Stundenplan_V2.Vertretung
             public List<VorschlagAnzeige> Vorschlaege { get; set; } = new();
             public string? GewaehlterVertreter { get; set; }
             public string Bemerkung { get; set; } = "";
+
+            // ---- V1: schon gebuchte Stunde ----
+            private VertretungsEintrag? _bestehend;
+            /// <summary>Gespeicherte Buchung dieser Stunde (null = noch nicht gebucht).</summary>
+            public VertretungsEintrag? Bestehend => _bestehend;
+            public bool IstGebucht => _bestehend != null;
+            /// <summary>Teil einer Verlegung (zwei verknüpfte Einträge) – nur im Wocheneditor änderbar.</summary>
+            public bool IstVerlegung => _bestehend != null && !string.IsNullOrEmpty(_bestehend.VerlegungsId);
+            /// <summary>Spalte „gebucht“: gespeicherte Art und Vertretung.</summary>
+            public string GebuchtText => _bestehend == null ? ""
+                : IstVerlegung ? "Verlegung (im Wocheneditor ändern)"
+                : BuchungText(_bestehend.Art, _bestehend.VertretungsLehrer);
+
+            /// <summary>Zeile wie gespeichert vorbelegen (Art, Vertretung, Bemerkung).</summary>
+            public void UebernimmBuchung(VertretungsEintrag b)
+            {
+                _bestehend = b;
+                Art = b.Art;
+                if (!string.IsNullOrWhiteSpace(b.VertretungsLehrer))
+                {
+                    string v = b.VertretungsLehrer!.Trim();
+                    if (!Vorschlaege.Any(x => string.Equals(x.Lehrer, v, StringComparison.OrdinalIgnoreCase)))
+                        Vorschlaege = new List<VorschlagAnzeige> { new() { Lehrer = v, Anzeige = $"{v}  (gebucht)" } }
+                            .Concat(Vorschlaege).ToList();
+                    GewaehlterVertreter = Vorschlaege.First(x => string.Equals(x.Lehrer, v, StringComparison.OrdinalIgnoreCase)).Lehrer;
+                }
+                Bemerkung = b.Bemerkung ?? "";
+                OnChanged(nameof(Vorschlaege));
+                OnChanged(nameof(GewaehlterVertreter));
+                OnChanged(nameof(Bemerkung));
+                OnChanged(nameof(IstGebucht));
+                OnChanged(nameof(GebuchtText));
+            }
+
+            /// <summary>Art, Vertretung (falls nötig) und Bemerkung wie gespeichert?</summary>
+            public bool Unveraendert()
+            {
+                if (_bestehend == null) return false;
+                if (Art != _bestehend.Art) return false;
+                if (!string.Equals((Bemerkung ?? "").Trim(), (_bestehend.Bemerkung ?? "").Trim(), StringComparison.Ordinal))
+                    return false;
+                if (!BrauchtVertreter) return true;
+                return string.Equals((GewaehlterVertreter ?? "").Trim(), (_bestehend.VertretungsLehrer ?? "").Trim(),
+                    StringComparison.OrdinalIgnoreCase);
+            }
+
+            /// <summary>Neue Art/Vertretung für die Rückfrage.</summary>
+            public string NeuText() => BuchungText(Art, BrauchtVertreter ? GewaehlterVertreter : null);
+
+            private static string BuchungText(Vertretungsart art, string? vertreter)
+                => string.IsNullOrWhiteSpace(vertreter) ? art.ToString() : $"{art} – {vertreter!.Trim()}";
 
             // Einmal erzeugt (F1): jede Zeile und jedes Lesen bekommt dieselbe Liste.
             private static readonly Array ArtenListe = Enum.GetValues(typeof(Vertretungsart));

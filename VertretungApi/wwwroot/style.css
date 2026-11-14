@@ -30,6 +30,7 @@
   --raum: #8a6b00;        --raum-t: #faf1cf;
   --frei: #636e83;        --frei-t: #eef1f6;
   --sonst: #6a4fb3;       --sonst-t: #eeeafa;
+  --klausur: #a1307a;     --klausur-t: #f9e4f1;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -54,6 +55,7 @@
     --raum: #e9cd52;        --raum-t: #433d1a;
     --frei: #9fb0a5;        --frei-t: #2a3a31;
     --sonst: #c3b2ff;       --sonst-t: #34304c;
+    --klausur: #f08cc8;     --klausur-t: #45253a;
   }
 }
 
@@ -405,6 +407,8 @@ s.alt {
 .eintrag.frei .badge { background: var(--frei); }
 .eintrag.sonst      { border-left-color: var(--sonst); background: var(--sonst-t); }
 .eintrag.sonst .badge { background: var(--sonst); }
+.eintrag.klausur    { border-left-color: var(--klausur); background: var(--klausur-t); }
+.eintrag.klausur .badge { background: var(--klausur); }
 
 /* Entfall/verlegt/frei: ganze Stunde mit dem Rotstift gestrichen */
 .eintrag.gestrichen .fach,
@@ -846,6 +850,7 @@ main.klassenbuch { max-width: 720px; padding-bottom: 0; }
 .marke.kb-art.betreuung { background: var(--betreuung); }
 .marke.kb-art.raumwechsel { background: var(--raum); }
 .marke.kb-art.sonst { background: var(--sonst); }
+.marke.kb-art.klausur { background: var(--klausur); }
 #kbHinweise:empty, #kbOffen:empty { display: none; }
 #kbHinweise, #kbOffen { display: grid; gap: 8px; }
 #kbHinweise .hinweis { margin: 0; }
@@ -1647,6 +1652,7 @@ main.klassenbuch > .hi-karte, main.fehlzeiten > .hi-karte { margin-top: 2px; }
 .hi-f-verlegung { background: var(--verlegung); }
 .hi-f-betreuung { background: var(--betreuung); }
 .hi-f-raum { background: var(--raum); }
+.hi-f-klausur { background: var(--klausur); }
 .hi-begriffe { margin: 0; display: grid; gap: 2px; }
 .hi-begriffe dt { margin-top: 6px; font-weight: 700; }
 .hi-begriffe dt:first-child { margin-top: 0; }

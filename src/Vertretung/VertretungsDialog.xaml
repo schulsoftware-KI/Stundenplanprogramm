@@ -80,12 +80,23 @@
                               AutoGenerateColumns="False" CanUserAddRows="False"
                               GridLinesVisibility="All" HeadersVisibility="All"
                               SelectionMode="Extended" SelectionUnit="FullRow">
+                        <DataGrid.RowStyle>
+                            <Style TargetType="DataGridRow">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IstGebucht}" Value="True">
+                                        <Setter Property="Background" Value="#FFF6D5"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DataGrid.RowStyle>
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Datum" Binding="{Binding DatumText}" IsReadOnly="True" Width="95"/>
                             <DataGridTextColumn Header="Std" Binding="{Binding Stunde}" IsReadOnly="True" Width="45"/>
                             <DataGridTextColumn Header="Klasse(n)" Binding="{Binding KlassenText}" IsReadOnly="True" Width="110"/>
                             <DataGridTextColumn Header="Fach" Binding="{Binding Fach}" IsReadOnly="True" Width="90"/>
                             <DataGridTextColumn Header="entfällt bei" Binding="{Binding OrigLehrer}" IsReadOnly="True" Width="90"/>
+                            <!-- V1: schon gebuchte Stunden – Zeile gelb, gespeicherte Art/Vertretung vorbelegt -->
+                            <DataGridTextColumn Header="gebucht" Binding="{Binding GebuchtText}" IsReadOnly="True" Width="140"/>
                             <DataGridTemplateColumn Header="Art" Width="150">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>

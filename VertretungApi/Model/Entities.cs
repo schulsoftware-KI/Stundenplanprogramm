@@ -11,7 +11,8 @@ public enum PlanArt
     EVA,
     Raumvertretung,
     Zusammenlegung,
-    Sonstiges
+    Sonstiges,
+    Klausur          // U-1a (Entscheidung 127): Klausur aus Untis (Lehrkraft = Aufsicht)
 }
 
 public enum BenutzerRolle { Admin, Lehrer, Schueler, Klassenlehrer, Stufenkoordination }
@@ -53,6 +54,14 @@ public class VertretungsEintragDb
     // ersatzweise über Stunde + Lehrkraft + Klassen.
     public int? UNr { get; set; }                    // UNr der gehaltenen Stunde (bei Verlegung: der verlegten)
     public int? GrundUNr { get; set; }               // UNr der Grundplan-Stunde, an deren Stelle der Eintrag tritt
+
+    // U-1a (Entscheidung 132): Der Desktop meldet ausdrücklich, was sich gegenüber der
+    // Grundplan-Stunde ändert (Untis: Vertretungsraum, Vertretungsfach, Vertretungsklassen).
+    // null = nichts gemeldet (ältere Desktop-Versionen, Vertretungsmodul): Raum dann nur bei
+    // „Raumvertretung“, Fach nur bei „verlegt hin“, Klassen nie – wie vor U-1a.
+    public bool? RaumGeaendert { get; set; }
+    public bool? FachGeaendert { get; set; }
+    public bool? KlassenGeaendert { get; set; }
 }
 
 /// <summary>Backend-Konto (Admin/Lehrkraft/Schüler). Login per JWT (Phase 1C, Phase 2 Schritt 4).</summary>

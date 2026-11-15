@@ -55,6 +55,14 @@ namespace Stundenplan_V2.Vertretung
             "„Zuordnungen speichern“ sichern: schild_zuordnung.json neben der Plandatei (für Pseudodaten " +
             "schild_zuordnung_pseudo.json). Die Datei enthält nur Kürzel, Fächer, Kurs- und Klassenbezeichnungen – keine " +
             "Personendaten.\n\n" +
+            "Gemeinsam unterrichtete Kurse: Wird ein Plan-Kurs in SchILD als mehrere Kurse geführt (z. B. Sport oder Projektkurs " +
+            "Q1 und Q2 zusammen, Kooperationskurs), im Reiter „Zuordnung“ beim zweiten SchILD-Kurs „⇄ gemeinsam mit …“ wählen. " +
+            "Passt ein SchILD-Kurs nur zu einem Plan-Kurs, der schon einen SchILD-Kurs hat, schlägt das Programm das vor. Ohne " +
+            "„gemeinsam“ sind zwei SchILD-Kurse desselben Jahrgangs auf einem Plan-Kurs ein Konflikt.\n\n" +
+            "Muster der Kursbezeichnung: Wie heißen die Kurse im SchILD der Schule? Mit {Fach}, {Art}, {Nr}, {Jg} (Stufe) und {*} " +
+            "(beliebiger Text), z. B. {Fach}-{Art}{Nr} für „D-G2“ oder {Jg}-{Fach}-{Art}{Nr} für „Q1-D-G2“. Daraus liest die " +
+            "Zuordnung die Nummer des Kurses; die Vorschau zeigt drei Kurse aus dem Export. Leer = automatisch (erste Ziffernfolge " +
+            "nach dem Fach). Mehrere Muster mit ; trennen. Gespeichert mit „Zuordnungen speichern“.\n\n" +
             "Der Bericht („Bericht kopieren“) enthält keine Schülerdaten: nur Zahlen, Zeilennummern, Klassen-, Kurs- " +
             "und Fachbezeichnungen sowie Lehrkräftekürzel.";
 
@@ -388,6 +396,15 @@ namespace Stundenplan_V2.Vertretung
             cbSek1.SelectedIndex = 0;
             panel.Children.Add(cbSek1);
 
+            // 5.2a-3 (Entscheidung 137): Schreibweise der Oberstufenkurse – zum Testen des Musters der Kursbezeichnung
+            panel.Children.Add(new TextBlock { Text = "Kursbezeichnungen der Oberstufe:", Margin = new Thickness(0, 0, 0, 2) });
+            var cbSchreib = new ComboBox { Margin = new Thickness(0, 0, 0, 10) };
+            cbSchreib.Items.Add("„D-G1“, „M-L2“ (Standard)");
+            cbSchreib.Items.Add("„D GK1“, „M LK2“");
+            cbSchreib.Items.Add("„Q1-D-G1“, „Q1-M-L2“ (mit Stufe – die Automatik liest die Nummer aus „Q1“)");
+            cbSchreib.SelectedIndex = 0;
+            panel.Children.Add(cbSchreib);
+
             var chkIds = new CheckBox
             {
                 Content = "SchuelerLernplattformen.dat mit SchILD-ID erzeugen",
@@ -448,6 +465,12 @@ namespace Stundenplan_V2.Vertretung
                         _ => SchildSek1Variante.Gemischt
                     },
                     MitIds = chkIds.IsChecked == true,
+                    Schreibweise = cbSchreib.SelectedIndex switch
+                    {
+                        1 => SchildKursSchreibweise.Leerzeichen,
+                        2 => SchildKursSchreibweise.MitStufe,
+                        _ => SchildKursSchreibweise.Bindestrich
+                    },
                     Startwert = start
                 };
                 win.DialogResult = true;
@@ -470,7 +493,8 @@ namespace Stundenplan_V2.Vertretung
             BtnBericht.IsEnabled = an && _ergebnis != null;
             BtnZuSpeichern.IsEnabled = an && _zuordnungGeaendert;
             BtnZuVorschlaege.IsEnabled = an && (_ergebnis?.Zuordnung?.VorschlagTexte.Count ?? 0) > 0;
-            if (!an) { BtnZuFestlegen.IsEnabled = false; BtnZuEntfernen.IsEnabled = false; }
+            if (!an) { BtnZuFestlegen.IsEnabled = false; BtnZuEntfernen.IsEnabled = false; TxtZuMuster.IsEnabled = false; BtnZuMuster.IsEnabled = false; }
+            else AktualisiereMusterVorschau();
         }
 
         private void BtnSchliessen_Click(object sender, RoutedEventArgs e) => Close();

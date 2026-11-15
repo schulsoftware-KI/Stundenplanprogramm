@@ -25,6 +25,19 @@ namespace Stundenplan_V2.Vertretung
     //  Meldungen (111, 114): Zuordnungsprobleme sind Warnungen, nie Fehler;
     //  genannt werden nur Kurs-, Klassen- und Fachbezeichnungen, Kürzel und
     //  Anzahlen – nie Schülerdaten (87, 91).
+    //
+    //  5.2a-3 (Entscheidungen 136/137):
+    //   - Gemeinsam unterrichtete Kurse: Ein Plan-Kurs darf mehrere SchILD-Kurse
+    //     haben (Sport/Projektkurs Q1+Q2, Kooperationskurs). Festlegung von Hand
+    //     „gemeinsam mit …“ – dann kein Konflikt, und Teilnehmer aus dem eigenen
+    //     Jahrgang des SchILD-Kurses passen. Passt ein offener SchILD-Kurs nur zu
+    //     einem schon vergebenen Plan-Kurs (Fach, Kursart, Lehrkraft, Stundenplan
+    //     der Teilnehmer), schlägt die Automatik „gemeinsam“ vor. Zwei SchILD-
+    //     Kurse desselben Jahrgangs von Hand auf einem Plan-Kurs ohne „gemeinsam“
+    //     sind ein Konflikt. Gemeinsam festgelegte Kurse sperren ihren Plan-Kurs
+    //     nicht für die Automatik der übrigen SchILD-Kurse.
+    //   - Muster der Kursbezeichnung (SchildKursMuster): liefert die Nummer; wer
+    //     nicht passt, bekommt die automatische Nummer (Hinweis).
     // =====================================================================
 
     public enum SchildZuordnungArt { Oberstufe, Sek1Kurs, OhneKurs }
@@ -74,12 +87,29 @@ namespace Stundenplan_V2.Vertretung
         /// Eine Zeile mit Zeitkonflikt gilt als offen – egal ob automatisch oder von Hand zugeordnet (Nachtrag 5.2a-2).
         /// </summary>
         public string? Zeitkonflikt { get; set; }
-        public string StatusText => SchildZuordnung.Text(Status) + (Zeitkonflikt != null ? " · ⚠ Zeitkonflikt" : "");
+        public string StatusText => SchildZuordnung.Text(Status) + (Gemeinsam ? " · gemeinsam" : "")
+                                    + (Zeitkonflikt != null ? " · ⚠ Zeitkonflikt" : "");
         public bool IstOffen => Zeitkonflikt != null || Status is SchildZuordnungStatus.Vorschlag or SchildZuordnungStatus.Offen
             or SchildZuordnungStatus.Konflikt or SchildZuordnungStatus.Veraltet or SchildZuordnungStatus.OhneGegenstueck;
-        public bool HatFestlegung => Status is SchildZuordnungStatus.VonHand or SchildZuordnungStatus.KeineZuordnung
-            or SchildZuordnungStatus.Veraltet;
+        /// <summary>In der Zuordnungsdatei gibt es eine Festlegung von Hand für diese Zeile (auch veraltet oder im Konflikt).</summary>
+        public bool HatFestlegung { get; set; }
+        /// <summary>5.2a-3 (136): gemeinsam festgelegt bzw. als „gemeinsam“ vorgeschlagen.</summary>
+        public bool Gemeinsam { get; set; }
+        /// <summary>5.2a-3: andere SchILD-Kurse im selben Plan-Kurs („„SP-G3“ (Q1)“), sonst leer.</summary>
+        public string GemeinsamMit { get; set; } = "";
+        /// <summary>5.2a-3: Plan-Kurse, die schon einen (anderen) SchILD-Kurs haben – für „⇄ gemeinsam mit …“.</summary>
+        public List<SchildGemeinsamWahl> GemeinsamWahl { get; set; } = new();
         internal string Sortierung => $"{JahrgangText.ToUpperInvariant()}|{KursBez.ToUpperInvariant()}";
+    }
+
+    /// <summary>5.2a-3 (136): Eintrag „⇄ gemeinsam mit …“ der Auswahl „Festlegen auf“.</summary>
+    public sealed class SchildGemeinsamWahl
+    {
+        public SchildPlanKurs Plan { get; init; } = new();
+        /// <summary>SchILD-Kurse, die schon in diesem Plan-Kurs sind („„SP-G3“ (Q1)“).</summary>
+        public string Mit { get; init; } = "";
+        /// <summary>Fach, Kursart, Lehrkraft und Stundenplan der Teilnehmer passen.</summary>
+        public bool Passt { get; init; }
     }
 
     public sealed class SchildKuerzelZeile
@@ -127,6 +157,8 @@ namespace Stundenplan_V2.Vertretung
         public Dictionary<string, string> VorschlagKuerzel { get; } = new(StringComparer.OrdinalIgnoreCase);
         /// <summary>SchILD-Fach → vollständige vorgeschlagene Liste der Plan-Fächer.</summary>
         public Dictionary<string, List<string>> VorschlagFaecher { get; } = new(StringComparer.OrdinalIgnoreCase);
+        /// <summary>5.2a-3 (136): vorgeschlagene „gemeinsam“-Festlegungen (Jahrgang und KursBez wie in Kurse.dat, Plan-Schlüssel).</summary>
+        public List<(string Jahrgang, string KursBez, string Plan)> VorschlagGemeinsam { get; } = new();
         /// <summary>Texte der Vorschläge (für die Rückfrage vor „Vorschläge übernehmen“).</summary>
         public List<string> VorschlagTexte { get; } = new();
         public List<string> PlanKuerzel { get; } = new();
@@ -197,6 +229,10 @@ namespace Stundenplan_V2.Vertretung
             public SchildZuordnungStatus Status;
             public string Grund = "";
             public List<SchildPlanKurs> Kand = new();
+            /// <summary>5.2a-3: gemeinsam festgelegt bzw. vorgeschlagen.</summary>
+            public bool Gemeinsam;
+            /// <summary>Es gibt eine Festlegung von Hand (auch veraltet).</summary>
+            public bool Festgelegt;
         }
 
         private sealed class Rechner
@@ -225,6 +261,14 @@ namespace Stundenplan_V2.Vertretung
             // Vorschläge: SchILD-Fach → (Plan-Fach → Anzahl), SchILD-Kürzel → (Plan-Kürzel, Anzahl)
             private readonly Dictionary<string, Dictionary<string, int>> _sugF = new(StringComparer.Ordinal);
             private readonly Dictionary<string, (string P, int N)> _sugK = new(StringComparer.Ordinal);
+
+            // 5.2a-3 (137): Muster der Kursbezeichnung
+            private SchildKursMuster? _muster;
+            private string? _musterFehler;
+            private readonly Dictionary<SchildZuordnungArt, List<string>> _musterNicht = new()
+            { [SchildZuordnungArt.Oberstufe] = new(), [SchildZuordnungArt.Sek1Kurs] = new() };
+            private readonly Dictionary<SchildZuordnungArt, int> _musterJa = new()
+            { [SchildZuordnungArt.Oberstufe] = 0, [SchildZuordnungArt.Sek1Kurs] = 0 };
 
             public Rechner(SchildExport ex, int jahr, int abschnitt, SchildPlanInfo plan, SchildZuordnungDatei datei,
                            List<SchildProblem> probleme, List<SchildZahl> zahlen)
@@ -293,6 +337,7 @@ namespace Stundenplan_V2.Vertretung
             {
                 bool hatB = _ex.Hat(SchildDateiArt.Basisdaten), hatK = _ex.Hat(SchildDateiArt.Kurse),
                      hatL = _ex.Hat(SchildDateiArt.Leistungsdaten);
+                _muster = SchildKursMuster.Lies(_datei.KursMuster, out _musterFehler);
                 _mitTeilnehmern = hatB && hatL;
                 var sch = new Dictionary<string, SchildSchueler>(StringComparer.Ordinal);
                 if (hatB)
@@ -356,11 +401,20 @@ namespace Stundenplan_V2.Vertretung
                     foreach (var x in k.AlleLehrkraefte())
                         if (x.Length > 0 && !lehrer.Any(y => SchildText.Gleich(x, y))) lehrer.Add(x);
                     string kl = ober || k.Klasse.Length == 0 ? "" : SchildText.KlasseNorm(k.Klasse);
+                    var art = ober ? SchildZuordnungArt.Oberstufe : SchildZuordnungArt.Sek1Kurs;
+                    int nr = Nummer(k.KursBez, k.Fach, kl);
+                    if (_muster != null)
+                    {
+                        // 5.2a-3 (137): Nummer laut Muster, sonst Automatik (Hinweis)
+                        var teile = _muster.Zerlege(k.KursBez, k.Fach, k.Jahrgaenge);
+                        if (teile != null) { nr = teile.Nr; _musterJa[art]++; }
+                        else _musterNicht[art].Add($"{k.KursBez} ({k.JahrgangText})");
+                    }
                     var u = new SchildZuordnungZeile
                     {
-                        Art = ober ? SchildZuordnungArt.Oberstufe : SchildZuordnungArt.Sek1Kurs, KursBez = k.KursBez, Klasse = kl,
+                        Art = art, KursBez = k.KursBez, Klasse = kl,
                         JahrgangText = k.JahrgangText, Fach = k.Fach.ToUpperInvariant(), FachText = k.Fach,
-                        Kursart = KursartNorm(k.Kursart), Nr = Nummer(k.KursBez, k.Fach, kl), Lehrkraefte = lehrer, Zeile = k.Zeile
+                        Kursart = KursartNorm(k.Kursart), Nr = nr, Lehrkraefte = lehrer, Zeile = k.Zeile
                     };
                     u.Jg = jg;
                     foreach (var kv in t) u.Teiln.TryAdd(kv.Key, kv.Value);
@@ -446,6 +500,13 @@ namespace Stundenplan_V2.Vertretung
 
             private static string StufeText(SchildZuordnungZeile u) => u.Art != SchildZuordnungArt.OhneKurs ? u.JahrgangText : u.Klasse;
 
+            /// <summary>Jahrgang einer Sek-I-Klasse („05A“ → „05“), sonst null.</summary>
+            private static string? JgDerKlasse(string? klasse)
+            {
+                string k = SchildText.KlasseNorm(klasse);
+                return k.Length >= 2 && char.IsDigit(k[0]) && char.IsDigit(k[1]) ? k[..2] : null;
+            }
+
             private (List<SchildPlanKurs> Kand, string Grund, bool OhneLk) Kandidaten(SchildZuordnungZeile u,
                 Func<string?, string?> km, Func<string, HashSet<string>> fm)
             {
@@ -463,6 +524,22 @@ namespace Stundenplan_V2.Vertretung
                 if (l.Count == 0) return (new List<SchildPlanKurs>(), $"Lehrkraft passt nicht ({string.Join(", ", u.Lehrkraefte)})", false);
                 return (l, "", false);
             }
+
+            /// <summary>
+            /// 5.2a-3 (136): Plan-Kurse derselben Art (Oberstufe bzw. Sek-I-Gruppe) aus ALLEN Stufen, die nach Fach, Kursart
+            /// und Lehrkraft passen (ohne Kursleiter: ohne Vergleich der Lehrkraft).
+            /// </summary>
+            private List<SchildPlanKurs> GemeinsamKandidaten(SchildZuordnungZeile u, Func<string?, string?> km,
+                                                             Func<string, HashSet<string>> fm)
+            {
+                var l = _plan.Kurse.Values.Where(p => GleicheArt(u, p) && FachPasst(u.Fach, p, fm) && ArtPasst(u.Kursart, p.Art)).ToList();
+                if (u.Lehrkraefte.Count == 0) return l;
+                var lp = new HashSet<string>(u.Lehrkraefte.Select(km).Where(x => x != null).Select(x => x!), StringComparer.Ordinal);
+                return l.Where(p => p.Lehrer.Overlaps(lp)).ToList();
+            }
+
+            private static bool GleicheArt(SchildZuordnungZeile u, SchildPlanKurs p)
+                => u.Art == SchildZuordnungArt.Oberstufe ? p.Oberstufe : !p.Oberstufe && p.Klassen.Count > 0;
 
             private static bool GleicherPool(SchildZuordnungZeile u, SchildZuordnungZeile v)
             {
@@ -482,7 +559,8 @@ namespace Stundenplan_V2.Vertretung
             {
                 var res = new Dictionary<SchildZuordnungZeile, Treffer>();
                 var veraltet = new Dictionary<SchildZuordnungZeile, string>();
-                var vergeben = new List<(SchildZuordnungZeile U, string Key)>();
+                // Gem = gemeinsam festgelegt (5.2a-3): sperrt den Plan-Kurs nicht für die Automatik der übrigen SchILD-Kurse
+                var vergeben = new List<(SchildZuordnungZeile U, string Key, bool Gem)>();
                 var offen = new List<SchildZuordnungZeile>();
 
                 foreach (var u in _kurse)
@@ -491,12 +569,19 @@ namespace Stundenplan_V2.Vertretung
                     if (f != null)
                     {
                         if (f.Plan == null)
-                        { res[u] = new Treffer { Status = SchildZuordnungStatus.KeineZuordnung, Grund = "von Hand: keine Zuordnung" }; continue; }
+                        {
+                            res[u] = new Treffer { Status = SchildZuordnungStatus.KeineZuordnung, Grund = "von Hand: keine Zuordnung", Festgelegt = true };
+                            continue;
+                        }
                         var p = _plan.Kurs(f.Plan);
                         if (p != null)
                         {
-                            res[u] = new Treffer { Plan = p.Gross, Status = SchildZuordnungStatus.VonHand, Grund = "von Hand festgelegt" };
-                            vergeben.Add((u, p.Gross));
+                            res[u] = new Treffer
+                            {
+                                Plan = p.Gross, Status = SchildZuordnungStatus.VonHand, Gemeinsam = f.Gemeinsam, Festgelegt = true,
+                                Grund = f.Gemeinsam ? "von Hand: gemeinsam unterrichtet" : "von Hand festgelegt"
+                            };
+                            vergeben.Add((u, p.Gross, f.Gemeinsam));
                             continue;
                         }
                         veraltet[u] = f.Plan;
@@ -515,14 +600,14 @@ namespace Stundenplan_V2.Vertretung
                         l.Add(p);
                     }
                 }
-                foreach (var (v, key) in vergeben) Belege(v, _plan.Kurse[key]);
+                foreach (var (v, key, _) in vergeben) Belege(v, _plan.Kurse[key]);
 
                 List<SchildPlanKurs> Frei(SchildZuordnungZeile u)
-                    => C[u].Kand.Where(p => !vergeben.Any(t => t.U != u && t.Key == p.Gross && GleicherPool(t.U, u))).ToList();
+                    => C[u].Kand.Where(p => !vergeben.Any(t => t.U != u && t.Key == p.Gross && !t.Gem && GleicherPool(t.U, u))).ToList();
                 void Setze(SchildZuordnungZeile u, SchildPlanKurs p, string wie)
                 {
                     zu[u] = (p, wie);
-                    vergeben.Add((u, p.Gross));
+                    vergeben.Add((u, p.Gross, false));
                     Belege(u, p);
                 }
                 int Zeitkonflikte(SchildZuordnungZeile u, SchildPlanKurs p)
@@ -587,6 +672,25 @@ namespace Stundenplan_V2.Vertretung
                     if (!fort) break;
                 }
 
+                // 5.2a-3 (136): Passt ein offener SchILD-Kurs zu keinem freien Plan-Kurs (bzw. keiner passt zum Stundenplan der
+                // Teilnehmer), aber zu genau einem schon vergebenen – Fach, Kursart, Lehrkraft, Stundenplan der Teilnehmer, auch aus
+                // einer anderen Stufe –, wird „gemeinsam unterrichtet“ vorgeschlagen.
+                // Die SchILD-Kurse, die schon im Plan-Kurs sind, müssen selbst zum Stundenplan passen – sonst ist dort eher eine
+                // Festlegung falsch (dann bleibt es beim „Konflikt“ wie vor 5.2a-3).
+                bool PartnerPassen(SchildZuordnungZeile u, SchildPlanKurs p)
+                {
+                    var da = vergeben.Where(t => t.U != u && t.Key == p.Gross).Select(t => t.U).ToList();
+                    return da.Count > 0 && da.All(v => Zeitkonflikte(v, p) == 0);
+                }
+                var gemV = new Dictionary<SchildZuordnungZeile, SchildPlanKurs>();
+                foreach (var u in Sortiert(Rest()))
+                {
+                    if (u.Teiln.Count == 0) continue;
+                    if (Frei(u).Any(p => Zeitkonflikte(u, p) == 0)) continue;   // mehrdeutig – bleibt offen
+                    var g = GemeinsamKandidaten(u, km, fm).Where(p => Zeitkonflikte(u, p) == 0 && PartnerPassen(u, p)).ToList();
+                    if (g.Count == 1) gemV[u] = g[0];
+                }
+
                 foreach (var u in offen)
                 {
                     var (kand, grund, ohneLk) = C[u];
@@ -599,23 +703,31 @@ namespace Stundenplan_V2.Vertretung
                         if (z.Wie != "eindeutig") g += "; " + z.Wie;
                         res[u] = new Treffer
                         {
-                            Plan = z.P.Gross, Kand = kand,
+                            Plan = z.P.Gross, Kand = kand, Festgelegt = alt != null,
                             Status = alt != null ? SchildZuordnungStatus.Veraltet
                                    : ohneLk ? SchildZuordnungStatus.OhneLehrkraft : SchildZuordnungStatus.Automatisch,
                             Grund = alt != null ? pre + "automatisch: " + g : g
                         };
                     }
+                    else if (gemV.TryGetValue(u, out var gp))
+                        res[u] = new Treffer
+                        {
+                            Plan = gp.Gross, Kand = kand, Status = SchildZuordnungStatus.Vorschlag, Gemeinsam = true, Festgelegt = alt != null,
+                            Grund = pre + "gemeinsam unterrichtet? Passt nur zu einem schon vergebenen Plan-Kurs (Fach, Kursart, Lehrkraft, " +
+                                    "Stundenplan der Teilnehmer)"
+                        };
                     else if (kand.Count == 0)
                         res[u] = new Treffer
                         {
-                            Status = alt != null ? SchildZuordnungStatus.Veraltet : SchildZuordnungStatus.Offen, Grund = pre + grund
+                            Status = alt != null ? SchildZuordnungStatus.Veraltet : SchildZuordnungStatus.Offen, Grund = pre + grund,
+                            Festgelegt = alt != null
                         };
                     else if (Frei(u).Count == 0)
                     {
                         var anderer = vergeben.FirstOrDefault(t => t.Key == kand[0].Gross && t.U != u).U;
                         res[u] = new Treffer
                         {
-                            Status = SchildZuordnungStatus.Konflikt, Kand = kand,
+                            Status = SchildZuordnungStatus.Konflikt, Kand = kand, Festgelegt = alt != null,
                             Grund = $"passender Plan-Kurs „{kand[0].Schluessel}“ ist schon „{anderer?.KursBez ?? "?"}“ zugeordnet"
                         };
                     }
@@ -627,6 +739,7 @@ namespace Stundenplan_V2.Vertretung
                         res[u] = new Treffer
                         {
                             Status = alt != null ? SchildZuordnungStatus.Veraltet : SchildZuordnungStatus.Offen, Kand = kand,
+                            Festgelegt = alt != null,
                             Grund = pre + (nz > 0
                                 ? $"einziger freier Plan-Kurs „{frei[0].Schluessel}“ passt nicht zum Stundenplan der Teilnehmer " +
                                   $"({nz} Teilnehmer hätten dann zur selben Zeit auch {string.Join(", ", mit.Take(3))}" +
@@ -634,6 +747,23 @@ namespace Stundenplan_V2.Vertretung
                                 : "mehrdeutig: " + string.Join(", ", frei.Select(p => p.Schluessel)))
                         };
                     }
+                }
+
+                // 5.2a-3 (136): zwei SchILD-Kurse desselben Jahrgangs von Hand auf einem Plan-Kurs ohne „gemeinsam“ → Konflikt
+                var vonHand = _kurse.Where(u => res[u].Status == SchildZuordnungStatus.VonHand && !res[u].Gemeinsam).ToList();
+                var doppelt = new List<(SchildZuordnungZeile U, List<SchildZuordnungZeile> Andere)>();
+                foreach (var u in vonHand)
+                {
+                    var andere = vonHand.Where(v => v != u && res[v].Plan == res[u].Plan && GleicherPool(u, v)).ToList();
+                    if (andere.Count > 0) doppelt.Add((u, andere));
+                }
+                foreach (var (u, andere) in doppelt)
+                {
+                    var r = res[u];
+                    r.Status = SchildZuordnungStatus.Konflikt;
+                    r.Grund = $"von Hand: „{_plan.Kurse[r.Plan!].Schluessel}“ ist auch " +
+                              string.Join(", ", andere.Select(v => $"„{v.KursBez}“ ({v.JahrgangText})")) +
+                              " zugeordnet – gemeinsam unterrichtet? Dann „⇄ gemeinsam mit …“ wählen, sonst eine Festlegung ändern";
                 }
 
                 // ---- Sek I ohne Kurs ----
@@ -655,10 +785,16 @@ namespace Stundenplan_V2.Vertretung
                     if (f != null)
                     {
                         if (f.Plan == null)
-                        { res[w] = new Treffer { Status = SchildZuordnungStatus.KeineZuordnung, Grund = "von Hand: keine Zuordnung" }; continue; }
+                        {
+                            res[w] = new Treffer { Status = SchildZuordnungStatus.KeineZuordnung, Grund = "von Hand: keine Zuordnung", Festgelegt = true };
+                            continue;
+                        }
                         var p = _plan.Kurs(f.Plan);
                         if (p != null)
-                        { res[w] = new Treffer { Plan = p.Gross, Status = SchildZuordnungStatus.VonHand, Grund = "von Hand festgelegt" }; continue; }
+                        {
+                            res[w] = new Treffer { Plan = p.Gross, Status = SchildZuordnungStatus.VonHand, Grund = "von Hand festgelegt", Festgelegt = true };
+                            continue;
+                        }
                         alt = f.Plan;
                     }
                     string pre = alt != null ? $"Festlegung „{alt}“ gibt es im Plan nicht mehr; " : "";
@@ -688,6 +824,7 @@ namespace Stundenplan_V2.Vertretung
                                                Grund = pre + $"Lehrkraft passt nicht ({(w.Fachlehrer.Length > 0 ? w.Fachlehrer : "ohne")})" };
                     else
                         res[w] = new Treffer { Status = SchildZuordnungStatus.OhneGegenstueck, Grund = "weder Gruppe noch Klassenunterricht im Plan" };
+                    res[w].Festgelegt = alt != null;   // veraltete Festlegung lässt sich entfernen
                 }
                 return res;
             }
@@ -841,12 +978,46 @@ namespace Stundenplan_V2.Vertretung
             // ---------------------------------------------------------------
             private void Zeilen(Dictionary<SchildZuordnungZeile, Treffer> res, Func<string?, string?> km, Func<string, HashSet<string>> fm)
             {
+                // 5.2a-3 (136): welche SchILD-Kurse teilen sich einen Plan-Kurs? jePlan ohne Zeilen im Konflikt (Anzeige „gemeinsam
+                // mit …“); jeWahl mit ihnen (für die Auswahl „⇄ gemeinsam mit …“ – damit lässt sich ein Konflikt gerade auflösen).
+                var jePlan = new Dictionary<string, List<SchildZuordnungZeile>>(StringComparer.Ordinal);
+                var jeWahl = new Dictionary<string, List<SchildZuordnungZeile>>(StringComparer.Ordinal);
+                var planReihe = new List<string>();
+                foreach (var u in _kurse)
+                {
+                    var r = res[u];
+                    if (r.Plan == null) continue;
+                    if (!jeWahl.TryGetValue(r.Plan, out var lw)) { jeWahl[r.Plan] = lw = new List<SchildZuordnungZeile>(); planReihe.Add(r.Plan); }
+                    lw.Add(u);
+                    if (r.Status == SchildZuordnungStatus.Konflikt) continue;
+                    if (!jePlan.TryGetValue(r.Plan, out var l)) jePlan[r.Plan] = l = new List<SchildZuordnungZeile>();
+                    l.Add(u);
+                }
+                // Belegung der Schüler laut Zuordnung – für ✓ bei „gemeinsam mit …“ (Stundenplan der Teilnehmer)
+                var belegtZ = new Dictionary<string, List<(SchildZuordnungZeile V, SchildPlanKurs P)>>(StringComparer.Ordinal);
+                foreach (var v in _kurse.Concat(_ohne))
+                {
+                    var rv = res[v];
+                    if (rv.Plan == null || !Zugeordnet(rv.Status)) continue;
+                    foreach (var pk in v.Teiln.Keys)
+                    {
+                        if (!belegtZ.TryGetValue(pk, out var bl)) belegtZ[pk] = bl = new();
+                        bl.Add((v, _plan.Kurse[rv.Plan]));
+                    }
+                }
+                bool StundenplanPasst(SchildZuordnungZeile u, SchildPlanKurs p)
+                    => !u.Teiln.Keys.Any(pk => belegtZ.TryGetValue(pk, out var bl)
+                                               && bl.Any(x => x.V != u && x.P != p && x.P.Zeiten.Overlaps(p.Zeiten)));
+                string Bez(SchildZuordnungZeile v) => $"„{v.KursBez}“ ({v.JahrgangText})";
+
                 foreach (var u in _kurse.Concat(_ohne))
                 {
                     var r = res[u];
                     u.Plan = r.Plan != null ? _plan.Kurse[r.Plan].Schluessel : null;
                     u.Status = r.Status;
                     u.Begruendung = r.Grund;
+                    u.HatFestlegung = r.Festgelegt;
+                    u.Gemeinsam = r.Gemeinsam;
                     u.LehrkraefteText = string.Join(", ", u.Lehrkraefte.Select(x =>
                     {
                         string? m = km(x);
@@ -865,6 +1036,36 @@ namespace Stundenplan_V2.Vertretung
                         var k = r.Kand.Count > 0 ? r.Kand : Kandidaten(u, km, fm).Kand;
                         u.Kandidaten = k.OrderBy(p => u.Nr > 0 && p.Nr == u.Nr ? 0 : 1)
                                         .ThenBy(p => p.Schluessel, StringComparer.OrdinalIgnoreCase).ToList();
+
+                        // 5.2a-3 (136): gemeinsam mit … (andere SchILD-Kurse im selben Plan-Kurs)
+                        if (r.Plan != null && r.Status != SchildZuordnungStatus.Konflikt && jePlan.TryGetValue(r.Plan, out var mitL))
+                        {
+                            var mit = mitL.Where(v => v != u).ToList();
+                            if (mit.Count > 0)
+                            {
+                                u.GemeinsamMit = string.Join(", ", mit.Select(Bez));
+                                u.Begruendung = (u.Begruendung.Length > 0 ? u.Begruendung + "; " : "") + "gemeinsam mit " + u.GemeinsamMit;
+                            }
+                        }
+                        // Auswahl „⇄ gemeinsam mit …“: Plan-Kurse derselben Art (alle Stufen) mit einem anderen SchILD-Kurs,
+                        // bei denen Fach oder Lehrkraft passt; ✓ = Fach, Kursart, Lehrkraft und Stundenplan der Teilnehmer passen
+                        var lpU = new HashSet<string>(u.Lehrkraefte.Select(km).Where(x => x != null).Select(x => x!), StringComparer.Ordinal);
+                        var wahl = new List<SchildGemeinsamWahl>();
+                        foreach (var key in planReihe)
+                        {
+                            var mit = jeWahl[key].Where(v => v != u).ToList();
+                            var p = _plan.Kurse[key];
+                            if (mit.Count == 0 || !GleicheArt(u, p)) continue;
+                            bool fp = FachPasst(u.Fach, p, fm), lpp = p.Lehrer.Overlaps(lpU);
+                            if (!fp && !lpp) continue;
+                            wahl.Add(new SchildGemeinsamWahl
+                            {
+                                Plan = p, Mit = string.Join(", ", mit.Select(Bez)),
+                                Passt = fp && (lpp || u.Lehrkraefte.Count == 0) && ArtPasst(u.Kursart, p.Art) && StundenplanPasst(u, p)
+                            });
+                        }
+                        u.GemeinsamWahl = wahl.OrderBy(w => w.Passt ? 0 : 1)
+                                              .ThenBy(w => w.Plan.Schluessel, StringComparer.OrdinalIgnoreCase).ToList();
                     }
                     var kandSet = new HashSet<SchildPlanKurs>(u.Kandidaten);
                     u.Weitere = pool.Where(p => !kandSet.Contains(p)).OrderBy(p => p.Schluessel, StringComparer.OrdinalIgnoreCase).ToList();
@@ -924,6 +1125,12 @@ namespace Stundenplan_V2.Vertretung
                     _e.VorschlagFaecher[x] = fm(x).OrderBy(y => y, StringComparer.Ordinal).ToList();
                     _e.VorschlagTexte.Add($"Fach „{x}“ = {string.Join(", ", _e.VorschlagFaecher[x])}");
                 }
+                foreach (var u in _kurse.Where(u2 => u2.Status == SchildZuordnungStatus.Vorschlag && u2.Gemeinsam && u2.Plan != null))
+                {
+                    _e.VorschlagGemeinsam.Add((u.JahrgangText, u.KursBez, u.Plan!));
+                    _e.VorschlagTexte.Add($"Kurs „{u.KursBez}“ ({u.JahrgangText}) gemeinsam mit " +
+                                          $"{(u.GemeinsamMit.Length > 0 ? u.GemeinsamMit : "…")} → {u.Plan}");
+                }
 
                 // Plan-Kurse ohne SchILD
                 var ziele = new HashSet<string>(_kurse.Concat(_ohne).Select(u => res[u].Plan).Where(p => p != null).Select(p => p!), StringComparer.Ordinal);
@@ -967,6 +1174,13 @@ namespace Stundenplan_V2.Vertretung
                     else if (r.Status == SchildZuordnungStatus.OhneLehrkraft)
                         P(SchildProblemArt.Hinweis, fKu,
                           $"{name} ohne Kursleiter – zugeordnet zu „{_plan.Kurse[r.Plan!].Schluessel}“ ohne Vergleich der Lehrkraft.", u.Zeile);
+                    else if (r.Status == SchildZuordnungStatus.Vorschlag && r.Gemeinsam)   // 5.2a-3 (136)
+                        P(SchildProblemArt.Warnung, fKu,
+                          $"{name}: Vorschlag „gemeinsam mit {(u.GemeinsamMit.Length > 0 ? u.GemeinsamMit : "…")}“ → {u.Plan} – {r.Grund}. " +
+                          "Im Reiter „Zuordnung“ mit „⇄ gemeinsam mit …“ oder „Vorschläge übernehmen“ bestätigen.", u.Zeile, "KursBez");
+                    else if (r.Status == SchildZuordnungStatus.VonHand && r.Gemeinsam && u.GemeinsamMit.Length == 0)
+                        P(SchildProblemArt.Hinweis, fKu,
+                          $"{name}: von Hand „gemeinsam“ mit „{u.Plan}“ festgelegt – dort ist zurzeit kein weiterer SchILD-Kurs.", u.Zeile);
                 }
                 foreach (var w in _ohne)
                 {
@@ -994,9 +1208,12 @@ namespace Stundenplan_V2.Vertretung
                     var r = res[u];
                     if (r.Plan == null || !Zugeordnet(r.Status)) continue;
                     var p = _plan.Kurse[r.Plan];
+                    // 5.2a-3 (136): gemeinsam unterrichtet – Teilnehmer aus dem eigenen Jahrgang des SchILD-Kurses passen auch
+                    bool gem = r.Gemeinsam;
                     if (u.Art == SchildZuordnungArt.Oberstufe)
                     {
-                        var fremd = u.Teiln.Values.Where(s => !p.Stufen.Contains(s.Jahrgang.Trim().ToUpperInvariant())).ToList();
+                        var fremd = u.Teiln.Values.Where(s => !p.Stufen.Contains(s.Jahrgang.Trim().ToUpperInvariant())
+                                                              && !(gem && u.Jg.Contains(s.Jahrgang.Trim().ToUpperInvariant()))).ToList();
                         if (fremd.Count > 0)
                             P(SchildProblemArt.Warnung, fKu,
                               $"Kurs „{u.KursBez}“: {fremd.Count} Teilnehmer aus einer anderen Stufe als „{p.Schluessel}“ " +
@@ -1004,7 +1221,8 @@ namespace Stundenplan_V2.Vertretung
                     }
                     else
                     {
-                        var fremd = u.Teiln.Values.Where(s => !p.Klassen.Contains(SchildText.KlasseNorm(s.Klasse))).ToList();
+                        var fremd = u.Teiln.Values.Where(s => !p.Klassen.Contains(SchildText.KlasseNorm(s.Klasse))
+                                                              && !(gem && JgDerKlasse(s.Klasse) is { } jk && u.Jg.Contains(jk))).ToList();
                         if (fremd.Count > 0)
                         {
                             string name = u.Art == SchildZuordnungArt.OhneKurs ? $"Unterricht {u.Schild}" : $"Kurs „{u.KursBez}“";
@@ -1078,6 +1296,20 @@ namespace Stundenplan_V2.Vertretung
                       $"{ZeitText(z)} – {n} Schüler wären in beiden. Eine der beiden Zuordnungen stimmt vermutlich nicht.");
                 }
 
+                // 5.2a-3 (137): Muster der Kursbezeichnung
+                if (_musterFehler != null)
+                    P(SchildProblemArt.Warnung, "Zuordnung",
+                      $"Muster der Kursbezeichnung „{_datei.KursMuster}“ ist ungültig ({_musterFehler}) – es gilt die automatische Nummer.");
+                if (_muster != null)
+                    foreach (var (art, was) in new[] { (SchildZuordnungArt.Oberstufe, "Oberstufenkurs(e)"), (SchildZuordnungArt.Sek1Kurs, "Sek-I-Kurs(e)") })
+                    {
+                        var nicht = _musterNicht[art];
+                        if (nicht.Count > 0)
+                            P(SchildProblemArt.Hinweis, fKu,
+                              $"Muster der Kursbezeichnung „{_muster.Text}“: {nicht.Count} von {nicht.Count + _musterJa[art]} {was} passen " +
+                              $"nicht – dort gilt die automatische Nummer (erste Ziffernfolge nach dem Fach): {Kurz(nicht)}");
+                    }
+
                 // Kürzel/Fächer ohne Gegenstück, Klassenleitung (Hinweise)
                 var unkRest = _unkK.Where(x => !_sugK.ContainsKey(x)).OrderBy(x => x, StringComparer.Ordinal).Select(SK).ToList();
                 if (unkRest.Count > 0) P(SchildProblemArt.Hinweis, "Zuordnung", $"Kürzel aus SchILD ohne Gegenstück im Plan: {Kurz(unkRest)}");
@@ -1106,6 +1338,8 @@ namespace Stundenplan_V2.Vertretung
                                     .Where(x => x.n > 0).Select(x => $"{x.n} {Text(x.st)}").ToList();
                     int mitZk = liste.Count(u => u.Zeitkonflikt != null);
                     if (mitZk > 0) teile.Add($"davon {mitZk} mit Zeitkonflikt");
+                    int mitGem = liste.Count(u => u.GemeinsamMit.Length > 0);
+                    if (mitGem > 0) teile.Add($"{mitGem} gemeinsam mit anderem SchILD-Kurs");
                     return $"{liste.Count}" + (teile.Count > 0 ? ": " + string.Join(" · ", teile) : "");
                 }
                 Z("Oberstufenkurse", Zaehl(_kurse.Where(u => u.Art == SchildZuordnungArt.Oberstufe)));
@@ -1114,6 +1348,10 @@ namespace Stundenplan_V2.Vertretung
                 Z("Plan-Kurse ohne SchILD", $"Oberstufe {pob.Count} · Sek I {pos.Count}");
                 Z("Zeitkonflikte (Kurspaare)", paare.Count.ToString(CultureInfo.InvariantCulture));
                 Z("Festlegungen von Hand (Zuordnungsdatei)", _datei.Anzahl.ToString(CultureInfo.InvariantCulture));
+                int mJa = _musterJa.Values.Sum(), mAlle = mJa + _musterNicht.Values.Sum(l => l.Count);
+                Z("Muster der Kursbezeichnung", _muster == null
+                    ? (_musterFehler != null ? "ungültig – automatisch" : "(leer – automatisch: erste Ziffernfolge nach dem Fach)")
+                    : $"„{_muster.Text}“ – passt bei {mJa} von {mAlle} Kurs(en)");
                 foreach (var z in _e.Kuerzel.Where(z2 => z2.Schild.Length > 0 && z2.StatusText != "gleich"))
                     Z($"Lehrkraft {z.Schild}", $"= {z.Plan} ({z.StatusText})", "Zuordnung – abweichende Kürzel und Fächer");
                 foreach (var z in _e.Faecher.Where(z2 => z2.Schild.Length > 0 && (z2.StatusText != "gleich" || z2.PlanListe.Count > 1

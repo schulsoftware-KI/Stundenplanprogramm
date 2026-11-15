@@ -1,11 +1,14 @@
 #nullable enable
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Input;
+using System.Windows.Media;
 
 namespace Stundenplan_V2.Vertretung
 {
@@ -15,6 +18,8 @@ namespace Stundenplan_V2.Vertretung
     /// Festlegungen von Hand. Festlegungen gelten sofort im Prüflauf; in die Datei (schild_zuordnung.json bzw.
     /// für Pseudodaten schild_zuordnung_pseudo.json neben der Plandatei) kommen sie erst mit „Zuordnungen speichern“.
     /// Die Datei enthält keine Personendaten.
+    /// Seit 5.2a-3: „⇄ gemeinsam mit …“ (Entscheidung 136) in „Festlegen auf“ und das Feld „Muster der
+    /// Kursbezeichnung“ mit Vorschau (Entscheidung 137).
     /// </summary>
     public partial class SchildDialog
     {
@@ -23,6 +28,7 @@ namespace Stundenplan_V2.Vertretung
         private bool _zuordnungGeaendert;
         private bool _zuAnsichtSetzen;
         private bool _zuErsteAnzeige = true;
+        private bool _musterSetzen;
 
         private enum ZuAnsicht { Oberstufe, Sek1Kurs, OhneKurs, Kuerzel, Faecher, PlanOhne }
 
@@ -32,7 +38,7 @@ namespace Stundenplan_V2.Vertretung
             public string Text { get; init; } = "";
             /// <summary>Plan-Schlüssel bzw. Plan-Kürzel (nur bei Art 2).</summary>
             public string? Wert { get; init; }
-            /// <summary>0 = automatisch (Festlegung entfernen), 1 = keine Zuordnung, 2 = Wert.</summary>
+            /// <summary>0 = automatisch (Festlegung entfernen), 1 = keine Zuordnung, 2 = Wert, 3 = gemeinsam mit … (Wert, 5.2a-3).</summary>
             public int Art { get; init; }
             public override string ToString() => Text;
         }
@@ -53,6 +59,9 @@ namespace Stundenplan_V2.Vertretung
             _zuordnung = SchildZuordnungDatei.Laden(_planOrdner, pseudo, out string? fehler);
             _zuordnungPseudo = pseudo;
             _zuordnungGeaendert = false;
+            _musterSetzen = true;
+            TxtZuMuster.Text = _zuordnung.KursMuster ?? "";
+            _musterSetzen = false;
             if (fehler != null)
                 MessageBox.Show(this, fehler, "Zuordnung", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
@@ -153,6 +162,7 @@ namespace Stundenplan_V2.Vertretung
 
             FuelleZuTabelle(null);
             ZeigeZuStatus(null);
+            AktualisiereMusterVorschau();
         }
 
         private void CbZuAnsicht_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -281,16 +291,34 @@ namespace Stundenplan_V2.Vertretung
                                         (zz.Zeitkonflikt != null
                                             ? $"⚠ {zz.Zeitkonflikt} – eine der beteiligten Zuordnungen stimmt vermutlich nicht. "
                                             : "") +
-                                        "✓ = passt nach Fach, Kursart und Lehrkraft.";
+                                        (zz.GemeinsamMit.Length > 0 ? $"Im selben Plan-Kurs: {zz.GemeinsamMit}. " : "") +
+                                        "✓ = passt nach Fach, Kursart und Lehrkraft" +
+                                        (zz.Art != SchildZuordnungArt.OhneKurs
+                                            ? "; ⇄ = gemeinsam unterrichtet – der Plan-Kurs hat schon einen SchILD-Kurs (z. B. Q1 und Q2 " +
+                                              "zusammen), ⇄ ✓ passt auch zum Stundenplan der Teilnehmer."
+                                            : ".");
                     CbZuPlan.Items.Add(new ZuWahl { Text = "(automatisch – Festlegung entfernen)", Art = 0 });
                     CbZuPlan.Items.Add(new ZuWahl { Text = "(keine Zuordnung – gehört zu keinem Plan-Kurs)", Art = 1 });
                     foreach (var p in zz.Kandidaten) CbZuPlan.Items.Add(new ZuWahl { Text = "✓ " + p.Anzeige, Wert = p.Schluessel, Art = 2 });
+                    if (zz.Art != SchildZuordnungArt.OhneKurs)
+                        foreach (var g in zz.GemeinsamWahl)
+                            CbZuPlan.Items.Add(new ZuWahl
+                            {
+                                Text = (g.Passt ? "⇄ ✓ " : "⇄    ") + $"gemeinsam mit {g.Mit} → {g.Plan.Anzeige}",
+                                Wert = g.Plan.Schluessel, Art = 3
+                            });
                     foreach (var p in zz.Weitere) CbZuPlan.Items.Add(new ZuWahl { Text = "    " + p.Anzeige, Wert = p.Schluessel, Art = 2 });
                     int idx = 0;
                     if (zz.Status == SchildZuordnungStatus.KeineZuordnung) idx = 1;
                     else if (zz.Plan != null)
-                        for (int i = 2; i < CbZuPlan.Items.Count; i++)
-                            if (CbZuPlan.Items[i] is ZuWahl w && SchildText.Gleich(w.Wert, zz.Plan)) { idx = i; break; }
+                    {
+                        // „gemeinsam“ → zuerst der ⇄-Eintrag; fehlt er (kein weiterer SchILD-Kurs mehr), der normale Eintrag
+                        for (int durchgang = 0; durchgang < (zz.Gemeinsam ? 2 : 1) && idx == 0; durchgang++)
+                            for (int i = 2; i < CbZuPlan.Items.Count; i++)
+                                if (CbZuPlan.Items[i] is ZuWahl w && (durchgang == 1 || (w.Art == 3) == zz.Gemeinsam)
+                                    && SchildText.Gleich(w.Wert, zz.Plan))
+                                { idx = i; break; }
+                    }
                     CbZuPlan.SelectedIndex = idx;
                     BtnZuFestlegen.IsEnabled = true;
                     BtnZuEntfernen.IsEnabled = zz.HatFestlegung;
@@ -364,7 +392,8 @@ namespace Stundenplan_V2.Vertretung
                     if (zz.Art == SchildZuordnungArt.OhneKurs)
                         _zuordnung.SetzeOhne(z.Schuljahr, zz.Klasse, zz.FachText, zz.Fachlehrer, w.Art == 2 ? w.Wert : null, w.Art == 0);
                     else
-                        _zuordnung.SetzeKurs(z.Schuljahr, zz.JahrgangText, zz.KursBez, w.Art == 2 ? w.Wert : null, w.Art == 0);
+                        _zuordnung.SetzeKurs(z.Schuljahr, zz.JahrgangText, zz.KursBez, w.Art is 2 or 3 ? w.Wert : null, w.Art == 0,
+                                             gemeinsam: w.Art == 3);
                     break;
                 case SchildKuerzelZeile kz when kz.Schild.Length > 0 && CbZuPlan.SelectedItem is ZuWahl w:
                     _zuordnung.SetzeKuerzel(kz.Schild, w.Art == 2 ? w.Wert : null);
@@ -419,6 +448,8 @@ namespace Stundenplan_V2.Vertretung
                 return;
             foreach (var kv in z.VorschlagKuerzel) _zuordnung.SetzeKuerzel(kv.Key, kv.Value);
             foreach (var kv in z.VorschlagFaecher) _zuordnung.SetzeFaecher(kv.Key, kv.Value);
+            foreach (var (jahrgang, kursBez, plan) in z.VorschlagGemeinsam)   // 5.2a-3 (136)
+                _zuordnung.SetzeKurs(z.Schuljahr, jahrgang, kursBez, plan, false, gemeinsam: true);
             ZuordnungGeaendert(ZuSchluessel(DgZuordnung.SelectedItem));
         }
 
@@ -442,6 +473,75 @@ namespace Stundenplan_V2.Vertretung
             }
             FuelleZuTabelle(auswahl);
             ZeigeZuStatus("Festlegung gilt im Prüflauf");
+        }
+
+        // =====================================================
+        //  Muster der Kursbezeichnung (5.2a-3, Entscheidung 137)
+        // =====================================================
+
+        /// <summary>Kurse des gewählten Abschnitts (für die Vorschau).</summary>
+        private List<SchildKurs> KurseImAbschnitt()
+        {
+            if (_export == null) return new List<SchildKurs>();
+            int jahr = _ergebnis?.Jahr ?? SchildGenerator.Jahr(_schuljahr), abschnitt = _ergebnis?.Abschnitt ?? 1;
+            return _export.Kurse.Where(k => k.Jahr == jahr && k.Abschnitt == abschnitt).ToList();
+        }
+
+        private void AktualisiereMusterVorschau()
+        {
+            if (TxtZuMusterVorschau == null || TxtZuMuster == null || BtnZuMuster == null) return;
+            if (_export == null)
+            {
+                TxtZuMuster.IsEnabled = false;
+                BtnZuMuster.IsEnabled = false;
+                TxtZuMusterVorschau.Foreground = Brushes.DimGray;
+                TxtZuMusterVorschau.Text = "Nach dem Prüflauf: Vorschau an Kursen aus dem Export. Platzhalter " + SchildKursMuster.Erlaubt +
+                                           "; leer = automatisch.";
+                return;
+            }
+            TxtZuMuster.IsEnabled = !_laeuft;
+            string text = TxtZuMuster.Text ?? "";
+            TxtZuMusterVorschau.Text = SchildKursMuster.Vorschau(text, KurseImAbschnitt(), out bool gueltig);
+            TxtZuMusterVorschau.Foreground = gueltig ? Brushes.DimGray : Brushes.Firebrick;
+            BtnZuMuster.IsEnabled = !_laeuft && gueltig &&
+                                    !string.Equals(text.Trim(), (_zuordnung.KursMuster ?? "").Trim(), StringComparison.Ordinal);
+        }
+
+        private void TxtZuMuster_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_musterSetzen) return;
+            AktualisiereMusterVorschau();
+        }
+
+        private void TxtZuMuster_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key != Key.Enter) return;
+            e.Handled = true;
+            WendeMusterAn();
+        }
+
+        private void BtnZuMuster_Click(object sender, RoutedEventArgs e) => WendeMusterAn();
+
+        /// <summary>Übernimmt das Muster in die Festlegungen (gilt sofort im Prüflauf, gespeichert mit „Zuordnungen speichern“).</summary>
+        private void WendeMusterAn()
+        {
+            if (_export == null || _laeuft) return;
+            string text = (TxtZuMuster.Text ?? "").Trim();
+            SchildKursMuster.Lies(text, out string? fehler);
+            if (fehler != null)
+            {
+                MessageBox.Show(this, "Das Muster ist ungültig:\n\n" + fehler + "\n\nErlaubt sind " + SchildKursMuster.Erlaubt +
+                                      "; {Nr} muss vorkommen. Mehrere Muster mit ; trennen.",
+                    "Muster der Kursbezeichnung", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            string? neu = text.Length == 0 ? null : text;
+            if (string.Equals(neu ?? "", _zuordnung.KursMuster ?? "", StringComparison.Ordinal)) return;
+            _zuordnung.KursMuster = neu;
+            _log?.Invoke(neu == null ? "SchILD: Muster der Kursbezeichnung entfernt (Automatik)."
+                                     : $"SchILD: Muster der Kursbezeichnung „{neu}“ angewendet.");
+            ZuordnungGeaendert(ZuSchluessel(DgZuordnung.SelectedItem));
+            ZeigeZuStatus(neu == null ? "Muster entfernt – es gilt die Automatik" : "Muster gilt im Prüflauf");
         }
     }
 }

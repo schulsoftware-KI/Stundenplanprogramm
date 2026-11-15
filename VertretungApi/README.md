@@ -751,6 +751,29 @@ Es nutzt die oben unter „Plan“ gewählte Plan-Spalte. Code: `src/Vertretung/
   vieler Folgemeldungen erscheint ein Hinweis, z. B. „Weitere Prüfungen der Schülerdaten entfallen, weil
   SchuelerBasisdaten.dat nicht gelesen werden konnte.“ Klassen in SchILD ohne führende Null („5a“) werden den Klassen im
   Plan („05A“) zugeordnet.
+- **Gemeinsam unterrichtete Kurse (5.2a-3, Entscheidung 136):** Ein Plan-Kurs darf mehrere SchILD-Kurse haben (Sport
+  oder Projektkurs Q1+Q2, Kooperationskurs). Im Reiter „Zuordnung“ beim weiteren SchILD-Kurs unter „Festlegen auf“
+  **„⇄ gemeinsam mit „SP-G3“ (Q1) → SPG3_Q1_L6 …“** wählen – angeboten werden Plan-Kurse aller Stufen, die schon einen
+  SchILD-Kurs haben und bei Fach oder Lehrkraft passen; „⇄ ✓“ = Fach, Kursart, Lehrkraft und Stundenplan der Teilnehmer
+  passen. Status „von Hand · gemeinsam“, Begründung „gemeinsam mit …“; Teilnehmer aus dem eigenen Jahrgang des SchILD-Kurses
+  gelten dann als passend. Passt ein offener SchILD-Kurs nur zu einem schon vergebenen Plan-Kurs, schlägt die Automatik
+  „gemeinsam“ vor (Warnung, bestätigen per „⇄ …“ oder „Vorschläge übernehmen“). Zwei SchILD-Kurse **desselben Jahrgangs**
+  von Hand auf einem Plan-Kurs **ohne** „gemeinsam“ sind ein **Konflikt** (beide Zeilen; vorher gab es dafür keine
+  Meldung). Gemeinsam festgelegte Kurse nehmen dem eigentlichen SchILD-Kurs seinen Plan-Kurs nicht weg. In der Datei:
+  `"Gemeinsam": true` an der Kurs-Festlegung. In 5.2b werden die Teilnehmer aller zugeordneten SchILD-Kurse Teilnehmer
+  des Plan-Kurses.
+- **Muster der Kursbezeichnung (5.2a-3, Entscheidung 137):** Feld oben im Reiter „Zuordnung“, z. B. `{Fach}-{Art}{Nr}`
+  („D-G2“), `{Fach} {Art}{Nr}` („D GK1“), `{Jg}-{Fach}-{Art}{Nr}` („Q1-D-G2“). Platzhalter `{Fach}` (Fach laut Kurse.dat,
+  sonst Buchstaben), `{Art}` (Buchstaben), `{Nr}` (Ziffern, Pflicht), `{Jg}` (Stufe/Jahrgang), `{*}` (beliebiger Text);
+  Leerzeichen = ein oder mehrere Leerzeichen, Groß/klein egal, die ganze Bezeichnung muss passen; mehrere Muster mit `;`.
+  Die **Vorschau** zeigt beim Tippen drei Kurse aus dem Export (ein nicht passender zuerst) und „passt bei x von y“.
+  „Anwenden“ (oder Enter) → gilt sofort im Prüflauf; gespeichert als `"KursMuster"` mit „Zuordnungen speichern“. Leer =
+  Automatik (erste Ziffernfolge nach dem Fach – liest bei „Q1-D-G2“ die 1). Kurse, die nicht passen → Hinweis, dort gilt
+  die Automatik. Übersicht/Bericht: Zeile „Muster der Kursbezeichnung“.
+- **Pseudo-Export seit 5.2a-3:** Option „Kursbezeichnungen der Oberstufe“ („D-G1“ · „D GK1“ · „Q1-D-G1“) und ein
+  zusätzlicher Stolperstein: ein Q1-Kurs (Sport zuerst), der mit einigen Q2-Schülern gemeinsam unterrichtet wird und in
+  SchILD einen eigenen Q2-Kurs hat (erwartet: Vorschlag „gemeinsam mit …“). Ein Standard-Pseudo-Export hat damit vor dem
+  Übernehmen 4 statt 3 Warnungen.
 - Danach **5.2b** Import.
 
 ## Vertretungen aus Untis (U-1b und U-2, Desktop)

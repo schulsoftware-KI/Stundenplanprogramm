@@ -8,7 +8,8 @@
         ResizeMode="CanResizeWithGrip">
 
     <!-- Phase 5.2a: Prüflauf eines SchILD-NRW-3-Exports (nur lesen, nichts senden), Pseudo-Export und (5.2a-2)
-         Zuordnung SchILD ↔ Plan mit Festlegungen von Hand (schild_zuordnung.json). -->
+         Zuordnung SchILD ↔ Plan mit Festlegungen von Hand (schild_zuordnung.json); 5.2a-3: Muster der
+         Kursbezeichnung und „gemeinsam mit …“. -->
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -91,6 +92,7 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
@@ -99,7 +101,18 @@
                             Margin="0,0,0,6" CornerRadius="3">
                         <TextBlock x:Name="TxtZuHinweis" TextWrapping="Wrap"/>
                     </Border>
-                    <WrapPanel Grid.Row="1" Margin="0,0,0,4">
+                    <!-- 5.2a-3 (Entscheidung 137): Muster der Kursbezeichnung -->
+                    <DockPanel Grid.Row="1" Margin="0,0,0,6" LastChildFill="True">
+                        <TextBlock DockPanel.Dock="Left" Text="Muster der Kursbezeichnung:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBox DockPanel.Dock="Left" x:Name="TxtZuMuster" Width="230" VerticalContentAlignment="Center"
+                                 IsEnabled="False" TextChanged="TxtZuMuster_TextChanged" KeyDown="TxtZuMuster_KeyDown"
+                                 ToolTip="Wie heißen die Kurse im SchILD der Schule? Platzhalter: {Fach}, {Art}, {Nr} (Pflicht), {Jg} (Stufe bzw. Jahrgang) und {*} (beliebiger Text). Beispiele: {Fach}-{Art}{Nr} für „D-G2“, {Fach} {Art}{Nr} für „D GK1“, {Jg}-{Fach}-{Art}{Nr} für „Q1-D-G2“. Mehrere Muster mit ; trennen. Leer = automatisch (erste Ziffernfolge nach dem Fach). Gespeichert mit „Zuordnungen speichern“."/>
+                        <Button DockPanel.Dock="Left" x:Name="BtnZuMuster" Content="Anwenden" Padding="10,3" Margin="6,0,10,0"
+                                VerticalAlignment="Center" IsEnabled="False" Click="BtnZuMuster_Click"/>
+                        <TextBlock x:Name="TxtZuMusterVorschau" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="DimGray"
+                                   Text="Nach dem Prüflauf: Vorschau an Kursen aus dem Export."/>
+                    </DockPanel>
+                    <WrapPanel Grid.Row="2" Margin="0,0,0,4">
                         <TextBlock Text="Anzeigen:" VerticalAlignment="Center" Margin="0,0,6,0"/>
                         <ComboBox x:Name="CbZuAnsicht" Width="360" VerticalAlignment="Center" Margin="0,0,12,0"
                                   SelectionChanged="CbZuAnsicht_SelectionChanged"/>
@@ -107,10 +120,10 @@
                                   Margin="0,0,12,0" Checked="ZuFilter_Changed" Unchecked="ZuFilter_Changed"/>
                         <TextBlock x:Name="TxtZuAnzahl" VerticalAlignment="Center" Foreground="DimGray"/>
                     </WrapPanel>
-                    <DataGrid Grid.Row="2" x:Name="DgZuordnung" AutoGenerateColumns="False" IsReadOnly="True"
+                    <DataGrid Grid.Row="3" x:Name="DgZuordnung" AutoGenerateColumns="False" IsReadOnly="True"
                               HeadersVisibility="Column" CanUserAddRows="False" GridLinesVisibility="Horizontal"
                               SelectionMode="Single" SelectionChanged="DgZuordnung_SelectionChanged"/>
-                    <Border Grid.Row="3" BorderBrush="#DDDDDD" BorderThickness="0,1,0,0" Padding="0,6,0,0" Margin="0,6,0,0">
+                    <Border Grid.Row="4" BorderBrush="#DDDDDD" BorderThickness="0,1,0,0" Padding="0,6,0,0" Margin="0,6,0,0">
                         <StackPanel>
                             <TextBlock x:Name="TxtZuAuswahl" TextWrapping="Wrap" Margin="0,0,0,4"
                                        Text="Zeile wählen, um die Zuordnung von Hand festzulegen."/>
@@ -132,7 +145,7 @@
                             </WrapPanel>
                         </StackPanel>
                     </Border>
-                    <DockPanel Grid.Row="4" Margin="0,8,0,0" LastChildFill="True">
+                    <DockPanel Grid.Row="5" Margin="0,8,0,0" LastChildFill="True">
                         <Button DockPanel.Dock="Left" x:Name="BtnZuVorschlaege" Content="Vorschläge übernehmen" Padding="10,3"
                                 Margin="0,0,6,0" IsEnabled="False" Click="BtnZuVorschlaege_Click"/>
                         <Button DockPanel.Dock="Left" x:Name="BtnZuSpeichern" Content="Zuordnungen speichern" Padding="10,3"

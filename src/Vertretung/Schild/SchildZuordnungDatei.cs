@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Stundenplan_V2.Vertretung
 {
@@ -21,6 +22,11 @@ namespace Stundenplan_V2.Vertretung
     //   - Kurse:    Schuljahr + Jahrgang + KursBez → Plan-Schlüssel
     //   - OhneKurs: Schuljahr + Klasse + Fach + Fachlehrer → Plan-Schlüssel
     //   „Plan“: null = bewusst keine Zuordnung.
+    //  Seit 5.2a-3: „Gemeinsam“: true an einer Kurs-Festlegung = der SchILD-Kurs
+    //  wird mit einem anderen SchILD-Kurs im selben Plan-Kurs unterrichtet
+    //  (Entscheidung 136, z. B. Sport Q1+Q2); „KursMuster“ = Muster der
+    //  Kursbezeichnung (Entscheidung 137, leer = Automatik). Ältere Dateien
+    //  ohne diese Angaben bleiben gültig.
     // =====================================================================
 
     public sealed class SchildKursFestlegung
@@ -29,6 +35,9 @@ namespace Stundenplan_V2.Vertretung
         public string Jahrgang { get; set; } = "";
         public string KursBez { get; set; } = "";
         public string? Plan { get; set; }
+        /// <summary>5.2a-3 (136): gemeinsam mit einem anderen SchILD-Kurs im Plan-Kurs „Plan“ unterrichtet.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public bool Gemeinsam { get; set; }
     }
 
     public sealed class SchildOhneKursFestlegung
@@ -48,7 +57,12 @@ namespace Stundenplan_V2.Vertretung
         public int Version { get; set; } = 1;
         public string Hinweis { get; set; } =
             "Festlegungen von Hand für die Zuordnung SchILD ↔ Stundenplan (Phase 5.2a). Keine Personendaten. " +
-            "„Plan“: null = bewusst keine Zuordnung. Ändern im Fenster „SchILD-Daten prüfen“, Reiter „Zuordnung“.";
+            "„Plan“: null = bewusst keine Zuordnung; „Gemeinsam“: true = mit einem anderen SchILD-Kurs im selben Plan-Kurs " +
+            "unterrichtet; „KursMuster“ = Muster der Kursbezeichnung (leer = automatisch). Ändern im Fenster " +
+            "„SchILD-Daten prüfen“, Reiter „Zuordnung“.";
+        /// <summary>5.2a-3 (137): Muster der Kursbezeichnung, z. B. „{Fach}-{Art}{Nr}“; null = Automatik.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? KursMuster { get; set; }
         public Dictionary<string, string> Kuerzel { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, List<string>> Faecher { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public List<SchildKursFestlegung> Kurse { get; set; } = new();
@@ -83,12 +97,18 @@ namespace Stundenplan_V2.Vertretung
 
         // ---- Ändern ----
 
-        /// <summary>plan: Schlüssel; null = keine Zuordnung. entfernen = zurück zur Automatik.</summary>
-        public void SetzeKurs(int schuljahr, string jahrgang, string kursBez, string? plan, bool entfernen)
+        /// <summary>
+        /// plan: Schlüssel; null = keine Zuordnung. entfernen = zurück zur Automatik. gemeinsam (5.2a-3): mit einem anderen
+        /// SchILD-Kurs im selben Plan-Kurs unterrichtet (nur mit plan).
+        /// </summary>
+        public void SetzeKurs(int schuljahr, string jahrgang, string kursBez, string? plan, bool entfernen, bool gemeinsam = false)
         {
             Kurse.RemoveAll(f => f.Schuljahr == schuljahr && SchildText.Gleich(f.Jahrgang, jahrgang) && SchildText.Gleich(f.KursBez, kursBez));
             if (!entfernen)
-                Kurse.Add(new SchildKursFestlegung { Schuljahr = schuljahr, Jahrgang = jahrgang, KursBez = kursBez, Plan = plan });
+                Kurse.Add(new SchildKursFestlegung
+                {
+                    Schuljahr = schuljahr, Jahrgang = jahrgang, KursBez = kursBez, Plan = plan, Gemeinsam = gemeinsam && plan != null
+                });
         }
 
         public void SetzeOhne(int schuljahr, string klasse, string fach, string fachlehrer, string? plan, bool entfernen)
@@ -127,7 +147,11 @@ namespace Stundenplan_V2.Vertretung
                 var d = JsonSerializer.Deserialize<SchildZuordnungDatei>(File.ReadAllText(pfad), JsonOpt)
                         ?? throw new InvalidDataException("leere Datei");
                 // Wörterbücher ohne Groß/klein-Unterschied neu aufbauen (der Deserialisierer kennt den Vergleich nicht).
-                var erg = new SchildZuordnungDatei { Version = d.Version };
+                var erg = new SchildZuordnungDatei
+                {
+                    Version = d.Version,
+                    KursMuster = string.IsNullOrWhiteSpace(d.KursMuster) ? null : d.KursMuster.Trim()
+                };
                 foreach (var kv in d.Kuerzel ?? new())
                     if (!string.IsNullOrWhiteSpace(kv.Key) && !string.IsNullOrWhiteSpace(kv.Value))
                         erg.Kuerzel.TryAdd(kv.Key.Trim(), kv.Value.Trim());
@@ -135,6 +159,7 @@ namespace Stundenplan_V2.Vertretung
                     if (!string.IsNullOrWhiteSpace(kv.Key) && kv.Value != null && kv.Value.Any(x => !string.IsNullOrWhiteSpace(x)))
                         erg.Faecher.TryAdd(kv.Key.Trim(), kv.Value.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).ToList());
                 erg.Kurse = (d.Kurse ?? new()).Where(f => f != null && !string.IsNullOrWhiteSpace(f.KursBez)).ToList();
+                foreach (var f in erg.Kurse) if (f.Plan == null) f.Gemeinsam = false;
                 erg.OhneKurs = (d.OhneKurs ?? new()).Where(f => f != null && !string.IsNullOrWhiteSpace(f.Klasse)
                                                                 && !string.IsNullOrWhiteSpace(f.Fach)).ToList();
                 return erg;
@@ -154,6 +179,7 @@ namespace Stundenplan_V2.Vertretung
             var sortiert = new SchildZuordnungDatei
             {
                 Version = Version,
+                KursMuster = string.IsNullOrWhiteSpace(KursMuster) ? null : KursMuster.Trim(),
                 Kuerzel = Kuerzel.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)
                                  .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase),
                 Faecher = Faecher.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase)

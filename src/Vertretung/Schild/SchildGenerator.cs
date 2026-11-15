@@ -31,11 +31,18 @@ namespace Stundenplan_V2.Vertretung
     //    Fachkürzel, ein abweichendes Lehrkräftekürzel, Kursbezeichnungen in
     //    SchILD-Art, ein Kooperationskurs ohne Kursleiter, ein #Klasse-Paar,
     //    einzelne Status 0/1/3/6/9; seit 5.2a-2 ein Projektkurs ohne
-    //    Gegenstück im Plan (testet „keine Zuordnung“).
+    //    Gegenstück im Plan (testet „keine Zuordnung“); seit 5.2a-3 ein
+    //    Q1-Kurs, der mit einigen Q2-Schülern gemeinsam unterrichtet wird und
+    //    in SchILD einen eigenen Q2-Kurs hat (testet „gemeinsam mit …“, 136).
+    //  - Schreibweise der Oberstufenkurse wählbar (5.2a-3, testet das Muster
+    //    der Kursbezeichnung, 137): „D-G1“, „D GK1“ oder „Q1-D-G1“.
     //  - Markerdatei PSEUDODATEN.json mit Prüfsummen (Entscheidung 90).
     // =====================================================================
 
     public enum SchildSek1Variante { Gemischt, MitKurs, OhneKurs }
+
+    /// <summary>5.2a-3: Schreibweise der Oberstufenkurse im Pseudo-Export.</summary>
+    public enum SchildKursSchreibweise { Bindestrich, Leerzeichen, MitStufe }
 
     public enum SchildZielordnerStand { Leer, AlterPseudoExport, Fremd }
 
@@ -47,6 +54,7 @@ namespace Stundenplan_V2.Vertretung
         public SchildSek1Variante Sek1 { get; set; } = SchildSek1Variante.Gemischt;
         public int Startwert { get; set; } = 42;
         public int Abschnitt { get; set; } = 1;
+        public SchildKursSchreibweise Schreibweise { get; set; } = SchildKursSchreibweise.Bindestrich;
     }
 
     public sealed class SchildGeneratorErgebnis
@@ -188,6 +196,8 @@ namespace Stundenplan_V2.Vertretung
             public string SchildFach = "";
             public string WahlFach = "";  // Fach für „je Fach nur ein Kurs“ (Vertiefung eigenes Fach)
             public string KursBez = "";
+            /// <summary>Laufende Nummer in der Kursbezeichnung (je Stufe, SchILD-Fach und Kursart).</summary>
+            public int KursNr;
             public bool Kooperation;
             public int Belegt;
         }
@@ -350,19 +360,25 @@ namespace Stundenplan_V2.Vertretung
                 erg.Stolpersteine.Add($"Lehrkraft „{abweichend}“ heißt in SchILD „{neu}“.");
             }
 
-            // Kursbezeichnungen in SchILD-Art: <Fach>-<G|L|V|Z><n>, n laufend je Stufe/Fach/Art nach Plan-Nummer.
+            // Kursbezeichnungen in SchILD-Art: <Fach>-<G|L|V|Z><n> (bzw. Schreibweise laut Option, 5.2a-3), n laufend je
+            // Stufe/Fach/Art nach Plan-Nummer.
             foreach (var g in kurse.Values.GroupBy(k => (k.Stufe, k.SchildFach, k.Art)))
             {
                 int n = 0;
                 foreach (var k in g.OrderBy(k2 => k2.Nr).ThenBy(k2 => k2.Key, StringComparer.OrdinalIgnoreCase))
                 {
                     n++;
-                    string a = k.Art switch { "LK" => "L", "VTF" => "V", "ZK" => "Z", _ => "G" };
-                    k.KursBez = $"{k.SchildFach}-{a}{n}";
+                    k.KursNr = n;
+                    k.KursBez = KursBezeichnung(opt.Schreibweise, k.Stufe, k.SchildFach, k.Art, n);
                 }
             }
-            erg.Stolpersteine.Add("Oberstufenkurse heißen wie in SchILD (z. B. „D-G1“), nicht wie die Grundplan-Schlüssel; " +
-                                  "die Nummern folgen der Reihenfolge, nicht immer der Nummer im Plan.");
+            string bsp = KursBezeichnung(opt.Schreibweise, "Q1", "D", "GK", 1);
+            erg.Stolpersteine.Add($"Oberstufenkurse heißen wie in SchILD (z. B. „{bsp}“), nicht wie die Grundplan-Schlüssel; " +
+                                  "die Nummern folgen der Reihenfolge, nicht immer der Nummer im Plan." +
+                                  (opt.Schreibweise == SchildKursSchreibweise.MitStufe
+                                      ? " Mit Stufe vorn liest die Automatik die Nummer aus „Q1“/„Q2“ – Muster „{Jg}-{Fach}-{Art}{Nr}“."
+                                      : opt.Schreibweise == SchildKursSchreibweise.Leerzeichen ? " Muster: „{Fach} {Art}{Nr}“."
+                                      : " Muster: „{Fach}-{Art}{Nr}“."));
             var koop = kurse.Values.Where(k => k.Stufe == "Q2" && k.Lehrer.D.Count == 1)
                                    .OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase).FirstOrDefault();
             if (koop != null)
@@ -597,6 +613,12 @@ namespace Stundenplan_V2.Vertretung
             }
             erg.KurseSek2 = kurse.Count;
 
+            // ---------- 5.2a-3 (136): Kurs Q1 + Q2 gemeinsam, in SchILD je Stufe ein Kurs ----------
+            var gemeinsam = GemeinsamerKurs(kurse, schueler, K, opt.Schreibweise);
+            if (gemeinsam is { } gk)
+                erg.Stolpersteine.Add($"Kurs „{gk.Kurs.KursBez}“ (Q1) wird mit {gk.Anzahl} Q2-Schülern gemeinsam unterrichtet – in SchILD " +
+                                      $"als eigener Kurs „{gk.KursBez}“ (Q2); im Reiter „Zuordnung“ „gemeinsam mit …“ bestätigen.");
+
             // ---------- Projektkurs ohne Gegenstück im Plan (Stolperstein 5.2a-2: „keine Zuordnung“) ----------
             (string KursBez, string Fach, string Leiter, string Stufe)? projekt = null;
             string? pjStufe = kurse.Values.Any(k => k.Stufe == "Q1") ? "Q1"
@@ -606,7 +628,8 @@ namespace Stundenplan_V2.Vertretung
                               .OrderBy(k => k.KursBez, StringComparer.OrdinalIgnoreCase).FirstOrDefault();
             if (pjBasis != null)
             {
-                var pj = (KursBez: $"{pjBasis.SchildFach}-PJ1", Fach: pjBasis.SchildFach, Leiter: K(pjBasis.Lehrer.Haupt()), Stufe: pjBasis.Stufe);
+                var pj = (KursBez: ProjektBezeichnung(opt.Schreibweise, pjBasis.Stufe, pjBasis.SchildFach), Fach: pjBasis.SchildFach,
+                          Leiter: K(pjBasis.Lehrer.Haupt()), Stufe: pjBasis.Stufe);
                 projekt = pj;
                 foreach (var teilnehmer in schueler.Where(x => x.Klasse == pj.Stufe && x.Status == 2).Take(12))
                     teilnehmer.Leistungen.Add(new PLeistung
@@ -702,6 +725,10 @@ namespace Stundenplan_V2.Vertretung
                                         k.Zeiten.Count.ToString(CultureInfo.InvariantCulture), "",
                                         k.Kooperation ? "" : K(k.Lehrer.Haupt()), "N", k.Kooperation ? "165432" : "" },
                                 k.Kooperation ? new List<(string, int)>() : k.Lehrer.Rest().Select(x => (K(x), k.Zeiten.Count)).ToList()));
+            if (gemeinsam is { } gz)
+                kursZeilen.Add((new[] { gz.KursBez, "", J, A, "Q2", gz.Kurs.SchildFach, gz.Kurs.Art,
+                                        gz.Kurs.Zeiten.Count.ToString(CultureInfo.InvariantCulture), "", K(gz.Kurs.Lehrer.Haupt()), "N", "" },
+                                gz.Kurs.Lehrer.Rest().Select(x => (K(x), gz.Kurs.Zeiten.Count)).ToList()));
             if (projekt is { } pkurs)
                 kursZeilen.Add((new[] { pkurs.KursBez, "", J, A, pkurs.Stufe, pkurs.Fach, "PJK", "2", "", pkurs.Leiter, "N", "" },
                                 new List<(string, int)>()));
@@ -877,6 +904,88 @@ namespace Stundenplan_V2.Vertretung
             if (e.Success && e.Groups["f"].Value.Length > 0)
                 return (e.Groups["f"].Value.ToUpperInvariant(), "", int.Parse(e.Groups["n"].Value, CultureInfo.InvariantCulture));
             return (f.ToUpperInvariant(), "", 0);
+        }
+
+        /// <summary>5.2a-3: Kursbezeichnung der Oberstufe in der gewählten Schreibweise („D-G1“, „D GK1“, „Q1-D-G1“).</summary>
+        private static string KursBezeichnung(SchildKursSchreibweise s, string stufe, string fach, string art, int n)
+        {
+            if (s == SchildKursSchreibweise.Leerzeichen)
+                return $"{fach} {(art is "LK" or "VTF" or "ZK" ? art : "GK")}{n}";
+            string a = art switch { "LK" => "L", "VTF" => "V", "ZK" => "Z", _ => "G" };
+            return s == SchildKursSchreibweise.MitStufe ? $"{stufe}-{fach}-{a}{n}" : $"{fach}-{a}{n}";
+        }
+
+        private static string ProjektBezeichnung(SchildKursSchreibweise s, string stufe, string fach)
+            => s switch
+            {
+                SchildKursSchreibweise.Leerzeichen => $"{fach} PJK1",
+                SchildKursSchreibweise.MitStufe => $"{stufe}-{fach}-PJ1",
+                _ => $"{fach}-PJ1"
+            };
+
+        /// <summary>
+        /// 5.2a-3 (Stolperstein 136): Ein Q1-GK, zu dessen Fach und Lehrkraft es in Q2 keinen Plan-Kurs gibt (Sport zuerst),
+        /// bekommt in SchILD zusätzlich einen Q2-Kurs mit etwa 6 Q2-Schülern, die das Fach noch nicht haben und zu den
+        /// Zeiten des Kurses frei sind – und bei den übrigen Kursen derselben Lehrkraft in diesem Fach nicht alle frei (damit
+        /// genau ein Vorschlag entsteht). Bezeichnung wie in Q1, sonst die nächste freie Nummer in Q2. Im Plan bleibt es EIN Kurs.
+        /// </summary>
+        private static (KursInfo Kurs, string KursBez, int Anzahl)? GemeinsamerKurs(Dictionary<string, KursInfo> kurse,
+            List<PSchueler> schueler, Func<string, string> K, SchildKursSchreibweise schreib)
+        {
+            var q2 = kurse.Values.Where(k => k.Stufe == "Q2").ToList();
+            if (q2.Count == 0) return null;
+            var q2Bez = new HashSet<string>(q2.Select(k => k.KursBez), StringComparer.OrdinalIgnoreCase);
+            var q2Zeiten = new Dictionary<string, HashSet<(int, int)>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var k in q2) q2Zeiten.TryAdd(k.KursBez, k.Zeiten);
+            var kandidaten = kurse.Values.Where(k => k.Stufe == "Q1" && k.Art == "GK" && !k.Kooperation)
+                                         .OrderBy(k => k.SchildFach.Equals("SP", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                                         .ThenBy(k => k.Key, StringComparer.OrdinalIgnoreCase).ToList();
+            foreach (var k in kandidaten)
+            {
+                string haupt = k.Lehrer.Haupt();
+                if (q2.Any(x => x.SchildFach.Equals(k.SchildFach, StringComparison.OrdinalIgnoreCase)
+                                && x.Lehrer.D.Keys.Any(l => l.Equals(haupt, StringComparison.OrdinalIgnoreCase))))
+                    continue;
+                var frei = new List<PSchueler>();
+                var belegtVon = new Dictionary<PSchueler, HashSet<(int, int)>>();
+                foreach (var s in schueler.Where(x => x.Klasse == "Q2" && x.Status == 2))
+                {
+                    if (s.Leistungen.Any(l => l.Fach.Equals(k.SchildFach, StringComparison.OrdinalIgnoreCase))) continue;
+                    var belegt = new HashSet<(int, int)>();
+                    foreach (var l in s.Leistungen)
+                        if (q2Zeiten.TryGetValue(l.Kurs, out var z)) belegt.UnionWith(z);
+                    if (belegt.Overlaps(k.Zeiten)) continue;
+                    frei.Add(s);
+                    belegtVon[s] = belegt;
+                }
+                var teil = frei.Take(6).ToList();
+                // Eindeutig machen: Bei jedem anderen Kurs mit Fach, Kursart und Lehrkraft (alle Stufen) ist mindestens ein
+                // Teilnehmer belegt – sonst passte der Q2-Kurs nach dem Stundenplan auch dorthin und es gäbe keinen Vorschlag.
+                var andere = kurse.Values.Where(x => x != k && x.SchildFach.Equals(k.SchildFach, StringComparison.OrdinalIgnoreCase)
+                                                     && x.Art == k.Art
+                                                     && x.Lehrer.D.Keys.Any(l => l.Equals(haupt, StringComparison.OrdinalIgnoreCase)))
+                                         .ToList();
+                bool moeglich = true;
+                foreach (var o in andere)
+                {
+                    if (teil.Any(t => belegtVon[t].Overlaps(o.Zeiten))) continue;
+                    var extra = frei.FirstOrDefault(t => !teil.Contains(t) && belegtVon[t].Overlaps(o.Zeiten));
+                    if (extra == null) { moeglich = false; break; }
+                    teil.Add(extra);
+                }
+                if (!moeglich || teil.Count < 4) continue;
+                int n = q2.Count(x => x.SchildFach.Equals(k.SchildFach, StringComparison.OrdinalIgnoreCase) && x.Art == k.Art);
+                string bez = KursBezeichnung(schreib, "Q2", k.SchildFach, k.Art, k.KursNr);
+                while (q2Bez.Contains(bez)) bez = KursBezeichnung(schreib, "Q2", k.SchildFach, k.Art, ++n);
+                string lehrer = K(k.Lehrer.Haupt()), zusatz = K(k.Lehrer.Rest().FirstOrDefault() ?? "");
+                foreach (var s in teil)
+                    s.Leistungen.Add(new PLeistung
+                    {
+                        Fach = k.SchildFach, Lehrer = lehrer, Kursart = "GKM", Kurs = bez, Wst = k.Zeiten.Count, Zusatz = zusatz, Jahrgang = "Q2"
+                    });
+                return (k, bez, teil.Count);
+            }
+            return null;
         }
 
         /// <summary>Zerlegt Gruppen in Komponenten, die sich zeitlich (direkt oder über andere) überschneiden.</summary>

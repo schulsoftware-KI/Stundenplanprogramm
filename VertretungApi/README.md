@@ -989,6 +989,38 @@ Plandatei wird nur gelesen, gebucht wird wie bisher in die Vertretungsdatei (Spa
   Raum“ (Raumvertretung wie bisher als „Raumwechsel“). Ohne Raumänderung bleibt der Raum in der App der des
   Grundplans.
 
+## Dauervertretung (Schritt V3, Desktop)
+
+Code: `src/Vertretung/Dauervertretung.cs` (Vorschau, Buchung, Zurücksetzen) und `TagesEditorDialog_Dauer.cs`
+(Fenster im Wocheneditor). **Keine API- und keine Schemaänderung.** In der Vertretungsdatei kommt im Blatt
+„Vertretungen“ die Spalte 20 **„SerienId“** hinzu (leer = Einzelbuchung; ältere Dateien laden unverändert).
+Entscheidungen 158–162 (`claude/Projektstand_und_Fahrplan.md` §6).
+
+- **Dauervertretung buchen:** Wocheneditor → Klick auf eine Stunde → **„Dauervertretung (jede Woche bis …) …“**.
+  Gilt für **diese eine Wochenstunde** (Wochentag, Stunde, Unterricht der abwesenden Lehrkraft). Art Vertretung,
+  Betreuung/Aufsicht, EVA oder Entfall; „durch“ bietet dieselben Vorschläge wie das Menü (UV, Vber, Hohlstunde).
+  Von (Vorgabe: der angeklickte Tag) – bis (Vorgabe: letzter Schultag vor den nächsten Ferien; Knöpfe „bis
+  Ferienbeginn“ / „bis Schuljahresende“). Die **Vorschau** zeigt jeden Tag dieses Wochentags: „wird gebucht“,
+  „ersetzt: Entfall“, „schulfrei – Weihnachtsferien“ (Ferien und freie Tage laut Kalender werden übersprungen) und
+  **Lücken** (rot): Fehlt die Vertretungskraft (Abwesenheit „Lehrer“ bzw. alle eigenen Stunden entfallen) oder ist
+  sie in der Stunde schon belegt (eigener Unterricht, andere Vertretung), wird an diesem Tag **nicht** gebucht – die
+  Stunde bleibt offen bzw. wie gebucht. Verlegte Stunden bleiben. „Bestehende Buchungen ersetzen“ (an) ersetzt z. B.
+  einen schon gebuchten Entfall; aus, bleiben bestehende Buchungen. Eine **Raumänderung** der angeklickten Stunde
+  (orange „→ R…“) wird an allen Tagen übernommen, an denen der Raum frei ist (sonst Raum laut Plan); ein schon
+  gebuchter Raumwechsel eines Tages bleibt. **Zähler:** jede Stunde zählt wie eine einzelne Vertretung (UV-Einsatz
+  ohne Zähler). Bei Quelle „Untis“ weist das Fenster darauf hin.
+- **Anzeige:** Stunden einer Dauervertretung zeigen **„⟳ bis 18.12.“**. Wird ein Tag einzeln umgebucht (z. B.
+  „Entfall“), gehört er nicht mehr zur Dauervertretung; „Raum ändern“ behält die Zugehörigkeit.
+- **Zurücksetzen** (Entscheidung 162): Knopf **„Künftige zurücksetzen…“** bzw. Klick auf eine Stunde einer
+  Dauervertretung → **„Dauervertretung (bis …) ab hier zurücksetzen …“**. Ab einem Datum (einschließlich) werden nur
+  die Buchungen **einer Dauervertretung** oder **einer Lehrkraft** entfernt – „für sie gebucht (sie fehlt)“ und/oder
+  „von ihr gehalten“; bei der Lehrkraft bleiben Verlegungen und reine Raumwechsel. Vorschau mit allen Buchungen,
+  Rückfrage vor dem Entfernen. Wahlweise enden die **Abwesenheiten** der Lehrkraft am Tag davor („früher zurück“;
+  beginnt eine erst später, wird sie entfernt).
+- **Veröffentlichen:** Nach dem Buchen bzw. Zurücksetzen fragt der Wocheneditor, ob der betroffene Zeitraum
+  (erster bis letzter geänderter Tag) veröffentlicht werden soll, und öffnet dann „Zeitraum veröffentlichen“
+  (Entscheidung 161; bei Quelle „Untis“ mit der bekannten Rückfrage).
+
 ## Nächste Schritte
 
 1. **Schülerkonten aus SchILD** (Phase 5): Import statt Pseudodaten, Zuordnung über `ExtId`.

@@ -180,7 +180,9 @@ namespace Stundenplan_V2.Vertretung
                 "Zaehlwert", "Bemerkung",
                 // Verlegung (M3a)
                 "VerlegungsId", "VerlegtVonDatum", "VerlegtVonStunde",
-                "VerlegtNachDatum", "VerlegtNachStunde"
+                "VerlegtNachDatum", "VerlegtNachStunde",
+                // Dauervertretung (V3)
+                "SerienId"
             };
             for (int c = 0; c < header.Length; c++) ws.Cell(1, c + 1).Value = header[c];
             ws.Row(1).Style.Font.Bold = true;
@@ -218,6 +220,9 @@ namespace Stundenplan_V2.Vertretung
                     ws.Cell(r, 18).Style.DateFormat.Format = "yyyy-mm-dd";
                 }
                 if (v.VerlegtNachStunde.HasValue) ws.Cell(r, 19).Value = v.VerlegtNachStunde.Value;
+
+                // ---- Dauervertretung (V3) ----
+                ws.Cell(r, 20).Value = v.SerienId ?? "";
 
                 r++;
             }
@@ -385,7 +390,10 @@ namespace Stundenplan_V2.Vertretung
                     VerlegtVonDatum = ZellDatumNull(row.Cell(16)),
                     VerlegtVonStunde = ZellIntNull(row.Cell(17)),
                     VerlegtNachDatum = ZellDatumNull(row.Cell(18)),
-                    VerlegtNachStunde = ZellIntNull(row.Cell(19))
+                    VerlegtNachStunde = ZellIntNull(row.Cell(19)),
+
+                    // ---- Dauervertretung (V3) – fehlt in Altdateien => leer (Einzelbuchung) ----
+                    SerienId = row.Cell(20).GetString().Trim()
                 });
             }
         }

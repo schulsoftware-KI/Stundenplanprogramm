@@ -46,6 +46,10 @@
 
             <Button x:Name="BtnLehrerAbwesend" Content="Lehrer am Bezugstag abwesend" Padding="10,3"
                     Margin="0,0,8,0" Click="BtnLehrerAbwesend_Click"/>
+            <!-- V3 (Entscheidung 162): künftige Buchungen ab einem Datum entfernen – einer Dauervertretung oder einer Lehrkraft -->
+            <Button x:Name="BtnZuruecksetzen" Content="Künftige zurücksetzen…" Padding="10,3"
+                    Margin="0,0,8,0" Click="BtnZuruecksetzen_Click"
+                    ToolTip="Buchungen ab einem Datum entfernen – einer Dauervertretung oder einer Lehrkraft (mit Vorschau und Rückfrage)"/>
             <Button x:Name="BtnAktualisieren" Content="Aktualisieren" Padding="10,3" Click="BtnAktualisieren_Click"/>
 
             <Button x:Name="BtnOnlinePush" Content="Online veröffentlichen" Padding="10,3"
@@ -84,7 +88,9 @@
             <!-- R3-D-Nachtrag: durch eine Buchung doppelt belegt -->
             <TextBlock Text="R07b ‼" VerticalAlignment="Center" Foreground="#AD1457" FontWeight="SemiBold"/>
             <TextBlock Text=" doppelt belegt" VerticalAlignment="Center" Foreground="DimGray"/>
-            <TextBlock Text="  ·  Klick = Aktionen (auch „Raum ändern“); eine Klassenstunde auf eine freie Stunde ziehen = Verlegung."
+            <!-- V3: Stunde einer Dauervertretung -->
+            <TextBlock Text="  ·  ⟳ bis … = Dauervertretung" VerticalAlignment="Center" Foreground="DimGray"/>
+            <TextBlock Text="  ·  Klick = Aktionen (auch „Raum ändern“, „Dauervertretung“); eine Klassenstunde auf eine freie Stunde ziehen = Verlegung."
                        VerticalAlignment="Center" Foreground="DimGray"/>
             <TextBlock x:Name="TxtInfo" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="DimGray"/>
             <TextBlock x:Name="TxtRaumInfo" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="DimGray"

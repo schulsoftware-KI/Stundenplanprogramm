@@ -413,6 +413,9 @@ namespace Stundenplan_V2.Vertretung
             if (_tage.Count > 0)
                 TxtInfo.Text = $"{_tage.First():dd.MM.} – {_tage.Last():dd.MM.yyyy}";
 
+            // V3: letzter Tag je Dauervertretung für „⟳ bis …“
+            _serienEnde = Dauervertretung.SerienEnde(_daten.Vertretungen);
+
             ZeichneLehrerSeite();
             ZeichneKlasseSeite();
         }
@@ -562,6 +565,9 @@ namespace Stundenplan_V2.Vertretung
         private Border MachZelle(TagesZelle z, DateTime datum, bool lehrerSicht, string? bezug)
         {
             var (kopf, zeile2, zeile3) = ZelltextTeile(z, lehrerSicht, bezug);
+            // V3: Stunde einer Dauervertretung – „⟳ bis 18.12.“
+            string dauer = DauerMarke(z);
+            if (dauer.Length > 0) zeile3 = zeile3.Length > 0 ? zeile3 + "  " + dauer : dauer;
 
             var sp = new StackPanel { Margin = new Thickness(3, 2, 3, 2) };
             var tbKopf = new TextBlock { Text = kopf, FontWeight = FontWeights.Bold, FontSize = 11, TextWrapping = TextWrapping.Wrap };
@@ -727,6 +733,14 @@ namespace Stundenplan_V2.Vertretung
             var miEva = new MenuItem { Header = "Eigenverantw. Arbeiten (EVA)" };
             miEva.Click += (_, __) => Buche(z, datum, Vertretungsart.EVA, null);
             menu.Items.Add(miEva);
+
+            // V3: Dauervertretung (diese Wochenstunde jede Woche bis …) bzw. ab hier zurücksetzen.
+            var miDauer = BaueDauerMenu(z, datum);
+            if (miDauer.Count > 0)
+            {
+                menu.Items.Add(new Separator());
+                foreach (var m in miDauer) menu.Items.Add(m);
+            }
 
             // R3-D: Raumvertretung bzw. Raum der Buchung ändern.
             var miRaum = BaueRaumMenu(z, datum);
@@ -1227,7 +1241,8 @@ namespace Stundenplan_V2.Vertretung
                 || (!string.IsNullOrWhiteSpace(v.VerlegungsId) && ids.Contains(v.VerlegungsId)));
         }
 
-        private void Speichere()
+        /// <summary>Speichert die Vertretungsdatei; false bei einem Fehler (Meldung wurde gezeigt).</summary>
+        private bool Speichere()
         {
             try { VertretungsStore.Speichern(_daten, _vertretungsPfad); }
             catch (Exception ex)
@@ -1235,12 +1250,13 @@ namespace Stundenplan_V2.Vertretung
                 MessageBox.Show("Fehler beim Speichern:\n\n" + ex.Message +
                     "\n\n(Häufigste Ursache: Datei ist parallel in Excel geöffnet.)",
                     "Wocheneditor", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
+                return false;
             }
             _log?.Invoke($"Wocheneditor: gespeichert ({Path.GetFileName(_vertretungsPfad)}).");
 
             // Partnerfenster über die geänderten Daten informieren.
             Partner?.NeuLaden();
+            return true;
         }
 
         private void SetzeInfo(string text) => TxtInfo.Text = text;

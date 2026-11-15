@@ -173,6 +173,14 @@ namespace Stundenplan_V2.Vertretung
         public int? VerlegtNachStunde { get; set; } = null;
 
         public bool IstVerlegung => Art == Vertretungsart.Verlegung;
+
+        // ---- Dauervertretung (V3, Entscheidungen 158–162) ----
+        // Alle Buchungen einer Dauervertretung (eine Wochenstunde, jede Woche bis zu einem Datum) tragen dieselbe
+        // SerienId; leer = Einzelbuchung. Jede Stunde bleibt ein eigener Eintrag (zählt wie eine einzelne
+        // Vertretung, Entscheidung 160). Wird ein Tag der Serie einzeln umgebucht, gehört er nicht mehr dazu.
+        public string SerienId { get; set; } = "";
+
+        public bool IstDauervertretung => !string.IsNullOrWhiteSpace(SerienId);
     }
 
     /// <summary>

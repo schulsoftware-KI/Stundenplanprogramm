@@ -859,7 +859,9 @@ importieren“, GPU001.TXT) fragt – nur wenn die Datei Räume enthält – „
 - Herkunft **„aus Untis“**, nicht fest. Bedarfe ohne Untis-Raum: „ohne Raum – in Untis kein Raum“ (rot) – verteilt wird
   nur auf Nachfrage (Planeditor „Räume verteilen“, Knopf 25 „Behalten und ergänzen“).
 - Blatt „Raumplan“: Die Zeilen für „Plan“ werden ersetzt; bei „Nein“ bleiben sie unverändert. Räume, die die UV nicht
-  kennt, werden im Blatt „Räume“ ergänzt (Art „Fachraum“, nicht als Ausweich – bitte prüfen).
+  kennt, werden im Blatt „Räume“ ergänzt (Art „Fachraum“, nicht als Ausweich – bitte prüfen). Untis-Kombinationen wie
+  „RSh2~RSb1“ (mehrere Räume gleichzeitig) bleiben im Raumplan so stehen, im Blatt „Räume“ kommen seit dem
+  R3-D-Nachtrag die Einzelräume hinzu (ältere Zeilen mit „~“ lassen sich dort löschen – das Vertretungsmodul übergeht sie).
 - Ein Fehler dabei bricht den Plan-Import nicht ab; Ergebnis und Hinweise stehen in der Meldung und im Log.
 
 ### Kopfleiste des Planeditors (Desktop)
@@ -943,6 +945,26 @@ Plandatei wird nur gelesen, gebucht wird wie bisher in die Vertretungsdatei (Spa
   jetzt kräftig gelb) zeigen den gebuchten Raum in „gebucht“ und „neuer Raum“. Die gebuchte Raumsperre sperrt den
   Raum auch für die Vorschläge im Wocheneditor (löschen lässt sie sich bisher nur im Blatt „Abwesenheiten“ der
   Vertretungsdatei).
+- **Nachtrag (R3-D-Nachtrag):** Der Tooltip der ganzen Stunde nennt den Raum („Raum: R07c → R07d (geändert)“, bei
+  einer Raumsperre mit „⚠“). Raumkombinationen aus dem Blatt „Räume“ („RSh2~RSb1“, „R08f~RKL“) werden nie als Raum
+  angeboten, ihre Einzelräume schon. Ist der Raum geändert, steht der Raum laut Plan nur oben („Raum wie im Plan“),
+  nicht noch einmal in der Liste. **Belegte Räume bewusst wählbar:** zuerst wie bisher nur freie Räume; ganz unten im
+  Wocheneditor das Untermenü „belegte Räume (n) …“ mit z. B. „R07b (belegt: 07B E L21)“ bzw. „R05a (gesperrt)“ – die
+  Wahl fragt nach („… ist in dieser Stunde belegt durch … – trotzdem?“); „Raum wie im Plan“ ist auch dann wählbar,
+  wenn der alte Raum inzwischen belegt ist (mit Rückfrage). In „neuer Raum“ von „Vertretung erfassen“ stehen nach den
+  freien Räumen die Trennzeilen **„– weitere Räume –“** (Fachräume anderer Fächer, Unbekannte) und **„– belegte
+  Räume –“**; beim Buchen kommt eine Rückfrage zusammen mit „Raum doppelt“ – „Ja“ bucht trotzdem (auch zwei Stunden
+  in denselben Raum). Wechselt „Abwesend“ (Lehrer / Klasse / Raum), wird das Feld „Namen“ geleert. Ist ein Raum
+  **durch eine Buchung doppelt belegt** (mindestens eine der Stunden hat ihren Raum durch eine Buchung geändert), zeigen
+  im Wocheneditor beide Stunden den Raum mit **„‼“** (dunkelrot), der Tooltip nennt die andere Stunde („‼ Raum R05d ist
+  doppelt belegt – auch 07C M L52“). Doppelbelegungen schon im Raumplan (z. B. zwei Gruppen in einer Halle) und
+  Team-Teaching werden nicht markiert.
+- **Zeitraum veröffentlichen…** (Wocheneditor, neben „Online veröffentlichen“; Entscheidung 161): alle Schultage
+  von–bis laut Kalender (Ferien und freie Tage übersprungen) – Vorgabe vom Tag im Feld „Woche um“ bis zum letzten
+  angezeigten Tag. Das Fenster zählt die Schultage und Änderungen, fragt vor dem Senden nach (bei Quelle „Untis“ mit
+  Warnung wie beim einen Tag), zeigt den Fortschritt und lässt sich abbrechen; Meldung „n von m Tag(en) veröffentlicht“.
+  Jeder Tag wird in der App komplett ersetzt (Tage ohne Buchungen werden leer); es gilt der geladene Plan (vorher
+  „Aktualisieren“, wenn im Feld „Plan“ ein anderer gewählt ist – das Fenster weist darauf hin).
 - **Tagesübersicht und PDF** (Lehrer-Sicht und Aushang): neue Spalte „Raum“ – Raum der Stunde, bei einer
   Raumänderung „alt → neu“, leer bei Entfall.
 - **Online veröffentlichen:** Jeder Eintrag sendet den Raum laut Raumplan bzw. den neuen Raum; ändert eine Buchung

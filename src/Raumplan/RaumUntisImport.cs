@@ -22,7 +22,8 @@ namespace Stundenplan_V2.Raumplanung
     //  UNr nicht kennt (z. B. Tausch in Untis), gehen an noch offene Bedarfe derselben
     //  Stunde, sonst nur ins Protokoll. Bedarfe ohne Untis-Raum: „ohne Raum – in Untis
     //  kein Raum" (verteilt wird nur auf Nachfrage). Herkunft „aus Untis", nicht fest.
-    //  Räume, die die UV nicht kennt, werden im Blatt „Räume" ergänzt.
+    //  Räume, die die UV nicht kennt, werden im Blatt „Räume" ergänzt – Kombinationen wie
+    //  „RSh2~RSb1“ als Einzelräume (R3-D-Nachtrag).
     // =====================================================================
     public static class RaumUntisImport
     {
@@ -113,8 +114,10 @@ namespace Stundenplan_V2.Raumplanung
             if (ohneStunde > 0)
                 erg.Hinweise.Add($"{ohneStunde} Untis-Stunde(n) mit Raum liegen nicht im Zeitraster des Plans (Tag/Stunde fehlt) – nicht übernommen.");
 
-            // Räume, die die UV nicht kennt → Raumverzeichnis bzw. Blatt „Räume“ ergänzen.
-            foreach (var raum in zeilen.Select(z => z.Raum).Where(r => r.Length > 0).Distinct(Cmp).ToList())
+            // Räume, die die UV nicht kennt → Raumverzeichnis bzw. Blatt „Räume“ ergänzen. R3-D-Nachtrag
+            // (14.11.2026): Untis-Kombinationen wie „RSh2~RSb1“ (mehrere Räume gleichzeitig) als Einzelräume –
+            // im Raumplan bleibt die Kombination, im Blatt „Räume“ steht jeder Raum für sich.
+            foreach (var raum in zeilen.SelectMany(z => RaumplanStore.SplitRaeume(z.Raum)).Distinct(Cmp).ToList())
             {
                 if (v.Enthaelt(raum)) continue;
                 v.Hinzu(new RaumInfo

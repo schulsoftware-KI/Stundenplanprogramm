@@ -27,7 +27,7 @@
                     </Grid.RowDefinitions>
 
                     <TextBlock Grid.Row="0" Margin="0,0,0,8" TextWrapping="Wrap"
-                               Text="Abwesenheit eintragen (mehrere Namen kommagetrennt möglich) und 'Betroffene Stunden ermitteln'. Je Stunde Art und ggf. Vertretung wählen – die Liste ist nach fachgerecht, vertretungsbereit und fairem Zähler sortiert. 'neuer Raum' wechselt den Raum (bei 'Raum' als Abwesenheit = Raumsperre: Raumvertretung mit freiem Raum vorbelegt). Mehrere markierte Zeilen lassen sich über die Leiste gemeinsam auf eine Art setzen. 'Buchen' schreibt alles in die Vertretungsdatei."/>
+                               Text="Abwesenheit eintragen (mehrere Namen kommagetrennt möglich) und 'Betroffene Stunden ermitteln'. Je Stunde Art und ggf. Vertretung wählen – die Liste ist nach fachgerecht, vertretungsbereit und fairem Zähler sortiert. 'neuer Raum' wechselt den Raum (bei 'Raum' als Abwesenheit = Raumsperre: Raumvertretung mit freiem Raum vorbelegt; belegte Räume stehen unten und brauchen eine Rückfrage). Mehrere markierte Zeilen lassen sich über die Leiste gemeinsam auf eine Art setzen. 'Buchen' schreibt alles in die Vertretungsdatei."/>
 
                     <!-- Eingabe der Abwesenheit -->
                     <StackPanel Grid.Row="1" Margin="0,0,0,8">
@@ -124,7 +124,9 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <!-- R3-D: freie Räume dieser Stunde; „(wie bisher)“ = Raum laut Plan -->
+                            <!-- R3-D: freie Räume dieser Stunde; „(wie bisher)“ = Raum laut Plan.
+                                 R3-D-Nachtrag: Trennzeilen „– weitere Räume –“ und „– belegte Räume –“ (nicht wählbar);
+                                 belegte Räume bewusst wählbar, Rückfrage beim Buchen. -->
                             <DataGridTemplateColumn Header="neuer Raum" Width="200">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
@@ -132,7 +134,19 @@
                                                   DisplayMemberPath="Anzeige"
                                                   SelectedValuePath="Name"
                                                   SelectedValue="{Binding NeuerRaum, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                  IsEnabled="{Binding RaumWaehlbar}"/>
+                                                  IsEnabled="{Binding RaumWaehlbar}">
+                                            <ComboBox.ItemContainerStyle>
+                                                <Style TargetType="ComboBoxItem">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IstTrenner}" Value="True">
+                                                            <Setter Property="IsEnabled" Value="False"/>
+                                                            <Setter Property="FontStyle" Value="Italic"/>
+                                                            <Setter Property="Foreground" Value="DimGray"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </ComboBox.ItemContainerStyle>
+                                        </ComboBox>
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>

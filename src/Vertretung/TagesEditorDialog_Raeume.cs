@@ -16,12 +16,18 @@ namespace Stundenplan_V2.Vertretung
     ///    Raumvertretung; bei Vertretung, Betreuung, EVA, Zusammenlegung und „hierher verlegt“ bekommt die
     ///    Buchung den neuen Raum (die Lehrkraft bleibt). „Raum wie im Plan“ nimmt die Änderung zurück.
     ///  - Team-Teaching (Teile derselben UNr im selben Raum) zieht gemeinsam um.
+    ///  - R3-D-Nachtrag: Doppelbelegung durch eine Buchung („‼“, beide Stunden).
+    ///  - R3-D-Nachtrag: Tooltip der ganzen Stunde nennt den Raum („Raum: alt → neu“); der Raum laut Plan steht
+    ///    nur einmal im Menü („Raum wie im Plan“); belegte und gesperrte Räume bewusst wählbar (Untermenü
+    ///    „belegte Räume“, mit Rückfrage); Raumkombinationen wie „RSh2~RSb1“ werden nicht angeboten.
     /// Die Plandatei wird nicht verändert; gebucht wird in die Vertretungsdatei.
     /// </summary>
     public partial class TagesEditorDialog
     {
         private const int MaxRaeumeImMenu = 14;
         private static readonly SolidColorBrush RaumGeaendertBrush = new(Color.FromRgb(0xE6, 0x51, 0x00));
+        /// <summary>R3-D-Nachtrag: Raum durch eine Buchung doppelt belegt („‼“).</summary>
+        private static readonly SolidColorBrush RaumDoppeltBrush = new(Color.FromRgb(0xAD, 0x14, 0x57));
 
         /// <summary>Räume der geladenen Plan-Spalte lesen (Raumplan, Raumverzeichnis) und anzeigen.</summary>
         private void LadeRaeume()
@@ -37,9 +43,13 @@ namespace Stundenplan_V2.Vertretung
         private HashSet<string> GesperrteRaeume(DateTime datum, int stunde)
             => PlanRaeume.Gesperrt(_daten.Abwesenheiten, datum, stunde);
 
-        /// <summary>Raum-Text oben rechts in der Zelle (null = nichts anzeigen).</summary>
-        private TextBlock? RaumAnzeige(TagesZelle z, DateTime datum)
+        /// <summary>
+        /// Raum-Text oben rechts in der Zelle (null = nichts anzeigen). <paramref name="tooltip"/> = Raumzeile für
+        /// den Tooltip der ganzen Stunde (R3-D-Nachtrag: am kleinen Raum-Text allein erschien er nicht).
+        /// </summary>
+        private TextBlock? RaumAnzeige(TagesZelle z, DateTime datum, out string? tooltip)
         {
+            tooltip = null;
             if (z.IstFrei || string.IsNullOrWhiteSpace(z.Raum)) return null;
 
             var tb = new TextBlock
@@ -48,15 +58,27 @@ namespace Stundenplan_V2.Vertretung
                 FontSize = 10,
                 Foreground = Brushes.DimGray,
                 Margin = new Thickness(4, 0, 0, 0),
-                VerticalAlignment = VerticalAlignment.Top,
-                ToolTip = "Raum " + z.Raum
+                VerticalAlignment = VerticalAlignment.Top
             };
+            tooltip = "Raum: " + z.Raum;
             if (z.RaumGeaendert)
             {
                 tb.Text = "→ " + z.Raum;
                 tb.Foreground = RaumGeaendertBrush;
                 tb.FontWeight = FontWeights.SemiBold;
-                tb.ToolTip = $"Raum geändert: {(string.IsNullOrWhiteSpace(z.GrundRaum) ? "–" : z.GrundRaum)} → {z.Raum}";
+                tooltip = $"Raum: {(string.IsNullOrWhiteSpace(z.GrundRaum) ? "–" : z.GrundRaum)} → {z.Raum} (geändert)";
+            }
+
+            // R3-D-Nachtrag: durch eine Buchung doppelt belegt (z. B. bewusst in einen belegten Raum gelegt) –
+            // beide Stunden zeigen „‼“ und nennen im Tooltip die andere Stunde.
+            var doppelt = PlanRaeume.DoppeltDurchBuchung(Tagesplan(datum), z);
+            if (doppelt.Count > 0)
+            {
+                tb.Text += " ‼";
+                tb.Foreground = RaumDoppeltBrush;
+                tb.FontWeight = FontWeights.SemiBold;
+                foreach (var kv in doppelt)
+                    tooltip += $"\n‼ Raum {kv.Key} ist doppelt belegt – auch {kv.Value}.";
             }
 
             var gesperrt = GesperrteRaeume(datum, z.Stunde);
@@ -66,7 +88,7 @@ namespace Stundenplan_V2.Vertretung
                 tb.Text += " ⚠";
                 tb.Foreground = Brushes.Red;
                 tb.FontWeight = FontWeights.SemiBold;
-                tb.ToolTip = $"Raum {string.Join(", ", hier)} ist gesperrt (Abwesenheit „Raum“) – Klick → „Raum ändern …“.";
+                tooltip += $"\n⚠ Raum {string.Join(", ", hier)} ist gesperrt (Abwesenheit „Raum“) – Klick → „Raum ändern …“.";
             }
             return tb;
         }
@@ -106,26 +128,35 @@ namespace Stundenplan_V2.Vertretung
 
             if (z.RaumGeaendert)
             {
-                var belegt = PlanRaeume.BelegteRaeume(tp, z);
-                belegt.UnionWith(gesperrt);
+                // R3-D-Nachtrag: auch belegt wählbar – dann mit Rückfrage.
+                var belegtVon = PlanRaeume.BelegtVon(tp, z);
                 var grund = PlanRaeume.Zerlege(z.GrundRaum);
-                bool frei = grund.All(x => !belegt.Contains(x));
+                string? warum = grund.Any(gesperrt.Contains) ? "gesperrt"
+                              : grund.Where(belegtVon.ContainsKey).Select(x => belegtVon[x]).FirstOrDefault() is string wer
+                                  ? "belegt: " + wer : null;
                 var zurueck = new MenuItem
                 {
-                    Header = "Raum wie im Plan: " + (grund.Count > 0 ? z.GrundRaum : "kein Raum") + (frei ? "" : " – belegt"),
-                    IsEnabled = frei
+                    Header = "Raum wie im Plan: " + (grund.Count > 0 ? z.GrundRaum : "kein Raum")
+                             + (warum == null ? "" : "  (" + warum + ")")
                 };
-                zurueck.Click += (_, __) => SetzeRaum(z, datum, null);
+                zurueck.Click += (_, __) =>
+                {
+                    if (warum != null && !BestaetigeBelegtenRaum(z, datum, z.GrundRaum ?? "", warum)) return;
+                    SetzeRaum(z, datum, null);
+                };
                 mi.Items.Add(zurueck);
                 mi.Items.Add(new Separator());
             }
 
-            var freie = raeume.FreieRaeume(_plan, tp, z, gesperrt, PlanRaeume.Zerlege(z.Raum));
+            // R3-D-Nachtrag: Der Raum laut Plan steht oben („Raum wie im Plan“) – in der Liste nicht noch einmal.
+            var ohne = PlanRaeume.Zerlege(z.Raum);
+            if (z.RaumGeaendert) ohne.AddRange(PlanRaeume.Zerlege(z.GrundRaum));
+            var alle = raeume.Vorschlaege(_plan, tp, z, gesperrt, ohne);
+            var freie = alle.Where(x => x.IstFrei).ToList();
+            var belegte = alle.Where(x => !x.IstFrei).ToList();
+
             if (freie.Count == 0)
-            {
                 mi.Items.Add(new MenuItem { Header = "(kein freier Raum in dieser Stunde)", IsEnabled = false });
-                return;
-            }
 
             var oben = freie.Where(x => !x.Weitere).Take(MaxRaeumeImMenu).ToList();
             var rest = freie.Where(x => !oben.Contains(x)).ToList();
@@ -136,14 +167,43 @@ namespace Stundenplan_V2.Vertretung
                 foreach (var v in rest) weitere.Items.Add(RaumEintrag(z, datum, v));
                 mi.Items.Add(weitere);
             }
+            // R3-D-Nachtrag: belegte und gesperrte Räume ganz unten, nur mit Rückfrage.
+            if (belegte.Count > 0)
+            {
+                mi.Items.Add(new Separator());
+                var bel = new MenuItem { Header = $"belegte Räume ({belegte.Count}) …" };
+                foreach (var v in belegte) bel.Items.Add(RaumEintrag(z, datum, v));
+                mi.Items.Add(bel);
+            }
         }
 
         private MenuItem RaumEintrag(TagesZelle z, DateTime datum, RaumVorschlag v)
         {
             var m = new MenuItem { Header = v.Anzeige };
             string raum = v.Name;
-            m.Click += (_, __) => SetzeRaum(z, datum, raum);
+            string? belegt = v.Belegt;
+            m.Click += (_, __) =>
+            {
+                if (belegt != null && !BestaetigeBelegtenRaum(z, datum, raum, belegt)) return;
+                SetzeRaum(z, datum, raum);
+            };
             return m;
+        }
+
+        /// <summary>R3-D-Nachtrag: Rückfrage vor der Wahl eines belegten bzw. gesperrten Raums.</summary>
+        private bool BestaetigeBelegtenRaum(TagesZelle z, DateTime datum, string raum, string belegt)
+        {
+            bool istBelegt = belegt.StartsWith("belegt: ", StringComparison.Ordinal);
+            string grund = istBelegt
+                ? "ist in dieser Stunde belegt durch " + belegt.Substring("belegt: ".Length)
+                : "ist in dieser Stunde gesperrt (Abwesenheit „Raum“)";
+            string frage = $"{raum} {grund}.\n\n{z.Fach} ({string.Join(", ", z.Klassen)}) am {datum:dd.MM.yyyy}, " +
+                           $"{z.Stunde}. Std trotzdem in {raum} legen?" +
+                           (istBelegt ? "\n\nDie andere Stunde behält ihren Raum – der Raum ist dann doppelt belegt." : "");
+            bool ja = MessageBox.Show(this, frage, "Raum belegt", MessageBoxButton.YesNo, MessageBoxImage.Warning,
+                          MessageBoxResult.No) == MessageBoxResult.Yes;
+            if (!ja) SetzeInfo($"Raum unverändert ({raum} nicht frei).");
+            return ja;
         }
 
         /// <summary>

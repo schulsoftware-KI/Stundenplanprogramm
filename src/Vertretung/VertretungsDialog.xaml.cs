@@ -162,6 +162,8 @@ namespace Stundenplan_V2.Vertretung
 
         private void CbSubjekt_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            // R3-D-Nachtrag: Namen einer anderen Art (z. B. Lehrkräfte, wenn jetzt „Raum“ gewählt ist) passen nicht mehr.
+            if (e.RemovedItems.Count > 0) TxtNamen.Text = "";
             if (!_bereit || _plan == null) return;
             if (CbSubjekt.SelectedItem is AbwesenheitsSubjekt subj)
                 FuelleNamen(subj);
@@ -335,7 +337,7 @@ namespace Stundenplan_V2.Vertretung
                     string gruppe = $"{inst.UNr}|{inst.Raum}";
                     if (!gruppenRaum.TryGetValue(tagStd + "|" + gruppe, out var raum))
                     {
-                        raum = zeile.RaumOptionen.Skip(1).Select(o => o.Name)
+                        raum = zeile.RaumOptionen.Where(o => o.IstFreierRaum).Select(o => o.Name)
                                    .FirstOrDefault(r => !vergeben.ContainsKey(tagStd + "|" + r)) ?? "";
                         if (raum.Length > 0)
                         {
@@ -416,14 +418,29 @@ namespace Stundenplan_V2.Vertretung
                 .GroupBy(z => $"{z.Inst.Datum:yyyyMMdd}|{z.Inst.Stunde}|{z.NeuerRaum!.Trim().ToUpperInvariant()}")
                 .Where(g => g.Select(z => $"{z.Inst.UNr}|{z.Inst.Raum}").Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1)
                 .ToList();
-            if (doppelt.Count > 0)
+            // R3-D-Nachtrag: bewusst gewählte belegte bzw. gesperrte Räume (nur Zeilen, die wirklich gebucht würden).
+            var belegtGewaehlt = _zeilen
+                .Where(z => !(z.Bestehend != null && z.Unveraendert()) && z.GewaehlteRaumOption?.Belegt != null)
+                .ToList();
+            if (doppelt.Count > 0 || belegtGewaehlt.Count > 0)
             {
-                var liste = string.Join("\n", doppelt.Take(8).Select(g =>
-                    $"• {g.First().DatumText}, {g.First().Stunde}. Std: {g.First().NeuerRaum} für " +
-                    string.Join(" und ", g.Select(z => $"{z.KlassenText} {z.Fach}"))));
-                if (MessageBox.Show($"Derselbe neue Raum ist mehrfach vergeben:\n\n{liste}\n\nTrotzdem buchen?",
-                        "Raum doppelt", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
-                { SetzeStatus("Nichts gebucht (Raum doppelt vergeben)."); return; }
+                var teileFrage = new List<string>();
+                if (doppelt.Count > 0)
+                    teileFrage.Add("Derselbe neue Raum ist mehrfach vergeben:\n" + string.Join("\n", doppelt.Take(8).Select(g =>
+                        $"• {g.First().DatumText}, {g.First().Stunde}. Std: {g.First().NeuerRaum} für " +
+                        string.Join(" und ", g.Select(z => $"{z.KlassenText} {z.Fach}")))));
+                if (belegtGewaehlt.Count > 0)
+                    teileFrage.Add("Gewählte Räume sind in dieser Stunde nicht frei:\n" + string.Join("\n", belegtGewaehlt.Take(8).Select(z =>
+                        $"• {z.DatumText}, {z.Stunde}. Std, {z.KlassenText} {z.Fach}: {z.NeuerRaum} ({z.GewaehlteRaumOption!.Belegt})"))
+                        + (belegtGewaehlt.Count > 8 ? $"\n… und {belegtGewaehlt.Count - 8} weitere" : ""));
+                string titel = doppelt.Count > 0 ? "Raum doppelt" : "Raum belegt";
+                if (MessageBox.Show(string.Join("\n\n", teileFrage) +
+                        "\n\nTrotzdem buchen? (Ja = die Stunden kommen in diese Räume, auch doppelt belegt.)",
+                        titel, MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
+                {
+                    SetzeStatus(doppelt.Count > 0 ? "Nichts gebucht (Raum doppelt vergeben)." : "Nichts gebucht (Raum belegt).");
+                    return;
+                }
             }
 
             // V1: Was geschieht mit schon gebuchten Stunden? Unverändert = bleibt, wie es ist;
@@ -728,7 +745,8 @@ namespace Stundenplan_V2.Vertretung
 
         /// <summary>
         /// R3-D: Auswahl „neuer Raum“ einer Zeile – „(wie bisher)“ und die in dieser Stunde freien Räume (ohne
-        /// gesperrte; der Raum laut Plan fehlt, er ist „wie bisher“).
+        /// gesperrte; der Raum laut Plan fehlt, er ist „wie bisher“). R3-D-Nachtrag: danach „– weitere Räume –“
+        /// (Fachräume anderer Fächer, Unbekannte) und „– belegte Räume –“ (bewusst wählbar, Rückfrage beim Buchen).
         /// </summary>
         private List<RaumOption> RaumOptionenFuer(StundenInstanz inst, Tagesplan tp, List<Abwesenheit> sperren)
         {
@@ -746,8 +764,17 @@ namespace Stundenplan_V2.Vertretung
                             string.Equals(c.OriginalLehrer, inst.Lehrer, StringComparison.OrdinalIgnoreCase));
             if (zelle == null) return l;
             var gesperrt = PlanRaeume.Gesperrt(sperren, inst.Datum, inst.Stunde);
-            foreach (var v in _plan.Raeume.FreieRaeume(_plan, tp, zelle, gesperrt, PlanRaeume.Zerlege(inst.Raum)))
+            var alle = _plan.Raeume.Vorschlaege(_plan, tp, zelle, gesperrt, PlanRaeume.Zerlege(inst.Raum));
+            foreach (var v in alle.Where(x => x.IstFrei && !x.Weitere))
                 l.Add(new RaumOption { Name = v.Name, Anzeige = v.Anzeige });
+            var weitere = alle.Where(x => x.IstFrei && x.Weitere).ToList();
+            if (weitere.Count > 0) l.Add(RaumOption.Trenner("– weitere Räume –"));
+            foreach (var v in weitere)
+                l.Add(new RaumOption { Name = v.Name, Anzeige = v.Anzeige });
+            var belegte = alle.Where(x => !x.IstFrei).ToList();
+            if (belegte.Count > 0) l.Add(RaumOption.Trenner("– belegte Räume –"));
+            foreach (var v in belegte)
+                l.Add(new RaumOption { Name = v.Name, Anzeige = v.Anzeige, Belegt = v.Belegt });
             return l;
         }
 
@@ -858,8 +885,20 @@ namespace Stundenplan_V2.Vertretung
         /// <summary>R3-D: Eintrag der Auswahl „neuer Raum“ (Name leer = wie bisher).</summary>
         public class RaumOption
         {
+            /// <summary>Kennung der Trennzeilen (kein Raumname beginnt so).</summary>
+            public const string TrennerPraefix = "\u0001";
+
             public string Name { get; set; } = "";
             public string Anzeige { get; set; } = "";
+            /// <summary>R3-D-Nachtrag: null = frei; sonst „belegt: 07B E L21“ bzw. „gesperrt“.</summary>
+            public string? Belegt { get; set; }
+            /// <summary>R3-D-Nachtrag: Trennzeile „– weitere Räume –“ bzw. „– belegte Räume –“ (nicht wählbar).</summary>
+            public bool IstTrenner { get; set; }
+            /// <summary>Ein freier Raum (für Vorbelegungen) – nicht „wie bisher“, kein Trenner, nicht belegt.</summary>
+            public bool IstFreierRaum => !IstTrenner && Belegt == null && Name.Length > 0;
+
+            public static RaumOption Trenner(string text)
+                => new() { Name = TrennerPraefix + text, Anzeige = text, IstTrenner = true };
         }
 
         public class InstanzZeile : INotifyPropertyChanged
@@ -959,11 +998,20 @@ namespace Stundenplan_V2.Vertretung
                 get => _neuerRaum;
                 set
                 {
+                    // R3-D-Nachtrag: Trennzeilen sind nicht wählbar (Absicherung, falls die Tastatur sie trifft).
+                    if (value != null && value.StartsWith(RaumOption.TrennerPraefix, StringComparison.Ordinal))
+                    { OnChanged(nameof(NeuerRaum)); return; }
                     if (string.Equals(_neuerRaum, value, StringComparison.Ordinal)) return;
                     _neuerRaum = value;
                     OnChanged(nameof(NeuerRaum));
                 }
             }
+
+            /// <summary>R3-D-Nachtrag: Option des gewählten neuen Raums (null bei „wie bisher“ bzw. nicht wählbar).</summary>
+            public RaumOption? GewaehlteRaumOption
+                => !RaumWaehlbar || string.IsNullOrWhiteSpace(_neuerRaum) ? null
+                   : RaumOptionen.FirstOrDefault(x => !x.IstTrenner &&
+                         string.Equals(x.Name, _neuerRaum!.Trim(), StringComparison.OrdinalIgnoreCase));
 
             /// <summary>Raum wählbar bei jeder Art außer Entfall und Verlegung.</summary>
             public bool RaumWaehlbar => _art != Vertretungsart.Entfall && _art != Vertretungsart.Verlegung;
@@ -984,8 +1032,9 @@ namespace Stundenplan_V2.Vertretung
                     OnChanged(nameof(BrauchtVertreter));
                     OnChanged(nameof(RaumWaehlbar));
                     // R3-D: Raumvertretung ohne Raum → ersten freien Raum vorschlagen.
-                    if (_art == Vertretungsart.Raumvertretung && string.IsNullOrWhiteSpace(_neuerRaum) && RaumOptionen.Count > 1)
-                        NeuerRaum = RaumOptionen[1].Name;
+                    if (_art == Vertretungsart.Raumvertretung && string.IsNullOrWhiteSpace(_neuerRaum)
+                        && RaumOptionen.FirstOrDefault(o => o.IstFreierRaum) is RaumOption frei)
+                        NeuerRaum = frei.Name;
                 }
             }
 

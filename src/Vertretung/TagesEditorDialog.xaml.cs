@@ -543,7 +543,7 @@ namespace Stundenplan_V2.Vertretung
             var tbKopf = new TextBlock { Text = kopf, FontWeight = FontWeights.Bold, FontSize = 11, TextWrapping = TextWrapping.Wrap };
             if (z.Status == ZellStatus.Entfall) tbKopf.TextDecorations = TextDecorations.Strikethrough;
             // R3-D: Raum rechts oben (geändert orange „→“, gesperrt rot „⚠“).
-            var tbRaum = RaumAnzeige(z, datum);
+            var tbRaum = RaumAnzeige(z, datum, out string? raumTip);
             if (tbRaum != null)
             {
                 var kopfZeile = new DockPanel();
@@ -566,6 +566,12 @@ namespace Stundenplan_V2.Vertretung
                 Child = sp,
                 Tag = z
             };
+            // R3-D-Nachtrag: Tooltip der ganzen Stunde mit dem Raum (am kleinen Raum-Text allein erschien er nicht).
+            if (raumTip != null)
+            {
+                border.ToolTip = raumTip;
+                ToolTipService.SetInitialShowDelay(border, 300);
+            }
 
             // Verlegung per Drag&Drop: im KLASSENPLAN eine verschiebbare Stunde
             // ziehbar machen (über die ganze sichtbare Spanne, auch 2 Wochen).

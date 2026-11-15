@@ -23,13 +23,19 @@ namespace Stundenplan_V2.Vertretung
     //  Die Plandatei wird nur gelesen.
     // =====================================================================
 
-    /// <summary>Ein freier Raum als Vorschlag (Wocheneditor-Menü, Spalte „neuer Raum“).</summary>
+    /// <summary>Ein Raum als Vorschlag (Wocheneditor-Menü, Spalte „neuer Raum“).</summary>
     public class RaumVorschlag
     {
         public string Name { get; set; } = "";
         public string Anzeige { get; set; } = "";
         /// <summary>true = „weitere Räume“ (Fachräume anderer Fächer u. Ä.) – im Menü eine Ebene tiefer.</summary>
         public bool Weitere { get; set; }
+        /// <summary>
+        /// R3-D-Nachtrag: null = frei; sonst warum der Raum nicht frei ist, z. B. „belegt: 07B E L21“ oder
+        /// „gesperrt“. Belegte Räume sind nur bewusst wählbar (mit Rückfrage).
+        /// </summary>
+        public string? Belegt { get; set; }
+        public bool IstFrei => Belegt == null;
     }
 
     public class PlanRaeume
@@ -75,6 +81,12 @@ namespace Stundenplan_V2.Vertretung
                 var v = RaumVerteilung.BaueVerzeichnis(e);
                 r.Verzeichnis = v;
                 string spalte = (plan.GewaehltePlanSpalte ?? "").Trim();
+                // R3-D-Nachtrag: Raumkombinationen im Blatt „Räume“ (z. B. „RSh2~RSb1“ aus Knopf 3 bis 14.11.2026)
+                // sind kein Raum – ihre Einzelräume zählen, auch wenn sie selbst nicht im Verzeichnis stehen.
+                foreach (var kombi in v.Raeume.Where(x => IstKombination(x.Name)))
+                    foreach (var einzel in Zerlege(kombi.Name))
+                        if (!v.Enthaelt(einzel) && !r._sonstigeRaeume.Contains(einzel, Cmp))
+                            r._sonstigeRaeume.Add(einzel);
                 foreach (var z in e.Raumplan.Where(x => Cmp.Equals(x.Plan.Trim(), spalte)))
                 {
                     string raum = (z.Raum ?? "").Trim();
@@ -166,6 +178,12 @@ namespace Stundenplan_V2.Vertretung
             return l;
         }
 
+        /// <summary>
+        /// R3-D-Nachtrag: true für eine Raumkombination wie „RSh2~RSb1“ oder „R08f, RKL“ (mehrere Räume, die
+        /// gleichzeitig gebraucht werden) – sie wird nie als eigener Raum angeboten.
+        /// </summary>
+        public static bool IstKombination(string? raum) => Zerlege(raum).Count > 1;
+
         /// <summary>Gleiche Räume (Reihenfolge, Trennzeichen und Groß-/Kleinschreibung egal; leer = leer).</summary>
         public static bool GleicherRaum(string? a, string? b)
             => new HashSet<string>(Zerlege(a), Cmp).SetEquals(Zerlege(b));
@@ -199,9 +217,10 @@ namespace Stundenplan_V2.Vertretung
                    + (info.Bereich.Length > 0 ? ", " + info.Bereich : "");
         }
 
-        /// <summary>Alle bekannten Raumnamen (Verzeichnis + nur im Raumplan/in der UV genannte).</summary>
+        /// <summary>Alle bekannten Einzelräume (Verzeichnis ohne Kombinationen + nur im Raumplan/in der UV genannte).</summary>
         public IEnumerable<string> AlleRaeume
-            => (Verzeichnis?.Raeume.Select(r => r.Name) ?? Enumerable.Empty<string>()).Concat(_sonstigeRaeume);
+            => (Verzeichnis?.Raeume.Select(r => r.Name).Where(n => !IstKombination(n)) ?? Enumerable.Empty<string>())
+               .Concat(_sonstigeRaeume);
 
         // =====================================================
         //  Freie Räume
@@ -212,15 +231,56 @@ namespace Stundenplan_V2.Vertretung
         /// weg verlegter Stunden. Teile derselben UNr im selben Raum (Team-Teaching) belegen ihn gemeinsam.
         /// </summary>
         public static HashSet<string> BelegteRaeume(Tagesplan tp, TagesZelle z)
+            => new HashSet<string>(BelegtVon(tp, z).Keys, Cmp);
+
+        /// <summary>
+        /// R3-D-Nachtrag: belegte Räume dieser Stunde (wie <see cref="BelegteRaeume"/>) mit den Stunden darin,
+        /// z. B. „R07b“ → „07B E L21“ (mehrere mit „; “).
+        /// </summary>
+        public static Dictionary<string, string> BelegtVon(Tagesplan tp, TagesZelle z)
         {
-            var b = new HashSet<string>(Cmp);
+            var b = new Dictionary<string, string>(Cmp);
             foreach (var c in tp.InStunde(z.Stunde))
             {
                 if (ReferenceEquals(c, z) || c.IstFrei) continue;
                 if (c.UNr == z.UNr && !string.IsNullOrWhiteSpace(z.Raum) && GleicherRaum(c.Raum, z.Raum)) continue;
-                foreach (var r in Zerlege(c.Raum)) b.Add(r);
+                string wer = Kurz(c);
+                foreach (var r in Zerlege(c.Raum))
+                    b[r] = b.TryGetValue(r, out var alt) ? (alt.Split("; ").Contains(wer) ? alt : alt + "; " + wer) : wer;
             }
             return b;
+        }
+
+        /// <summary>
+        /// R3-D-Nachtrag: Räume der Zelle, die in dieser Stunde durch eine Buchung doppelt belegt sind – mindestens
+        /// eine der beiden Stunden hat ihren Raum durch eine Buchung geändert (z. B. bewusst in einen belegten Raum
+        /// gelegt). Doppelbelegungen schon im Raumplan (z. B. zwei Gruppen in einer Halle) zählen nicht.
+        /// Ergebnis: Raum → die anderen Stunden („07C M L52“, mehrere mit „; “). Team-Teaching zählt nicht.
+        /// </summary>
+        public static Dictionary<string, string> DoppeltDurchBuchung(Tagesplan tp, TagesZelle z)
+        {
+            var d = new Dictionary<string, string>(Cmp);
+            if (z.IstFrei || string.IsNullOrWhiteSpace(z.Raum)) return d;
+            var meine = new HashSet<string>(Zerlege(z.Raum), Cmp);
+            foreach (var c in tp.InStunde(z.Stunde))
+            {
+                if (ReferenceEquals(c, z) || c.IstFrei) continue;
+                if (!z.RaumGeaendert && !c.RaumGeaendert) continue;
+                if (c.UNr == z.UNr && GleicherRaum(c.Raum, z.Raum)) continue;   // Team-Teaching
+                string wer = Kurz(c);
+                foreach (var r in Zerlege(c.Raum))
+                    if (meine.Contains(r))
+                        d[r] = d.TryGetValue(r, out var alt) ? (alt.Split("; ").Contains(wer) ? alt : alt + "; " + wer) : wer;
+            }
+            return d;
+        }
+
+        /// <summary>Kurztext einer Stunde für „belegt: …“, z. B. „07B E L21“.</summary>
+        private static string Kurz(TagesZelle c)
+        {
+            string le = !string.IsNullOrWhiteSpace(c.Lehrer) ? c.Lehrer : c.OriginalLehrer;
+            return string.Join(" ", new[] { string.Join(",", c.Klassen), c.Fach, le }
+                                     .Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()));
         }
 
         /// <summary>
@@ -232,9 +292,17 @@ namespace Stundenplan_V2.Vertretung
         /// </summary>
         public List<RaumVorschlag> FreieRaeume(PlanDaten plan, Tagesplan tp, TagesZelle z,
                                                ISet<string> gesperrt, IEnumerable<string> ohne)
+            => Vorschlaege(plan, tp, z, gesperrt, ohne).Where(x => x.IstFrei).ToList();
+
+        /// <summary>
+        /// R3-D-Nachtrag: alle Räume in Vorschlagsreihenfolge (wie <see cref="FreieRaeume"/>), belegte und
+        /// gesperrte mit <see cref="RaumVorschlag.Belegt"/> („belegt: 07B E L21“ bzw. „gesperrt“).
+        /// Raumkombinationen („RSh2~RSb1“) und <paramref name="ohne"/> fehlen.
+        /// </summary>
+        public List<RaumVorschlag> Vorschlaege(PlanDaten plan, Tagesplan tp, TagesZelle z,
+                                               ISet<string> gesperrt, IEnumerable<string> ohne)
         {
-            var belegt = BelegteRaeume(tp, z);
-            belegt.UnionWith(gesperrt);
+            var belegt = BelegtVon(tp, z);
             var aus = new HashSet<string>(ohne.Select(x => x.Trim()), Cmp);
 
             var teil = TeilFuer(plan, z.UNr, z.OriginalLehrer, z.Fach);
@@ -252,13 +320,17 @@ namespace Stundenplan_V2.Vertretung
             void Dazu(string raum, string zusatz, bool weitere)
             {
                 string r = (raum ?? "").Trim();
-                if (r.Length == 0 || aus.Contains(r) || belegt.Contains(r) || !gesehen.Add(r)) return;
+                if (r.Length == 0 || IstKombination(r) || aus.Contains(r) || !gesehen.Add(r)) return;
+                string? grund = gesperrt.Contains(r) ? "gesperrt"
+                              : belegt.TryGetValue(r, out var wer) ? "belegt: " + wer
+                              : null;
                 string b = Beschreibung(r);
                 liste.Add(new RaumVorschlag
                 {
                     Name = r,
-                    Anzeige = r + (b.Length > 0 ? "  (" + b + ")" : "") + zusatz,
-                    Weitere = weitere
+                    Anzeige = grund != null ? r + "  (" + grund + ")" : r + (b.Length > 0 ? "  (" + b + ")" : "") + zusatz,
+                    Weitere = weitere,
+                    Belegt = grund
                 });
             }
 

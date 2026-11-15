@@ -21,6 +21,8 @@ namespace Stundenplan_V2.Vertretung
     /// je Tag und veröffentlicht die Schultage des Zeitraums Tag für Tag (jeder Tag wird in der App komplett ersetzt).
     /// Im Desktop bleibt nur das Protokoll untis_import.json (ohne Inhalte); die gelesenen Daten liegen nur im
     /// Arbeitsspeicher und werden beim Schließen freigegeben.
+    /// U-2: Das Fenster ist nicht mehr modal (der Wocheneditor bleibt bedienbar) und kann den Ordner der Datei
+    /// beobachten – dann werden nur die geänderten Tage gesendet (UntisDialog_Beobachten.cs).
     /// </summary>
     public partial class UntisDialog : Window
     {
@@ -28,7 +30,7 @@ namespace Stundenplan_V2.Vertretung
         private readonly string _schuljahr;
         private readonly SchuljahrKalender _kal;
         private readonly Func<(PlanDaten? Plan, string? Fehler)> _planHolen;
-        private readonly ISet<DateTime> _buchungsTage;
+        private readonly Func<ISet<DateTime>> _buchungsTageHolen;
         private readonly DateTime _basis;
         private readonly Action<string>? _log;
 
@@ -49,7 +51,8 @@ namespace Stundenplan_V2.Vertretung
             "4. Zeitraum prüfen (Vorgabe: erster bis letzter Tag der Datei) und „Veröffentlichen“. Jeder Schultag im Zeitraum " +
             "wird in der App komplett ersetzt – auch Tage ohne Vertretung (dann leer), damit in Untis gelöschte Vertretungen " +
             "verschwinden. Ferien und Feiertage laut Kalender (Button 22) werden übersprungen.\n" +
-            "5. Nach jeder Änderungsrunde in Untis neu exportieren und veröffentlichen.\n\n" +
+            "5. Nach jeder Änderungsrunde in Untis neu exportieren und veröffentlichen – oder „Ordner beobachten…“ " +
+            "(unten) einschalten, dann geschieht das von selbst (siehe „Ordner beobachten“ am Ende).\n\n" +
             "Voraussetzung: Unter „Plan“ im Wocheneditor ist der aus Untis importierte Plan gewählt (Knopf 3, GPU001.TXT), und " +
             "genau dieser Grundplan ist veröffentlicht („Grundplan veröffentlichen…“). Sonst passen U-Nr und Lehrkräfte nicht " +
             "und viele Zeilen sind „ohne Gegenstück“.\n\n" +
@@ -68,7 +71,7 @@ namespace Stundenplan_V2.Vertretung
             "Testwerte „GEHEIM-ABSENZGRUND“ und „GEHEIM-TEXT“ – sie dürfen nirgends erscheinen.";
 
         public UntisDialog(string planOrdner, string schuljahr, SchuljahrKalender kalender,
-                           Func<(PlanDaten? Plan, string? Fehler)> planHolen, ISet<DateTime> buchungsTage,
+                           Func<(PlanDaten? Plan, string? Fehler)> planHolen, Func<ISet<DateTime>> buchungsTage,
                            DateTime basis, Action<string>? log = null)
         {
             InitializeComponent();
@@ -76,10 +79,11 @@ namespace Stundenplan_V2.Vertretung
             _schuljahr = schuljahr ?? "";
             _kal = kalender;
             _planHolen = planHolen;
-            _buchungsTage = buchungsTage;
+            _buchungsTageHolen = buchungsTage;
             _basis = basis.Date;
             _log = log;
-            TxtHilfe.Text = Hilfe;
+            TxtHilfe.Text = Hilfe + HilfeBeobachten;
+            LbBeobachten.ItemsSource = _beobProtokoll;
             TxtPlan.Text = "Plan: wird beim Prüfen gelesen (Auswahl „Plan“ im Wocheneditor)";
             ZeigeQuelle();
         }
@@ -90,7 +94,7 @@ namespace Stundenplan_V2.Vertretung
 
         private async void BtnDatei_Click(object sender, RoutedEventArgs e)
         {
-            if (_laeuft) return;
+            if (_laeuft || Beobachtet) return;
             var prot = UntisImportProtokoll.Laden(_planOrdner);
             var dlg = new Microsoft.Win32.OpenFileDialog
             {
@@ -147,7 +151,7 @@ namespace Stundenplan_V2.Vertretung
             try
             {
                 var kal = _kal;
-                var tage = _buchungsTage;
+                var tage = _buchungsTageHolen();
                 PlanDaten p = plan;
                 (datei, erg) = await Task.Run(() =>
                 {
@@ -165,10 +169,30 @@ namespace Stundenplan_V2.Vertretung
                 _laeuft = false;
             }
 
+            if (datei == null || erg == null)
+            {
+                _datei = null;
+                _ergebnis = null;
+                SetzeKnoepfe(true);
+                TxtStatus.Text = "Prüfen fehlgeschlagen.";
+                return;
+            }
+            ZeigeErgebnis(datei, erg, pfad);
+            int f = erg.Anzahl(UntisProblemArt.Fehler);
+            int w = erg.Anzahl(UntisProblemArt.Warnung);
+            TxtStatus.Text = f > 0 ? $"Geprüft: {f} Zeile(n) mit Fehlern werden nicht gesendet – siehe „Probleme“."
+                           : w > 0 ? $"Geprüft ohne Fehler, {w} Warnung(en)."
+                           : "Geprüft ohne Fehler und Warnungen.";
+            _log?.Invoke($"Untis: {Path.GetFileName(pfad)} geprüft ({(datei.IstDemo ? "Demo-Datei" : "echte Datei")}, " +
+                         $"{datei.Zeilen.Count} Zeilen, {erg.Tage.Values.Sum(l => l.Count)} Einträge, {f} Fehler, {w} Warnungen).");
+        }
+
+        /// <summary>Zeigt ein Prüfergebnis an (Übersicht, Probleme, Zeitraum, Vorschau) – auch für U-2.</summary>
+        private void ZeigeErgebnis(UntisDatei datei, UntisErgebnis erg, string pfad, bool waehleTag = true)
+        {
             _datei = datei;
             _ergebnis = erg;
-            SetzeKnoepfe(true);
-            if (_datei == null || _ergebnis == null) { TxtStatus.Text = "Prüfen fehlgeschlagen."; return; }
+            SetzeKnoepfe(!_laeuft);
 
             // Echte Datei mit Absenzgründen in einem Cloud-Ordner? (Entscheidung 123)
             bool cloud = !_datei.IstDemo && _datei.MitAbsenzgrund > 0 && IstCloudOrdner(pfad);
@@ -196,15 +220,10 @@ namespace Stundenplan_V2.Vertretung
             DpVon.SelectedDate = _ergebnis.ErsterTag;
             DpBis.SelectedDate = _ergebnis.LetzterTag;
             _zeitraumSetzen = false;
-            ZeitraumAnzeigen(waehleTag: true);
+            ZeitraumAnzeigen(waehleTag);
 
-            TxtStatus.Text = f > 0 ? $"Geprüft: {f} Zeile(n) mit Fehlern werden nicht gesendet – siehe „Probleme“."
-                           : w > 0 ? $"Geprüft ohne Fehler, {w} Warnung(en)."
-                           : "Geprüft ohne Fehler und Warnungen.";
-            BtnBericht.IsEnabled = true;
+            BtnBericht.IsEnabled = !_laeuft;
             ZeigeQuelle();
-            _log?.Invoke($"Untis: {Path.GetFileName(pfad)} geprüft ({(_datei.IstDemo ? "Demo-Datei" : "echte Datei")}, " +
-                         $"{_datei.Zeilen.Count} Zeilen, {_ergebnis.Tage.Values.Sum(l => l.Count)} Einträge, {f} Fehler, {w} Warnungen).");
         }
 
         private static bool IstCloudOrdner(string pfad)
@@ -323,6 +342,7 @@ namespace Stundenplan_V2.Vertretung
         private async void BtnVeroeffentlichen_Click(object sender, RoutedEventArgs e)
         {
             if (_laeuft || _ergebnis == null || _datei == null) return;
+            using var pause = PauseBeobachten();   // U-2: kein Beobachten-Durchgang während Rückfrage und Senden
             var z = Zeitraum();
             if (z == null)
             {
@@ -344,41 +364,13 @@ namespace Stundenplan_V2.Vertretung
                 return;
             }
 
-            var einst = OnlineSync.LadeEinstellungen(_planOrdner);
-            if (string.IsNullOrWhiteSpace(einst.BaseUrl))
-            {
-                var neu = OnlineSync.FrageEinstellungen(this, einst, _planOrdner);
-                if (neu == null) return;
-                OnlineSync.SpeichereEinstellungen(_planOrdner, neu);
-                einst = neu;
-            }
-
-            // Eine Quelle je Tag (Entscheidung 120).
-            if (!einst.QuelleIstUntis)
-            {
-                var r = MessageBox.Show(this,
-                    "In den Online-Einstellungen ist „Vertretungsmodul“ als Quelle der Vertretungen eingestellt.\n\n" +
-                    "Ja = Quelle auf „Untis“ umstellen und veröffentlichen (empfohlen: dann fragt „Online veröffentlichen“ im " +
-                    "Wocheneditor nach, bevor ein Tag aus dem Vertretungsmodul die Untis-Vertretungen ersetzt).\n" +
-                    "Nein = nur veröffentlichen, Quelle bleibt „Vertretungsmodul“.",
-                    "Quelle der Vertretungen", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
-                if (r == MessageBoxResult.Cancel) return;
-                if (r == MessageBoxResult.Yes)
-                {
-                    einst.Quelle = OnlineEinstellungen.QuelleUntis;
-                    try { OnlineSync.SpeichereEinstellungen(_planOrdner, einst); }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show(this, "Die Online-Einstellungen konnten nicht gespeichert werden:\n\n" + ex.Message,
-                            "Quelle der Vertretungen", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    }
-                    ZeigeQuelle();
-                }
-            }
+            var einst = HoleEinstellungenMitQuelle("veröffentlichen");
+            if (einst == null) return;
 
             int mit = tage.Count(t => _ergebnis.EintraegeAm(t).Count > 0);
             int eintraege = tage.Sum(t => _ergebnis.EintraegeAm(t).Count);
-            var buchungen = tage.Where(t => _buchungsTage.Contains(t)).ToList();
+            var buchungsTage = _buchungsTageHolen();
+            var buchungen = tage.Where(t => buchungsTage.Contains(t)).ToList();
             int fehler = _ergebnis.Anzahl(UntisProblemArt.Fehler);
             string frage =
                 $"Vertretungen aus Untis veröffentlichen?\n\n" +
@@ -403,94 +395,166 @@ namespace Stundenplan_V2.Vertretung
             await VeroeffentlicheAsync(einst, tage, z.Value.Von, z.Value.Bis);
         }
 
+        /// <summary>
+        /// Serveradresse und Quelle prüfen (Entscheidung 120): fehlt die Adresse, wird nachgefragt; steht die Quelle auf
+        /// „Vertretungsmodul“, bietet das Fenster an, sie auf „Untis“ umzustellen. null = abgebrochen.
+        /// </summary>
+        private OnlineEinstellungen? HoleEinstellungenMitQuelle(string wozu)
+        {
+            var einst = OnlineSync.LadeEinstellungen(_planOrdner);
+            if (string.IsNullOrWhiteSpace(einst.BaseUrl))
+            {
+                var neu = OnlineSync.FrageEinstellungen(this, einst, _planOrdner);
+                if (neu == null) return null;
+                OnlineSync.SpeichereEinstellungen(_planOrdner, neu);
+                einst = neu;
+            }
+
+            // Eine Quelle je Tag (Entscheidung 120).
+            if (!einst.QuelleIstUntis)
+            {
+                var r = MessageBox.Show(this,
+                    "In den Online-Einstellungen ist „Vertretungsmodul“ als Quelle der Vertretungen eingestellt.\n\n" +
+                    $"Ja = Quelle auf „Untis“ umstellen und {wozu} (empfohlen: dann fragt „Online veröffentlichen“ im " +
+                    "Wocheneditor nach, bevor ein Tag aus dem Vertretungsmodul die Untis-Vertretungen ersetzt).\n" +
+                    $"Nein = nur {wozu}, Quelle bleibt „Vertretungsmodul“.",
+                    "Quelle der Vertretungen", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+                if (r == MessageBoxResult.Cancel) return null;
+                if (r == MessageBoxResult.Yes)
+                {
+                    einst.Quelle = OnlineEinstellungen.QuelleUntis;
+                    try { OnlineSync.SpeichereEinstellungen(_planOrdner, einst); }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(this, "Die Online-Einstellungen konnten nicht gespeichert werden:\n\n" + ex.Message,
+                            "Quelle der Vertretungen", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    }
+                    ZeigeQuelle();
+                }
+            }
+            return einst;
+        }
+
         private async Task VeroeffentlicheAsync(OnlineEinstellungen einst, List<DateTime> tage, DateTime von, DateTime bis)
         {
             if (_ergebnis == null || _datei == null) return;
-            var erg = _ergebnis;
+            var r = await SendeTageAsync(einst, _datei, _ergebnis, tage, von, bis, automatisch: false, unveraendert: 0);
+
+            if (r.Fehler != null)
+                MessageBox.Show(this, $"Veröffentlichen bei {r.FehlerTag:dd.MM.yyyy} fehlgeschlagen:\n\n{r.Fehler}\n\n{r.Zahlen}",
+                    "Veröffentlichen", MessageBoxButton.OK, MessageBoxImage.Warning);
+            else if (r.Abgebrochen)
+                MessageBox.Show(this, "Abgebrochen.\n\n" + r.Zahlen + "\nDie übrigen Tage sind in der App unverändert.",
+                    "Veröffentlichen", MessageBoxButton.OK, MessageBoxImage.Information);
+            else
+                MessageBox.Show(this, r.Zahlen, "Veröffentlichen", MessageBoxButton.OK, MessageBoxImage.Information);
+            if (r.ProtokollFehler != null)
+                TxtStatus.Text = "Protokoll untis_import.json konnte nicht gespeichert werden: " + r.ProtokollFehler;
+        }
+
+        /// <summary>Ergebnis eines Sendelaufs (manuell oder beim Beobachten).</summary>
+        private sealed class SendeErgebnis
+        {
+            public int Geplant { get; init; }
+            public int Gesendet { get; set; }
+            public int Eintraege { get; set; }
+            public bool Abgebrochen { get; set; }
+            public string? Fehler { get; set; }
+            public DateTime? FehlerTag { get; set; }
+            public string? ProtokollFehler { get; set; }
+            /// <summary>Gesendete Tage (für die Liste beim Beobachten).</summary>
+            public List<DateTime> Tage { get; } = new();
+            public string Zahlen => $"{Gesendet} von {Geplant} Tag(en) veröffentlicht ({Eintraege} Einträge).";
+        }
+
+        /// <summary>
+        /// Sendet die Tage nacheinander über POST /api/plan/push (jeder Tag wird in der App komplett ersetzt), mit
+        /// Fortschritt und „Abbrechen“; bricht beim ersten Fehler ab. Schreibt je gesendetem Tag die Prüfsumme und am Ende
+        /// den Lauf ins Protokoll untis_import.json. Gemeinsam für „Veröffentlichen“ und „Ordner beobachten“ (U-2).
+        /// </summary>
+        private async Task<SendeErgebnis> SendeTageAsync(OnlineEinstellungen einst, UntisDatei datei, UntisErgebnis erg,
+            List<DateTime> tage, DateTime von, DateTime bis, bool automatisch, int unveraendert)
+        {
             var sync = new OnlineSync { BaseUrl = einst.BaseUrl, ApiKey = einst.ApiKey };
             var prot = UntisImportProtokoll.Laden(_planOrdner);
             _abbruch = new CancellationTokenSource();
             var token = _abbruch.Token;
+            var r = new SendeErgebnis { Geplant = tage.Count };
 
             _laeuft = true;
             SetzeKnoepfe(false);
             PbFortschritt.Minimum = 0;
-            PbFortschritt.Maximum = tage.Count;
+            PbFortschritt.Maximum = Math.Max(1, tage.Count);
             PbFortschritt.Value = 0;
             PbFortschritt.Visibility = Visibility.Visible;
             BtnAbbrechen.Visibility = Visibility.Visible;
             BtnAbbrechen.IsEnabled = true;
 
-            int gesendet = 0, eintraege = 0;
-            bool abgebrochen = false;
-            string? fehler = null;
-            DateTime? fehlerTag = null;
-            foreach (var tag in tage)
+            try
             {
-                if (token.IsCancellationRequested) { abgebrochen = true; break; }
-                TxtFortschritt.Text = $"Tag {gesendet + 1} von {tage.Count}: {UntisText.Tag(tag)} {tag:dd.MM.yyyy} …";
-                var dto = erg.PushFuer(_schuljahr, tag);
-                try
+                foreach (var tag in tage)
                 {
-                    await sync.PushAsync(dto, token);
-                    prot.TagGesendet(dto);
-                    gesendet++;
-                    eintraege += dto.Eintraege.Count;
-                    PbFortschritt.Value = gesendet;
-                }
-                catch (OperationCanceledException) when (token.IsCancellationRequested)
-                {
-                    abgebrochen = true;
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    fehler = ex is TaskCanceledException ? "Zeitüberschreitung – der Server hat nicht geantwortet." : OnlineSync.FehlerText(ex, _planOrdner);
-                    fehlerTag = tag;
-                    break;
+                    if (token.IsCancellationRequested) { r.Abgebrochen = true; break; }
+                    TxtFortschritt.Text = (automatisch ? "Beobachten: " : "") +
+                                          $"Tag {r.Gesendet + 1} von {tage.Count}: {UntisText.Tag(tag)} {tag:dd.MM.yyyy} …";
+                    var dto = erg.PushFuer(_schuljahr, tag);
+                    try
+                    {
+                        await sync.PushAsync(dto, token);
+                        prot.TagGesendet(dto);
+                        r.Gesendet++;
+                        r.Eintraege += dto.Eintraege.Count;
+                        r.Tage.Add(tag);
+                        PbFortschritt.Value = r.Gesendet;
+                    }
+                    catch (OperationCanceledException) when (token.IsCancellationRequested)
+                    {
+                        r.Abgebrochen = true;
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        r.Fehler = ex is TaskCanceledException ? "Zeitüberschreitung – der Server hat nicht geantwortet." : OnlineSync.FehlerText(ex, _planOrdner);
+                        r.FehlerTag = tag;
+                        break;
+                    }
                 }
             }
-
-            prot.Laeufe.Add(new UntisImportLauf
+            finally
             {
-                Zeit = DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
-                Datei = _datei.Pfad,
-                Demo = _datei.IstDemo,
-                Plan = erg.PlanName,
-                Von = UntisImportProtokoll.TagSchluessel(von),
-                Bis = UntisImportProtokoll.TagSchluessel(bis),
-                TageGeplant = tage.Count,
-                TageGesendet = gesendet,
-                Eintraege = eintraege,
-                Abgebrochen = abgebrochen,
-                Fehler = fehler == null ? null : $"bei {fehlerTag:dd.MM.yyyy}"
-            });
-            string? protFehler = null;
-            try { prot.Speichern(_planOrdner); }
-            catch (Exception ex) { protFehler = ex.Message; }
+                prot.Laeufe.Add(new UntisImportLauf
+                {
+                    Zeit = DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
+                    Datei = datei.Pfad,
+                    Demo = datei.IstDemo,
+                    Plan = erg.PlanName,
+                    Von = UntisImportProtokoll.TagSchluessel(von),
+                    Bis = UntisImportProtokoll.TagSchluessel(bis),
+                    TageGeplant = tage.Count,
+                    TageGesendet = r.Gesendet,
+                    Eintraege = r.Eintraege,
+                    Abgebrochen = r.Abgebrochen,
+                    Fehler = r.Fehler == null ? null : $"bei {r.FehlerTag:dd.MM.yyyy}",
+                    Automatisch = automatisch,
+                    TageUnveraendert = unveraendert
+                });
+                try { prot.Speichern(_planOrdner); }
+                catch (Exception ex) { r.ProtokollFehler = ex.Message; }
 
-            _laeuft = false;
-            _abbruch?.Dispose();
-            _abbruch = null;
-            PbFortschritt.Visibility = Visibility.Collapsed;
-            BtnAbbrechen.Visibility = Visibility.Collapsed;
-            SetzeKnoepfe(true);
+                _laeuft = false;
+                _abbruch?.Dispose();
+                _abbruch = null;
+                PbFortschritt.Visibility = Visibility.Collapsed;
+                BtnAbbrechen.Visibility = Visibility.Collapsed;
+                SetzeKnoepfe(true);
+            }
 
-            string ergebnis = $"{gesendet} von {tage.Count} Tag(en) veröffentlicht ({eintraege} Einträge).";
-            TxtFortschritt.Text = abgebrochen ? "Abgebrochen – " + ergebnis : fehler != null ? "Fehler – " + ergebnis : ergebnis;
-            _log?.Invoke($"Online: Untis-Vertretungen {von:dd.MM.yyyy}–{bis:dd.MM.yyyy}: {ergebnis}" +
-                         (abgebrochen ? " (abgebrochen)" : fehler != null ? $" (Fehler bei {fehlerTag:dd.MM.yyyy})" : ""));
-
-            if (fehler != null)
-                MessageBox.Show(this, $"Veröffentlichen bei {fehlerTag:dd.MM.yyyy} fehlgeschlagen:\n\n{fehler}\n\n{ergebnis}",
-                    "Veröffentlichen", MessageBoxButton.OK, MessageBoxImage.Warning);
-            else if (abgebrochen)
-                MessageBox.Show(this, "Abgebrochen.\n\n" + ergebnis + "\nDie übrigen Tage sind in der App unverändert.",
-                    "Veröffentlichen", MessageBoxButton.OK, MessageBoxImage.Information);
-            else
-                MessageBox.Show(this, ergebnis, "Veröffentlichen", MessageBoxButton.OK, MessageBoxImage.Information);
-            if (protFehler != null)
-                TxtStatus.Text = "Protokoll untis_import.json konnte nicht gespeichert werden: " + protFehler;
+            TxtFortschritt.Text = (automatisch ? "Beobachten: " : "") +
+                                  (r.Abgebrochen ? "Abgebrochen – " + r.Zahlen : r.Fehler != null ? "Fehler – " + r.Zahlen : r.Zahlen);
+            _log?.Invoke($"Online: Untis-Vertretungen {(automatisch ? "(Ordner beobachten) " : "")}{von:dd.MM.yyyy}–{bis:dd.MM.yyyy}: " +
+                         r.Zahlen + (automatisch ? $" {unveraendert} Tag(e) unverändert." : "") +
+                         (r.Abgebrochen ? " (abgebrochen)" : r.Fehler != null ? $" (Fehler bei {r.FehlerTag:dd.MM.yyyy})" : ""));
+            return r;
         }
 
         private void BtnAbbrechen_Click(object sender, RoutedEventArgs e)
@@ -507,6 +571,7 @@ namespace Stundenplan_V2.Vertretung
         private async void BtnDemo_Click(object sender, RoutedEventArgs e)
         {
             if (_laeuft) return;
+            using var pause = PauseBeobachten();   // U-2: die neue Datei erst nach den Rückfragen beobachten
             var opt = FrageDemoOptionen();
             if (opt == null) return;
 
@@ -566,9 +631,19 @@ namespace Stundenplan_V2.Vertretung
             string text =
                 $"Demo-Datei erzeugt:\n{erg.Pfad}\n\n{erg.Zeilen} Zeilen, Woche ab {opt.Montag:dd.MM.yyyy}, Plan „{plan.GewaehltePlanSpalte}“.\n\n" +
                 "Enthaltene Fälle (auch in UNTIS_DEMO.json):\n• " + string.Join("\n• ", erg.Faelle.Take(45)) +
-                (erg.Faelle.Count > 45 ? "\n• …" : "") +
-                "\n\nJetzt prüfen?";
-            if (MessageBox.Show(this, text, "Demo-Datei", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
+                (erg.Faelle.Count > 45 ? "\n• …" : "");
+            if (Beobachtet)
+            {
+                // U-2: Liegt die Demo-Datei im beobachteten Ordner, prüft und sendet das Beobachten sie gleich von selbst.
+                bool gleich = string.Equals(Path.GetFullPath(erg.Pfad), Path.GetFullPath(_beobPfad ?? ""), StringComparison.OrdinalIgnoreCase);
+                MessageBox.Show(this, text + "\n\n" + (gleich
+                        ? "Die Datei liegt im beobachteten Ordner – sie wird gleich von selbst geprüft, geänderte Tage werden gesendet."
+                        : "Beobachtet wird ein anderer Ordner. Zum Prüfen dieser Datei erst „Beobachten beenden“."),
+                    "Demo-Datei", MessageBoxButton.OK, MessageBoxImage.Information);
+                TxtStatus.Text = "Demo-Datei erzeugt.";
+                return;
+            }
+            if (MessageBox.Show(this, text + "\n\nJetzt prüfen?", "Demo-Datei", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
             {
                 TxtDatei.Text = erg.Pfad;
                 await PruefenAsync();
@@ -720,7 +795,9 @@ namespace Stundenplan_V2.Vertretung
 
         private void SetzeKnoepfe(bool an)
         {
-            BtnDatei.IsEnabled = an;
+            BtnDatei.IsEnabled = an && !Beobachtet;
+            BtnBeobachten.IsEnabled = an;
+            BtnJetztSenden.IsEnabled = an;
             BtnPruefen.IsEnabled = an;
             BtnDemo.IsEnabled = an;
             DpVon.IsEnabled = an;
@@ -741,11 +818,23 @@ namespace Stundenplan_V2.Vertretung
                     ? "Bitte warten oder „Abbrechen“ wählen – es wird gerade veröffentlicht."
                     : "Bitte warten, bis der Vorgang fertig ist …";
             }
+            else if (Beobachtet && !_ohneRueckfrageSchliessen)
+            {
+                using var pause = PauseBeobachten();
+                if (MessageBox.Show(this,
+                        "Der Ordner wird beobachtet. Mit dem Schließen des Fensters endet das Beobachten – neue Untis-Dateien " +
+                        "werden dann nicht mehr von selbst veröffentlicht.\n\nFenster schließen und Beobachten beenden?",
+                        "Ordner beobachten", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes)
+                    e.Cancel = true;
+            }
             base.OnClosing(e);
         }
 
         protected override void OnClosed(EventArgs e)
         {
+            // U-2: Beobachten endet mit dem Fenster.
+            if (Beobachtet) BeendeBeobachten("Fenster geschlossen");
+            _gehalten = null;
             // Gelesene Daten freigeben (nur Arbeitsspeicher).
             DgZahlen.ItemsSource = null;
             DgProbleme.ItemsSource = null;

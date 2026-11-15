@@ -2,20 +2,23 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Vertretungen aus Untis"
-        Width="1180" Height="780"
+        Width="1180" Height="820"
         MinWidth="900" MinHeight="580"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResizeWithGrip">
 
     <!-- U-1b: Untis-Übergangsschnittstelle. Liest die Untis-Exportdatei GPU014.TXT (Absenzgrund und Text werden nie
          gelesen), prüft sie gegen den Grundplan der gewählten Plan-Spalte, zeigt eine Vorschau je Tag und
-         veröffentlicht Tag für Tag über POST /api/plan/push. Konzept: claude/Untis_Vorschlag.md. -->
+         veröffentlicht Tag für Tag über POST /api/plan/push. Konzept: claude/Untis_Vorschlag.md.
+         U-2: „Ordner beobachten“ – solange das Fenster offen ist (auch minimiert), wird eine neu geschriebene
+         GPU014.TXT geprüft und nur die geänderten Tage werden gesendet (UntisDialog_Beobachten.cs). -->
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -117,6 +120,17 @@
                     </DataGrid>
                 </DockPanel>
             </TabItem>
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock x:Name="TxtBeobachtenKopf" Text="Beobachten"/>
+                </TabItem.Header>
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,4,0,6" Foreground="DimGray"
+                               Text="Was beim Beobachten geschehen ist (neueste Zeile oben; nur Zeitpunkte, Tage und Zahlen – keine Inhalte). Die Liste gilt nur, solange das Fenster offen ist; die gesendeten Tage stehen außerdem in untis_import.json."/>
+                    <ListBox x:Name="LbBeobachten" FontFamily="Consolas" FontSize="12"
+                             ScrollViewer.HorizontalScrollBarVisibility="Auto"/>
+                </DockPanel>
+            </TabItem>
             <TabItem Header="So geht’s">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <TextBlock x:Name="TxtHilfe" TextWrapping="Wrap" Margin="8" LineHeight="20"/>
@@ -142,7 +156,19 @@
             </WrapPanel>
         </Border>
 
-        <DockPanel Grid.Row="5" Margin="0,10,0,0" LastChildFill="True">
+        <Border Grid.Row="5" x:Name="BrdBeobachten" Background="#F4F4F4" Padding="8,5" Margin="0,8,0,0" CornerRadius="3">
+            <DockPanel LastChildFill="True">
+                <Button DockPanel.Dock="Left" x:Name="BtnBeobachten" Content="Ordner beobachten…" Padding="10,3"
+                        Margin="0,0,8,0" Click="BtnBeobachten_Click"
+                        ToolTip="Solange dieses Fenster offen ist (auch minimiert): Schreibt Untis die Datei neu, werden nur die geänderten Tage veröffentlicht."/>
+                <Button DockPanel.Dock="Left" x:Name="BtnJetztSenden" Content="Geänderte Tage trotzdem senden…" Padding="10,3"
+                        Margin="0,0,8,0" Visibility="Collapsed" Click="BtnJetztSenden_Click"/>
+                <TextBlock x:Name="TxtBeobachten" VerticalAlignment="Center" TextWrapping="Wrap" Foreground="DimGray"
+                           Text="Ordner wird nicht beobachtet."/>
+            </DockPanel>
+        </Border>
+
+        <DockPanel Grid.Row="6" Margin="0,10,0,0" LastChildFill="True">
             <Button DockPanel.Dock="Left" x:Name="BtnDemo" Content="Demo-Datei erzeugen…" Padding="10,3"
                     Margin="0,0,6,0" Click="BtnDemo_Click"/>
             <Button DockPanel.Dock="Left" x:Name="BtnBericht" Content="Bericht kopieren" Padding="10,3"

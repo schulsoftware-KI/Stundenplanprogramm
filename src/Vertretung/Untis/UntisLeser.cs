@@ -30,9 +30,12 @@ namespace Stundenplan_V2.Vertretung
         private const int FeldAbsenzgrund = 15;   // 0-basiert: Feld 16
         private const int FeldText = 16;          // 0-basiert: Feld 17
 
-        public static UntisDatei Lies(string pfad)
+        public static UntisDatei Lies(string pfad) => Lies(pfad, File.ReadAllBytes(pfad));
+
+        /// <summary>U-2: liest bereits geladene Bytes (die Prüfsumme der Datei und der gelesene Inhalt passen so sicher
+        /// zusammen, auch wenn Untis die Datei gleich danach neu schreibt).</summary>
+        public static UntisDatei Lies(string pfad, byte[] bytes)
         {
-            byte[] bytes = File.ReadAllBytes(pfad);
             string text = SchildText.Dekodiere(bytes, "auto", out string zeichensatz, out _);
             var d = LiesText(text);
             d.Pfad = pfad;

@@ -753,7 +753,7 @@ Es nutzt die oben unter „Plan“ gewählte Plan-Spalte. Code: `src/Vertretung/
   Plan („05A“) zugeordnet.
 - Danach **5.2b** Import.
 
-## Vertretungen aus Untis (U-1b, Desktop)
+## Vertretungen aus Untis (U-1b und U-2, Desktop)
 
 Übergangsphase: Die Schule plant die Vertretungen weiter in Untis; App und Klassenbuch zeigen sie trotzdem. Nur
 Desktop, **keine API- und keine Schemaänderung** (die Schnittstelle kam mit U-1a). Im Vertretungs-Wocheneditor
@@ -805,7 +805,22 @@ oben unter „Plan“ gewählte Plan-Spalte. Code: `src/Vertretung/Untis/`, Konz
   passende Markierung wird nie überschrieben.
 - **„Bericht kopieren“:** Zahlen und Probleme als Text (Kürzel, Klassen, Fächer, Zeilennummern – keine Absenzgründe,
   keine Texte).
-- Danach **R3-D** (Räume im Vertretungsmodul) und **U-2** („Ordner beobachten“, nur geänderte Tage senden).
+- **Ordner beobachten (U-2):** Das Fenster ist seit U-2 nicht mehr modal (der Wocheneditor bleibt bedienbar; ein
+  zweiter Klick auf „Untis-Vertretungen…“ holt es nach vorn). **„Ordner beobachten…“** (unten im Fenster) beobachtet die
+  gewählte Datei bzw. `GPU014.TXT` in einem gewählten Ordner (die Datei muss noch nicht da sein), **solange das Fenster
+  offen ist** (auch minimiert). Plan = die beim Einschalten gewählte Plan-Spalte; Zeitraum = immer erster bis letzter Tag
+  der Datei. Ein Takt prüft alle 3 Sekunden Größe und Zeitstempel; erst wenn beide einen Takt lang gleich sind und die
+  Datei ohne Schreibsperre lesbar ist, wird sie gelesen (gleicher Inhalt wie zuvor → nichts zu tun). Gesendet werden nur
+  die **geänderten Schultage** – Prüfsumme der Einträge je Tag gegen den zuletzt aus Untis gesendeten Stand in
+  `untis_import.json` –, heute und künftige Tage zuerst; in Untis geleerte Tage werden leer gesendet. **Nichts wird
+  automatisch gesendet**, wenn die Datei mehr Fehlerzeilen hat als zuletzt gesendet bzw. bestätigt (anfangs 0, z. B.
+  halb geschrieben; nach „trotzdem senden“ werden gleich viele hingenommen – die Demo-Datei hat absichtlich zwei) oder auf einen Schlag mehr als drei
+  Tage leer würden, die vorher Einträge hatten; dann nennt das Fenster den Grund (rote Leiste, Fenstertitel „⚠ nicht
+  gesendet“) und bietet **„Geänderte Tage trotzdem senden…“** an. Ist der Server nicht erreichbar, folgt nach 60 Sekunden
+  ein neuer Versuch. Reiter **„Beobachten“**: Verlauf (Zeit, Datei, Zahl und Datum der geänderten Tage, Ergebnis – keine
+  Inhalte). Läufe stehen mit `"Automatisch": true` und `"TageUnveraendert"` im Protokoll. Tage, die aus dem
+  Vertretungsmodul veröffentlicht wurden, bleiben, bis sich der Tag in Untis ändert. Schließen des Fensters bzw. des
+  Wocheneditors beendet das Beobachten (mit Rückfrage). Code: `src/Vertretung/Untis/UntisDialog_Beobachten.cs`.
 
 ## Räume zuweisen – Raumplan (Schritt R1, Desktop)
 

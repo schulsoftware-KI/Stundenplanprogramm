@@ -18,6 +18,9 @@ namespace Stundenplan_V2.Vertretung
     //  Zeitpunkt und Prüfsumme des zuletzt gesendeten Stands (für die Rückfrage im
     //  Wocheneditor und später für U-2 „nur geänderte Tage senden“).
     //  Außerdem der zuletzt gewählte Ordner (nicht die Datei).
+    //  U-2 („Ordner beobachten“): Läufe tragen „Automatisch“ und die Zahl der
+    //  unveränderten Tage; ein Tag gilt als unverändert, wenn die Prüfsumme
+    //  seiner Einträge gleich der zuletzt gesendeten ist (TagUnveraendert).
     // =====================================================================
 
     public sealed class UntisImportLauf
@@ -33,6 +36,10 @@ namespace Stundenplan_V2.Vertretung
         public int Eintraege { get; set; }
         public bool Abgebrochen { get; set; }
         public string? Fehler { get; set; }
+        /// <summary>U-2: Lauf aus „Ordner beobachten“ (nur geänderte Tage).</summary>
+        public bool Automatisch { get; set; }
+        /// <summary>U-2: Schultage der Datei, die unverändert waren und deshalb nicht gesendet wurden.</summary>
+        public int TageUnveraendert { get; set; }
     }
 
     public sealed class UntisTagStand
@@ -48,7 +55,7 @@ namespace Stundenplan_V2.Vertretung
         private const int MaxLaeufe = 100;
 
         public string Hinweis { get; set; } =
-            "Protokoll des Untis-Imports (U-1b): wann welche Datei für welche Tage veröffentlicht wurde – ohne Inhalte.";
+            "Protokoll des Untis-Imports (U-1b/U-2): wann welche Datei für welche Tage veröffentlicht wurde – ohne Inhalte.";
         public string? Ordner { get; set; }
         public List<UntisImportLauf> Laeufe { get; set; } = new();
         public SortedDictionary<string, UntisTagStand> Tage { get; set; } = new(StringComparer.Ordinal);
@@ -72,6 +79,7 @@ namespace Stundenplan_V2.Vertretung
                 prot.Tage = new SortedDictionary<string, UntisTagStand>(
                     prot.Tage ?? new SortedDictionary<string, UntisTagStand>(), StringComparer.Ordinal);
                 prot.Laeufe ??= new List<UntisImportLauf>();
+                prot.Hinweis = new UntisImportProtokoll().Hinweis;   // immer der aktuelle Text (ältere Dateien: „U-1b“)
                 return prot;
             }
             catch { return new UntisImportProtokoll(); }
@@ -88,6 +96,15 @@ namespace Stundenplan_V2.Vertretung
         /// <summary>Prüfsumme des gesendeten Tages (aus den Einträgen; für U-2).</summary>
         public static string Pruefsumme(PlanPushDto dto)
             => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(dto.Eintraege))))[..16];
+
+        /// <summary>U-2: true, wenn genau dieser Stand des Tages zuletzt aus Untis gesendet wurde.</summary>
+        public bool TagUnveraendert(PlanPushDto dto)
+            => Tage.TryGetValue(TagSchluessel(dto.Datum.ToDateTime(TimeOnly.MinValue)), out var s)
+               && string.Equals(s.Pruefsumme, Pruefsumme(dto), StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>U-2: Zahl der Einträge, die zuletzt für den Tag aus Untis gesendet wurden (null = nie).</summary>
+        public int? EintraegeZuletzt(DateTime tag)
+            => Tage.TryGetValue(TagSchluessel(tag), out var s) ? s.Eintraege : null;
 
         public void TagGesendet(PlanPushDto dto)
         {

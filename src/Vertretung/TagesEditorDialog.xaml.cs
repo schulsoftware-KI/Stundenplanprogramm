@@ -192,7 +192,31 @@ namespace Stundenplan_V2.Vertretung
         }
 
         private void DpTag_Changed(object sender, SelectionChangedEventArgs e)
-        { if (_laedt || _syncLaeuft) return; Zeichne(); MeldeAuswahl(); }
+        {
+            ZeigeTagAmOnlineKnopf();   // auch beim Laden und bei Kopplung mit „Vertretung erfassen“
+            if (_laedt || _syncLaeuft) return;
+            Zeichne(); MeldeAuswahl();
+        }
+
+        /// <summary>
+        /// R3-D-Nachtrag (Nutzer 15.11.2026): Der Knopf nennt den Tag, den er veröffentlicht – den Tag im Feld
+        /// „Woche um“, z. B. „Online veröffentlichen (Di 24.11.)“. Vorher wurde leicht ein anderer Tag der Woche
+        /// veröffentlicht als der gerade bearbeitete.
+        /// </summary>
+        private void ZeigeTagAmOnlineKnopf()
+        {
+            if (DpTag.SelectedDate is DateTime d)
+            {
+                BtnOnlinePush.Content = $"Online veröffentlichen ({UntisText.Tag(d)} {d:dd.MM.})";
+                BtnOnlinePush.ToolTip = $"Nur den {d:dd.MM.yyyy} (Feld „Woche um“) in der App veröffentlichen – " +
+                                        "für mehrere Tage „Zeitraum veröffentlichen…“";
+            }
+            else
+            {
+                BtnOnlinePush.Content = "Online veröffentlichen";
+                BtnOnlinePush.ToolTip = "Den Tag im Feld „Woche um“ in der App veröffentlichen";
+            }
+        }
         private void Auswahl_Changed(object sender, SelectionChangedEventArgs e)
         {
             if (_laedt || _syncLaeuft) return;

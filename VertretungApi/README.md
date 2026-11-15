@@ -959,6 +959,8 @@ Plandatei wird nur gelesen, gebucht wird wie bisher in die Vertretungsdatei (Spa
   im Wocheneditor beide Stunden den Raum mit **„‼“** (dunkelrot), der Tooltip nennt die andere Stunde („‼ Raum R05d ist
   doppelt belegt – auch 07C M L52“). Doppelbelegungen schon im Raumplan (z. B. zwei Gruppen in einer Halle) und
   Team-Teaching werden nicht markiert.
+- **„Online veröffentlichen (Di 24.11.)“:** Der Knopf nennt den Tag, den er sendet – den Tag im Feld „Woche um“ (nicht
+  den zuletzt bearbeiteten Tag der Woche).
 - **Zeitraum veröffentlichen…** (Wocheneditor, neben „Online veröffentlichen“; Entscheidung 161): alle Schultage
   von–bis laut Kalender (Ferien und freie Tage übersprungen) – Vorgabe vom Tag im Feld „Woche um“ bis zum letzten
   angezeigten Tag. Das Fenster zählt die Schultage und Änderungen, fragt vor dem Senden nach (bei Quelle „Untis“ mit

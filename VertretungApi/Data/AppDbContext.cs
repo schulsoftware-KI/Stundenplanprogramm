@@ -24,6 +24,7 @@ public class AppDbContext : DbContext
     public DbSet<UnterrichtEinstellung> UnterrichtEinstellungen => Set<UnterrichtEinstellung>(); // Phase 3.3
     public DbSet<KlassenbuchEintrag> KlassenbuchEintraege => Set<KlassenbuchEintrag>();        // Phase 3.4
     public DbSet<DownloadProtokoll> DownloadProtokolle => Set<DownloadProtokoll>();           // Phase 4.2
+    public DbSet<SchildImportProtokoll> SchildImportProtokolle => Set<SchildImportProtokoll>(); // Phase 5.2b
 
     // Grundplan + Kalender (Phase 2, Schritt 1)
     public DbSet<GrundplanVersion> GrundplanVersionen => Set<GrundplanVersion>();
@@ -63,8 +64,17 @@ public class AppDbContext : DbContext
             .HasForeignKey(z => z.LerngruppeId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        // Phase 5.2b (Entscheidung 164): nicht mehr eindeutig – mit Gültigkeit von–bis kann ein Schüler
+        // im selben Schuljahr mehrmals in derselben Lerngruppe stehen (verschiedene Zeiträume). Der alte
+        // eindeutige Index "IX_Zugehoerigkeiten_SchuelerId_LerngruppeId_Schuljahr" wird in SQLite von
+        // der Schema-Nachrüstung ersetzt, in PostgreSQL von der Migration „SchildImport“.
         b.Entity<Zugehoerigkeit>()
-            .HasIndex(z => new { z.SchuelerId, z.LerngruppeId, z.Schuljahr }).IsUnique();
+            .HasIndex(z => new { z.SchuelerId, z.LerngruppeId, z.Schuljahr, z.GueltigVon });
+
+        // Phase 5.2b: Wiedererkennung beim SchILD-Import über die Prüfsummen.
+        b.Entity<Schueler>().HasIndex(s => s.ExtId);
+        b.Entity<Schueler>().HasIndex(s => s.ExtIdSchild);
+        b.Entity<SchildImportProtokoll>().HasIndex(p => p.Zeit);
 
         // Phase 3.1: neue Tabelle. Die alte Phase-1A-Tabelle "Lektionen" (eine Lerngruppe je
         // Lektion, nie benutzt) bleibt in bestehenden Entwicklungs-DBs ungenutzt liegen.

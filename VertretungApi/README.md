@@ -576,8 +576,9 @@ Migration dazu – im Ordner `VertretungApi`:
 dotnet tool install --global dotnet-ef        # nur einmal
 dotnet ef migrations add <Name> -o Data/Migrations
 ```
-(Namen z. B. `Zugehoerigkeit_Gueltigkeit`; vergeben sind „Grundlinie“ und – seit U-1a, Raum im Grundplan und
-Wechsel-Merker der Vertretungen – `U1a_RaumUndWechsel`). Den Ordner `Data/Migrations` danach ins Repo übernehmen.
+(vergeben sind „Grundlinie“, – seit U-1a, Raum im Grundplan und Wechsel-Merker der Vertretungen –
+`U1a_RaumUndWechsel` und – seit 5.2b-1, Gültigkeit der Zugehörigkeiten und Felder für den SchILD-Import –
+`SchildImport`). Den Ordner `Data/Migrations` danach ins Repo übernehmen.
 Fehlt nach einer Modelländerung die Migration, bricht der Start mit „pending changes“ und einem Hinweis
 ab, statt mit unvollständigem Schema zu laufen. SQLite in der Entwicklung bleibt bei EnsureCreated +
 Schema-Nachrüstung und braucht keine Migrations.
@@ -775,6 +776,36 @@ Es nutzt die oben unter „Plan“ gewählte Plan-Spalte. Code: `src/Vertretung/
   SchILD einen eigenen Q2-Kurs hat (erwartet: Vorschlag „gemeinsam mit …“). Ein Standard-Pseudo-Export hat damit vor dem
   Übernehmen 4 statt 3 Warnungen.
 - Danach **5.2b** Import.
+
+## Gültigkeit der Zugehörigkeiten (Phase 5.2b-1, API)
+
+Vorbereitung des SchILD-Imports (Vorschlag und Entscheidungen 163–171: `claude/5.2b_Vorschlag.md` im Claude-Projekt).
+Nur API, keine Desktop- und keine PWA-Änderung.
+
+- **Schema** (Migration `SchildImport` für PostgreSQL; SQLite rüstet es beim Start nach): `Zugehoerigkeiten` +
+  `GueltigVon`, `GueltigBis` (jeweils einschließlich, leer = ab Schuljahresbeginn bzw. offen) und `Quelle`
+  (`Hand` / `Seed` / `SchILD`); der bisher **eindeutige** Index auf (Schüler, Lerngruppe, Schuljahr) ist jetzt
+  nicht eindeutig und enthält `GueltigVon`. `Schueler` + `Status`, `AbgangAm`, `ExtIdSchild`, `ExtIdVornameGeb`,
+  `ExtIdNachnameGeb`, `ImportAm` (`ExtId` = Prüfsumme aus Nachname + Vorname + Geburtsdatum, keine SchILD-Id).
+  `Lerngruppen` + `Quelle`, `SchildAb`. Neue Tabelle `SchildImportProtokolle` (ohne Namen; geschrieben ab 5.2b-2).
+- **Schema-Nachrüstung (SQLite):** ergänzt jetzt auch fehlende, nicht eindeutige Indizes auf vorhandenen Tabellen und
+  ersetzt den alten eindeutigen Index der Zugehörigkeiten (Log „Schema nachgerüstet: Index … entfernt (ersetzt)“ /
+  „Index … ergänzt“). `vertretung.db` muss nicht gelöscht werden.
+- **Gültigkeit in allen Abfragen** (`Services/Gueltigkeit.cs`): Teilnehmer im Stundenblatt, Schülerplan,
+  Hausaufgaben der Schüler, Soll/Fehlquote nach dem **Tag der Stunde**; Listen einer Klasse über einen Zeitraum
+  (Fehlzeiten, offene Fälle, Einträge, CSV-Export) zeigen, wer im Zeitraum zur Klasse gehörte, **mit den Daten aus der
+  Zeit der Zugehörigkeit**; Klasse eines Schülers, Konten (Sammelanlage, Zuständigkeit), Gruppenübersicht und
+  Lerngruppen-Listen nach dem **heutigen** Stand. Wer in einer Stunde eine Anwesenheit hat, bleibt in ihrer Liste.
+  Ohne Datum (Seed, Gruppenlisten der Lehrkräfte, alles vor 5.2b) ändert sich nichts.
+- **Sek-I-Gruppen aus SchILD (81):** Ab `SchildAb` lässt sich die Gruppenliste nicht mehr bearbeiten (nur ansehen;
+  Speichern → „Diese Gruppe kommt seit … aus SchILD …“). Die Liste der Fachlehrkraft bleibt ohne Datum; Entfernen
+  löscht wie bisher.
+- **CSV-Export:** Die Spalte „SchILD-Id“ bleibt leer (die API kennt nur die Prüfsumme; Rückweg nach SchILD: 5.3).
+- **Wechsel zum Ausprobieren (nur Entwicklung):** `POST /api/seed/pseudodaten?wechsel=1` (optional
+  `&stichtag=2026-11-16`, Standard = Montag der laufenden Woche) legt nach den Pseudodaten an: 2 Klassenwechsel,
+  2 Kurswechsel in der Oberstufe, 1 Abgang, 1 Neuaufnahme und 1 Sek-I-Gruppe, die bis zum Vortag eine Liste „von Hand“
+  hat und ab dem Stichtag aus SchILD kommt. Die Antwort nennt unter `wechsel.aenderungen` jeden Wechsel mit Namen und
+  Id (Pseudodaten); mit `| ConvertTo-Json -Depth 4` anzeigen. Die Testkonten `s05A`/`sQ1` sind nicht betroffen.
 
 ## Vertretungen aus Untis (U-1b und U-2, Desktop)
 

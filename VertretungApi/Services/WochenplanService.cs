@@ -99,9 +99,14 @@ public static class WochenplanService
     /// (siehe <see cref="FertigeGruppenAsync"/>).
     /// </param>
     /// <param name="leser">Phase 3.3: wer Thema/Hausaufgabe lesen darf; null = niemand.</param>
+    /// <param name="werteAm">
+    /// Phase 5.2b-1 (Schülerplan): Lerngruppen-Schlüssel je Tag (Zugehörigkeiten mit von–bis).
+    /// null = <paramref name="werte"/> gelten an allen Tagen.
+    /// </param>
     public static async Task<WochenplanDto> BerechneAsync(
         AppDbContext db, WochenZielArt art, string anzeige, IEnumerable<string> werte,
-        DateOnly datum, int wochen, ISet<string>? fertigeGruppen = null, InhaltLeser? leser = null)
+        DateOnly datum, int wochen, ISet<string>? fertigeGruppen = null, InhaltLeser? leser = null,
+        Func<DateOnly, IEnumerable<string>>? werteAm = null)
     {
         wochen = Math.Clamp(wochen, 1, 6);
         var von = Montag(datum);
@@ -200,6 +205,10 @@ public static class WochenplanService
         foreach (var (d, iso, kal, ver) in tage)
         {
             string wtag = Kurz[iso - 1];
+            // Phase 5.2b-1: Lerngruppen des Schülers an diesem Tag.
+            var zielTag = werteAm == null
+                ? zielWerte
+                : new HashSet<string>(werteAm(d).Where(w => !string.IsNullOrWhiteSpace(w)).Select(w => w.Trim()), Cmp);
 
             if (kal == null)
             {
@@ -237,7 +246,7 @@ public static class WochenplanService
             // Schüler dieser Klasse – ist der ganze Tag frei, auch klassenübergreifende Stunden.
             // Lehrkräfte sehen dagegen weiterhin ihre Stunden (nur rein betroffene als „Frei").
             var freiFuerZiel = art == WochenZielArt.Lehrer ? null : teilFrei.FirstOrDefault(f =>
-                Liste(f.Klassen).Any(k => zielWerte.Contains(k) &&
+                Liste(f.Klassen).Any(k => zielTag.Contains(k) &&
                                           (art == WochenZielArt.Klasse || KlassenMuster.IsMatch(k))));
             if (freiFuerZiel != null)
             {
@@ -272,7 +281,7 @@ public static class WochenplanService
             }
 
             var stunden = EffektiverTag(verSlots, iso, vt?.Eintraege, teilFrei)
-                .Where(st => Passt(st, art, zielWerte, GruppeFertig))
+                .Where(st => Passt(st, art, zielTag, GruppeFertig))
                 .OrderBy(st => st.Stunde).ThenBy(st => st.Fach, Cmp).ThenBy(st => st.Lehrer, Cmp)
                 .Select(st => ZuDto(st, erfasst.Contains(LektionSchluessel(d, st.Stunde, st.GrundUNr, st.GrundLehrer)),
                     InhaltFuer(st)))

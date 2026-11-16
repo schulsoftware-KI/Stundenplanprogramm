@@ -354,10 +354,13 @@ public class KontenController : ControllerBase
 
         var inKlasse = await _db.Zugehoerigkeiten
             .Where(z => z.Lerngruppe!.Typ == LerngruppeTyp.Klasse)
+            .GueltigAm(Heute())                              // Phase 5.2b-1: Klasse von heute
             .Select(z => new { Gruppe = z.Lerngruppe!.Bezeichnung, z.SchuelerId })
             .ToListAsync();
         var mitKlasse = inKlasse.Select(x => x.SchuelerId).ToHashSet();
-        var ohneKlasse = (await _db.Schueler.Select(s => new { s.Id, s.Stufe }).ToListAsync())
+        // Phase 5.2b-1: Abgänge (Status „abgang“) zählen nicht mehr.
+        var ohneKlasse = (await _db.Schueler.Where(s => s.Status == null || s.Status != "abgang")
+                .Select(s => new { s.Id, s.Stufe }).ToListAsync())
             .Where(s => !mitKlasse.Contains(s.Id) && !string.IsNullOrWhiteSpace(s.Stufe))
             .Select(s => new { Gruppe = s.Stufe.Trim().ToUpperInvariant(), SchuelerId = s.Id });
         var mitKonto = (await _db.Benutzer

@@ -17,6 +17,10 @@ namespace VertretungApi.Services;
 //     damit ihr individueller Wochenplan stimmig ist.
 //   - Generieren (Phase 1B): frei erfundene Klassen/Kurse, falls noch kein
 //     Grundplan vorliegt.
+//
+//  Phase 5.2b-1: Zugehörigkeiten tragen Quelle „Seed" (ohne Datum = ganzes Schuljahr).
+//  WechselAnlegen (nur Entwicklung, seed/pseudodaten?wechsel=1) legt danach einige
+//  Wechsel mit von–bis an, damit die Gültigkeit in der App sichtbar wird.
 // =====================================================================
 
 public static class PseudoDatenGenerator
@@ -83,7 +87,7 @@ public static class PseudoDatenGenerator
                 {
                     var s = NeuerSchueler(stufe);
                     schueler.Add(s);
-                    zuordnungen.Add(new Zugehoerigkeit { Schueler = s, Lerngruppe = kl, Schuljahr = schuljahr });
+                    zuordnungen.Add(new Zugehoerigkeit { Schueler = s, Lerngruppe = kl, Schuljahr = schuljahr, Quelle = Gueltigkeit.QuelleSeed });
                 }
             }
         }
@@ -153,7 +157,7 @@ public static class PseudoDatenGenerator
                 }
 
                 foreach (var g in gewaehlt)
-                    zuordnungen.Add(new Zugehoerigkeit { Schueler = s, Lerngruppe = g, Schuljahr = schuljahr });
+                    zuordnungen.Add(new Zugehoerigkeit { Schueler = s, Lerngruppe = g, Schuljahr = schuljahr, Quelle = Gueltigkeit.QuelleSeed });
             }
         }
 
@@ -264,7 +268,7 @@ public static class PseudoDatenGenerator
             {
                 var s = NeuerSchueler(kl.Stufe);
                 schueler.Add(s);
-                zuordnungen.Add(new Zugehoerigkeit { Schueler = s, Lerngruppe = kl, Schuljahr = schuljahr });
+                zuordnungen.Add(new Zugehoerigkeit { Schueler = s, Lerngruppe = kl, Schuljahr = schuljahr, Quelle = Gueltigkeit.QuelleSeed });
             }
         }
 
@@ -324,7 +328,7 @@ public static class PseudoDatenGenerator
                 foreach (var kurs in gewaehlt)
                 {
                     kurs.Belegt++;
-                    zuordnungen.Add(new Zugehoerigkeit { Schueler = s, Lerngruppe = kurs.Lg, Schuljahr = schuljahr });
+                    zuordnungen.Add(new Zugehoerigkeit { Schueler = s, Lerngruppe = kurs.Lg, Schuljahr = schuljahr, Quelle = Gueltigkeit.QuelleSeed });
                 }
             }
         }
@@ -385,4 +389,211 @@ public static class PseudoDatenGenerator
     }
 
     public record Ergebnis(int Schueler, int Klassen, int Kurse, int Zuordnungen);
+
+    // =================================================================
+    //  Phase 5.2b-1: Wechsel mit Gültigkeit (nur Entwicklung)
+    // =================================================================
+
+    /// <summary>
+    /// Legt nach <see cref="GenerierenAusGrundplan"/> Wechsel zum <paramref name="stichtag"/> an: alte
+    /// Zugehörigkeit bis zum Vortag, neue ab dem Stichtag. Zwei Klassenwechsel (Sek I), zwei Kurswechsel
+    /// (Oberstufe, gleiches Fach, überschneidungsfrei), ein Abgang, eine Neuaufnahme und eine Sek-I-Gruppe,
+    /// die bis zum Vortag eine Liste „von Hand" hat und ab dem Stichtag aus SchILD kommt (81). Betroffen sind
+    /// nie die ersten Schüler einer Klasse/Stufe (die Testkonten s05A/sQ1 bleiben, wie sie sind).
+    /// Liefert je Wechsel eine Zeile für die Antwort.
+    /// </summary>
+    public static List<string> WechselAnlegen(
+        AppDbContext db, GrundplanVersion version, List<GrundplanSlot> slots, DateOnly stichtag, int seed = 12345)
+    {
+        var cmp = StringComparer.OrdinalIgnoreCase;
+        string sj = version.Schuljahr;
+        var vortag = stichtag.AddDays(-1);
+        string V = vortag.ToString("dd.MM.yyyy");
+        string S = stichtag.ToString("dd.MM.yyyy");
+        var meldungen = new List<string>();
+
+        var lerngruppen = db.Lerngruppen.Where(l => l.Schuljahr == sj && l.IstPseudo).ToList();
+        var zug = db.Zugehoerigkeiten.Where(z => z.Schuljahr == sj).ToList();
+        var schueler = db.Schueler.Where(x => x.IstPseudo).ToList().ToDictionary(x => x.Id);
+        string Name(int id) => schueler.TryGetValue(id, out var x) ? $"{x.Vorname} {x.Nachname} (Id {id})" : $"Id {id}";
+        var benutzt = new HashSet<int>();
+
+        Zugehoerigkeit Neu(int schuelerId, Lerngruppe lg, DateOnly? von, DateOnly? bis, string quelle)
+        {
+            var z = new Zugehoerigkeit
+            {
+                SchuelerId = schuelerId, LerngruppeId = lg.Id, Schuljahr = sj,
+                GueltigVon = von, GueltigBis = bis, Quelle = quelle
+            };
+            db.Zugehoerigkeiten.Add(z);
+            zug.Add(z);
+            return z;
+        }
+        // Mitglieder einer Lerngruppe, die am Stichtag gelten – die letzten zuerst.
+        List<Zugehoerigkeit> In(Lerngruppe lg) => zug
+            .Where(z => z.LerngruppeId == lg.Id && z.GiltAm(stichtag))
+            .OrderByDescending(z => z.SchuelerId)
+            .ToList();
+
+        var klassen = lerngruppen.Where(l => l.Typ == LerngruppeTyp.Klasse)
+            .OrderBy(l => l.Bezeichnung, cmp).ToList();
+
+        // ---- 1. Zwei Klassenwechsel: je Jahrgang mit mindestens zwei Klassen 1. → 2. Klasse ----
+        int n = 0;
+        foreach (var jg in klassen.GroupBy(k => k.Stufe, cmp).Where(g => g.Count() >= 2))
+        {
+            if (n >= 2) break;
+            var a = jg.ElementAt(0);
+            var b = jg.ElementAt(1);
+            var z = In(a).FirstOrDefault(x => !benutzt.Contains(x.SchuelerId));
+            if (z == null) continue;
+            z.GueltigBis = vortag;
+            Neu(z.SchuelerId, b, stichtag, null, Gueltigkeit.QuelleSeed);
+            benutzt.Add(z.SchuelerId);
+            meldungen.Add($"Klassenwechsel: {Name(z.SchuelerId)} – {a.Bezeichnung} bis {V}, ab {S} {b.Bezeichnung}");
+            n++;
+        }
+
+        // ---- 2. Zwei Kurswechsel (Oberstufe): GK → anderer GK desselben Fachs, überschneidungsfrei ----
+        var zeiten = slots
+            .Where(x => x.Art == "Unterricht" && x.LerngruppeTyp == "Kurs" && !string.IsNullOrWhiteSpace(x.LerngruppeKey))
+            .GroupBy(x => x.LerngruppeKey.Trim(), cmp)
+            .ToDictionary(g => g.Key, g => new HashSet<(int, int)>(g.Select(x => (x.WTagIndex, x.Stunde))), cmp);
+        HashSet<(int, int)> ZeitenVon(Lerngruppe lg)
+            => zeiten.TryGetValue(lg.Bezeichnung.Trim(), out var t) ? t : new HashSet<(int, int)>();
+        var kurse = lerngruppen.Where(l => l.Typ == LerngruppeTyp.Kurs).ToList();
+        n = 0;
+        foreach (var stufe in kurse.Select(k => k.Stufe).Distinct(cmp).OrderBy(x => x, cmp).ToList())
+        {
+            if (n >= 2) break;
+            var stufeKurse = kurse.Where(k => cmp.Equals(k.Stufe, stufe)).ToDictionary(k => k.Id);
+            var jeSchueler = zug.Where(z => stufeKurse.ContainsKey(z.LerngruppeId) && z.GiltAm(stichtag))
+                .GroupBy(z => z.SchuelerId)
+                .OrderByDescending(g => g.Key)
+                .ToList();
+            bool gefunden = false;
+            foreach (var g in jeSchueler)
+            {
+                if (benutzt.Contains(g.Key)) continue;
+                var eigene = g.ToList();
+                var eigeneIds = eigene.Select(z => z.LerngruppeId).ToHashSet();
+                foreach (var alt in eigene)
+                {
+                    var x = stufeKurse[alt.LerngruppeId];
+                    if (x.Kursart != Kursart.GK) continue;
+                    var belegt = new HashSet<(int, int)>();
+                    foreach (var o in eigene)
+                        if (!ReferenceEquals(o, alt)) belegt.UnionWith(ZeitenVon(stufeKurse[o.LerngruppeId]));
+                    var y = stufeKurse.Values
+                        .Where(k => k.Id != x.Id && !eigeneIds.Contains(k.Id) && k.Kursart == x.Kursart
+                                    && cmp.Equals(k.Fach ?? "", x.Fach ?? "") && !ZeitenVon(k).Overlaps(belegt))
+                        .OrderBy(k => k.Bezeichnung, cmp)
+                        .FirstOrDefault();
+                    if (y == null) continue;
+                    alt.GueltigBis = vortag;
+                    Neu(g.Key, y, stichtag, null, Gueltigkeit.QuelleSeed);
+                    benutzt.Add(g.Key);
+                    meldungen.Add($"Kurswechsel {stufe}: {Name(g.Key)} – {x.Bezeichnung} bis {V}, ab {S} {y.Bezeichnung}");
+                    gefunden = true;
+                    n++;
+                    break;
+                }
+                if (gefunden) break;
+            }
+        }
+
+        // ---- 3. Ein Abgang: letzte Klasse, alle Zugehörigkeiten enden am Vortag ----
+        var letzte = klassen.LastOrDefault();
+        var weg = letzte == null ? null : In(letzte).FirstOrDefault(x => !benutzt.Contains(x.SchuelerId));
+        if (letzte != null && weg != null)
+        {
+            foreach (var z in zug.Where(q => q.SchuelerId == weg.SchuelerId && q.GueltigBis == null)) z.GueltigBis = vortag;
+            if (schueler.TryGetValue(weg.SchuelerId, out var sa))
+            {
+                sa.Status = "abgang";
+                sa.AbgangAm = vortag;
+            }
+            benutzt.Add(weg.SchuelerId);
+            meldungen.Add($"Abgang: {Name(weg.SchuelerId)} – {letzte.Bezeichnung} bis {V}");
+        }
+
+        // ---- 4. Eine Neuaufnahme: erste Klasse ab dem Stichtag ----
+        Schueler? neuer = null;
+        var erste = klassen.FirstOrDefault();
+        if (erste != null)
+        {
+            var rnd = new Random(seed + 1);
+            neuer = new Schueler
+            {
+                Vorname = Vornamen[rnd.Next(Vornamen.Length)],
+                Nachname = Nachnamen[rnd.Next(Nachnamen.Length)],
+                Stufe = erste.Stufe,
+                IstPseudo = true
+            };
+            db.Schueler.Add(neuer);
+            db.Zugehoerigkeiten.Add(new Zugehoerigkeit
+            {
+                Schueler = neuer, LerngruppeId = erste.Id, Schuljahr = sj, GueltigVon = stichtag,
+                Quelle = Gueltigkeit.QuelleSeed
+            });
+        }
+
+        // ---- 5. Sek-I-Gruppe: bis zum Vortag Liste „von Hand“, ab dem Stichtag aus SchILD ----
+        var gruppe = slots
+            .Where(x => x.Art == "Unterricht" && x.LerngruppeTyp == "Klasse" && !string.IsNullOrWhiteSpace(x.Schuelergruppe))
+            .GroupBy(x => x.Schuelergruppe!.Trim(), cmp)
+            .OrderBy(g => g.Key, cmp)
+            .Select(g => new
+            {
+                Schluessel = g.Key,
+                Klassen = g.Select(x => x.LerngruppeKey.Trim()).Distinct(cmp).ToList(),
+                Fach = string.Join(", ", g.Select(x => x.Fach.Trim()).Where(f => f.Length > 0).Distinct(cmp).OrderBy(f => f, cmp)),
+                Lehrer = g.Select(x => x.Lehrer.Trim()).FirstOrDefault(l => l.Length > 0)
+            })
+            .FirstOrDefault(g => g.Klassen.Count >= 2 && g.Klassen.All(k => klassen.Any(l => cmp.Equals(l.Bezeichnung, k))));
+        if (gruppe != null)
+        {
+            var poolLg = klassen.Where(l => gruppe.Klassen.Contains(l.Bezeichnung, cmp)).ToList();
+            var pool = poolLg.SelectMany(In).Select(z => z.SchuelerId).Distinct().OrderBy(id => id).ToList();
+            string ersteKlasse = gruppe.Klassen.OrderBy(k => k, cmp).First();
+            var lg = new Lerngruppe
+            {
+                Typ = LerngruppeTyp.Gruppe,
+                Bezeichnung = gruppe.Schluessel,
+                Stufe = ersteKlasse.Length >= 2 && char.IsDigit(ersteKlasse[0]) && char.IsDigit(ersteKlasse[1]) ? ersteKlasse[..2] : "",
+                Fach = gruppe.Fach,
+                LehrerKuerzel = gruppe.Lehrer,
+                Schuljahr = sj,
+                IstPseudo = true,
+                BearbeitetVon = "Seed",
+                BearbeitetAm = DateTime.UtcNow,
+                Quelle = Gueltigkeit.QuelleSchild,
+                SchildAb = stichtag
+            };
+            db.Lerngruppen.Add(lg);
+            int schild = 0;
+            for (int i = 0; i < pool.Count; i++)
+            {
+                db.Zugehoerigkeiten.Add(new Zugehoerigkeit
+                {
+                    SchuelerId = pool[i], Lerngruppe = lg, Schuljahr = sj, GueltigBis = vortag, Quelle = Gueltigkeit.QuelleHand
+                });
+                if (i % 2 == 0)
+                {
+                    db.Zugehoerigkeiten.Add(new Zugehoerigkeit
+                    {
+                        SchuelerId = pool[i], Lerngruppe = lg, Schuljahr = sj, GueltigVon = stichtag, Quelle = Gueltigkeit.QuelleSchild
+                    });
+                    schild++;
+                }
+            }
+            meldungen.Add($"Gruppe {gruppe.Schluessel} ({gruppe.Fach}; {string.Join(", ", gruppe.Klassen)}): bis {V} von Hand " +
+                          $"alle {pool.Count} Schüler, ab {S} aus SchILD {schild} Schüler (Gruppenliste nur lesen)");
+        }
+
+        db.SaveChanges();
+        if (neuer != null && erste != null)
+            meldungen.Add($"Neuaufnahme: {neuer.Vorname} {neuer.Nachname} (Id {neuer.Id}) – ab {S} in {erste.Bezeichnung}");
+        return meldungen;
+    }
 }

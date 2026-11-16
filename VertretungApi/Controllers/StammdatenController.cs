@@ -32,12 +32,15 @@ public class StammdatenController : ControllerBase
     /// Liegt für das Schuljahr ein Grundplan vor, entstehen Klassen/Kurse genau aus dessen
     /// Lerngruppen (neueste Version); sonst frei erfundene Daten wie in Phase 1B.
     /// quelle=synthetisch erzwingt den alten Weg.
+    /// Phase 5.2b-1: wechsel=1 legt danach einige Wechsel mit Gültigkeit von–bis an (Stichtag: Montag der
+    /// laufenden Woche bzw. stichtag=JJJJ-MM-TT) – nur mit Grundplan.
     /// </summary>
     // Phase 5.1: nur in der Entwicklung (im Echtbetrieb 404) und nur, solange keine echten
     // Schüler in der Datenbank stehen.
     [NurEntwicklung]
     [HttpPost("seed/pseudodaten")]
-    public IActionResult Seed([FromQuery] string? schuljahr, [FromQuery] int? seed, [FromQuery] string? quelle)
+    public IActionResult Seed([FromQuery] string? schuljahr, [FromQuery] int? seed, [FromQuery] string? quelle,
+        [FromQuery] int? wechsel, [FromQuery] DateOnly? stichtag)
     {
         if (!ApiSchluessel.Gueltig(Request, _cfg))      // Phase 5.1: Vergleich in konstanter Zeit
             return Unauthorized(ApiSchluessel.Fehlertext);
@@ -62,6 +65,17 @@ public class StammdatenController : ControllerBase
         {
             var slots = _db.GrundplanSlots.Where(s => s.VersionId == version.Id).ToList();
             var eg = PseudoDatenGenerator.GenerierenAusGrundplan(_db, version, slots, seed ?? 12345);
+            object? wechselInfo = null;
+            if (wechsel is > 0)
+            {
+                var heute = KlassenbuchService.Heute();
+                var tag = stichtag ?? WochenplanService.Montag(heute);
+                wechselInfo = new
+                {
+                    stichtag = tag,
+                    aenderungen = PseudoDatenGenerator.WechselAnlegen(_db, version, slots, tag, seed ?? 12345)
+                };
+            }
             return Ok(new
             {
                 schuljahr = sj,
@@ -69,7 +83,8 @@ public class StammdatenController : ControllerBase
                 grundplan = version.Bezeichnung,
                 gueltigAb = version.GueltigAb,
                 eg.Schueler, eg.Klassen, eg.Kurse, eg.Zuordnungen,
-                schuelerKonten = konten
+                schuelerKonten = konten,
+                wechsel = wechselInfo
             });
         }
 
@@ -125,6 +140,7 @@ public class StammdatenController : ControllerBase
         if (!string.IsNullOrWhiteSpace(stufe))
             q = q.Where(l => l.Stufe == stufe);
 
+        var heute = KlassenbuchService.Heute();
         var liste = await q
             .OrderBy(l => l.Stufe).ThenBy(l => l.Bezeichnung)
             .Select(l => new
@@ -136,7 +152,9 @@ public class StammdatenController : ControllerBase
                 l.Fach,
                 Kursart = l.Kursart == Kursart.Keine ? null : l.Kursart.ToString(),
                 l.LehrerKuerzel,
-                Anzahl = l.Mitglieder.Count
+                // Phase 5.2b-1: Mitglieder, die heute gelten.
+                Anzahl = l.Mitglieder.Count(z => (z.GueltigVon == null || z.GueltigVon <= heute)
+                                                && (z.GueltigBis == null || z.GueltigBis >= heute))
             })
             .ToListAsync();
         return Ok(liste);
@@ -152,6 +170,7 @@ public class StammdatenController : ControllerBase
 
         var liste = await _db.Zugehoerigkeiten
             .Where(z => z.LerngruppeId == id)
+            .GueltigAm(KlassenbuchService.Heute())         // Phase 5.2b-1: heutige Mitglieder
             .Select(z => z.Schueler!)
             .OrderBy(s => s.Nachname).ThenBy(s => s.Vorname)
             .Select(s => new { s.Id, s.Nachname, s.Vorname, s.Stufe })
@@ -185,14 +204,18 @@ public class StammdatenController : ControllerBase
                 s.Nachname.Contains(gross) || s.Vorname.Contains(gross));
         }
 
+        var heute = KlassenbuchService.Heute();
         var liste = await query
             .OrderBy(s => s.Nachname).ThenBy(s => s.Vorname).ThenBy(s => s.Id)
             .Take(Math.Clamp(limit, 1, 1000))
             .Select(s => new
             {
                 s.Id, s.Nachname, s.Vorname, s.Stufe,
+                // Phase 5.2b-1: Klasse von heute.
                 Klasse = s.Zugehoerigkeiten
-                    .Where(z => z.Lerngruppe!.Typ == LerngruppeTyp.Klasse)
+                    .Where(z => z.Lerngruppe!.Typ == LerngruppeTyp.Klasse
+                                && (z.GueltigVon == null || z.GueltigVon <= heute)
+                                && (z.GueltigBis == null || z.GueltigBis >= heute))
                     .Select(z => z.Lerngruppe!.Bezeichnung)
                     .FirstOrDefault()
             })
@@ -210,6 +233,7 @@ public class StammdatenController : ControllerBase
 
         var gruppen = await _db.Zugehoerigkeiten
             .Where(z => z.SchuelerId == id)
+            .GueltigAm(KlassenbuchService.Heute())         // Phase 5.2b-1: heutige Lerngruppen
             .Select(z => z.Lerngruppe!)
             .OrderBy(l => l.Typ).ThenBy(l => l.Bezeichnung)
             .Select(l => new { l.Id, Typ = l.Typ.ToString(), l.Bezeichnung, l.Fach, l.LehrerKuerzel })

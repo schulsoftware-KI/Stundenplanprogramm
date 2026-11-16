@@ -349,14 +349,12 @@ public static class UnterrichtInhaltService
     {
         var heute = KlassenbuchService.Heute();
         var ab = heute.AddDays(-VergangeneTage);
-        var gruppen = await db.Zugehoerigkeiten.AsNoTracking()
-            .Where(z => z.SchuelerId == s.Id)
-            .Select(z => z.Lerngruppe!.Bezeichnung)
-            .ToListAsync();
+        // Phase 5.2b-1: Lerngruppen mit Gültigkeit – je Tag die dann gültigen.
+        var alle = await Gueltigkeit.SchuelerGruppenAsync(db, s.Id);
         var fertig = await WochenplanService.FertigeGruppenAsync(db);
         var plan = await WochenplanService.BerechneAsync(
-            db, WochenZielArt.Schueler, $"{s.Vorname} {s.Nachname}", gruppen, heute.AddDays(-35), 6, fertig,
-            InhaltLeser.FuerSchueler());
+            db, WochenZielArt.Schueler, $"{s.Vorname} {s.Nachname}", alle.Am(heute), heute.AddDays(-35), 6, fertig,
+            InhaltLeser.FuerSchueler(), alle.Am);
 
         var liste = plan.Tage
             .Where(t => t.Datum <= heute)

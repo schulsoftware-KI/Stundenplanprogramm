@@ -100,16 +100,16 @@ public class WocheController : ControllerBase
 
     private async Task<object> SchuelerPlan(Schueler s, DateOnly datum, int wochen, InhaltLeser? leser)
     {
-        var gruppen = await _db.Zugehoerigkeiten
-            .Where(z => z.SchuelerId == s.Id)
-            .Select(z => z.Lerngruppe!.Bezeichnung)
-            .ToListAsync();
+        // Phase 5.2b-1: Lerngruppen mit Gültigkeit – der Plan nimmt je Tag die dann gültigen.
+        var alle = await Gueltigkeit.SchuelerGruppenAsync(_db, s.Id);
+        var gruppen = alle.Am(datum);
 
         // Phase 3.1: zusammengestellte Sek-I-Gruppen – Stunden einer solchen Gruppe sieht der
         // Schüler nur, wenn er dazugehört (sonst wie bisher die ganze Klasse).
         var fertig = await WochenplanService.FertigeGruppenAsync(_db);
         var plan = await WochenplanService.BerechneAsync(
-            _db, WochenZielArt.Schueler, $"{s.Vorname} {s.Nachname}", gruppen, datum, wochen, fertig, leser);
+            _db, WochenZielArt.Schueler, $"{s.Vorname} {s.Nachname}", gruppen, datum, wochen, fertig, leser,
+            werteAm: alle.Am);
 
         return new
         {

@@ -303,6 +303,7 @@ public class AuthController : ControllerBase
         var inKlasse = await _db.Zugehoerigkeiten
             .Where(z => z.Lerngruppe!.Typ == LerngruppeTyp.Klasse && z.Lerngruppe.Bezeichnung == gruppe
                         && z.Schueler!.IstPseudo)
+            .GueltigAm(KlassenbuchService.Heute())           // Phase 5.2b-1: heute in der Klasse
             .OrderBy(z => z.SchuelerId)
             .Select(z => z.Schueler!)
             .FirstOrDefaultAsync();

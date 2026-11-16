@@ -539,17 +539,26 @@ public static class KlassenbuchEintragService
             .Select(l => l.Id)
             .ToList();
         bool istStufe = lgIds.Count == 0;
-        List<int> ids = !istStufe
-            ? await db.Zugehoerigkeiten.AsNoTracking().Where(z => lgIds.Contains(z.LerngruppeId))
-                .Select(z => z.SchuelerId).Distinct().ToListAsync()
+        // Phase 5.2b-1: wer im Zeitraum zur Klasse gehörte – je Eintrag nach dem Tag des Eintrags.
+        var zeiten = !istStufe
+            ? (await db.Zugehoerigkeiten.AsNoTracking().Where(z => lgIds.Contains(z.LerngruppeId))
+                    .GueltigIm(von, bis)
+                    .Select(z => new { z.SchuelerId, z.GueltigVon, z.GueltigBis }).ToListAsync())
+                .ToLookup(z => z.SchuelerId)
+            : null;
+        List<int> ids = zeiten != null
+            ? zeiten.Select(g => g.Key).ToList()
             : await db.Schueler.AsNoTracking().Where(x => x.Stufe.ToUpper() == k).Select(x => x.Id).ToListAsync();
 
         var schuelerEintraege = ids.Count == 0
             ? new List<KlassenbuchEintrag>()
-            : await db.KlassenbuchEintraege.AsNoTracking()
-                .Where(e => e.Art == KbEintragArt.Schueler && e.SchuelerId != null && ids.Contains(e.SchuelerId.Value)
-                            && e.Datum >= von && e.Datum <= bis)
-                .ToListAsync();
+            : (await db.KlassenbuchEintraege.AsNoTracking()
+                    .Where(e => e.Art == KbEintragArt.Schueler && e.SchuelerId != null && ids.Contains(e.SchuelerId.Value)
+                                && e.Datum >= von && e.Datum <= bis)
+                    .ToListAsync())
+                .Where(e => zeiten == null
+                            || zeiten[e.SchuelerId!.Value].Any(z => Gueltigkeit.GiltAm(z.GueltigVon, z.GueltigBis, e.Datum)))
+                .ToList();
         var filter = new List<string> { k };
         var klassenEintraege = (await db.KlassenbuchEintraege.AsNoTracking()
                 .Where(e => e.Art == KbEintragArt.Klasse && e.Datum >= von && e.Datum <= bis)

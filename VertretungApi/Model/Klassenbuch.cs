@@ -68,6 +68,12 @@ public class Lerngruppe
     public string? BearbeitetVon { get; set; }
     public DateTime? BearbeitetAm { get; set; }
 
+    // Phase 5.2b (Entscheidung 81/164): "SchILD", wenn der SchILD-Import die Lerngruppe angelegt
+    // bzw. übernommen hat; leer = selbst angelegt (Seed, Gruppe der Fachlehrkraft).
+    public string? Quelle { get; set; }
+    // Ab diesem Tag kommt die Liste aus SchILD; eine Gruppe ist ab dann im Gruppeneditor nur lesbar.
+    public DateOnly? SchildAb { get; set; }
+
     public List<Zugehoerigkeit> Mitglieder { get; set; } = new();
 }
 
@@ -77,13 +83,29 @@ public class Schueler
     public string Nachname { get; set; } = "";
     public string Vorname { get; set; } = "";
     public string Stufe { get; set; } = "";          // Jahrgang des Schülers
-    public string? ExtId { get; set; }               // SchILD-Id (später)
+    // Phase 5.2b (Entscheidungen 72/85/164): Prüfsumme (HMAC) aus Nachname + Vorname + Geburtsdatum,
+    // gebildet im Desktop mit einem Schlüssel, der nur auf dem Verwaltungsrechner liegt. Keine SchILD-Id.
+    public string? ExtId { get; set; }
     public bool IstPseudo { get; set; }
+
+    // Phase 5.2b (Entscheidung 164): Stand laut SchILD-Import. Leer = aktiv (Seed, ältere Daten).
+    public string? Status { get; set; }                // aktiv | beurlaubt | extern | abgang
+    public DateOnly? AbgangAm { get; set; }
+    public string? ExtIdSchild { get; set; }           // HMAC aus der SchILD-ID (falls exportiert)
+    public string? ExtIdVornameGeb { get; set; }       // HMAC aus Vorname + Geburtsdatum (für 5.2c)
+    public string? ExtIdNachnameGeb { get; set; }      // HMAC aus Nachname + Geburtsdatum (für 5.2c)
+    public DateTime? ImportAm { get; set; }            // UTC, letzter SchILD-Import dieses Schülers
 
     public List<Zugehoerigkeit> Zugehoerigkeiten { get; set; } = new();
 }
 
-/// <summary>Verknüpft einen Schüler mit einer Lerngruppe (Klasse/Kurs/Gruppe) im Schuljahr.</summary>
+/// <summary>
+/// Verknüpft einen Schüler mit einer Lerngruppe (Klasse/Kurs/Gruppe) im Schuljahr.
+/// Phase 5.2b (Entscheidungen 68/79/165): gilt von <see cref="GueltigVon"/> bis <see cref="GueltigBis"/>
+/// (jeweils einschließlich; leer = ab Schuljahresbeginn bzw. offen). Ein Schüler kann deshalb im
+/// selben Schuljahr mehrmals in derselben Lerngruppe stehen (verschiedene Zeiträume).
+/// Abfragen nutzen <c>Services/Gueltigkeit.cs</c> – maßgeblich ist der Tag der Stunde.
+/// </summary>
 public class Zugehoerigkeit
 {
     public int Id { get; set; }
@@ -92,6 +114,11 @@ public class Zugehoerigkeit
     public int LerngruppeId { get; set; }
     public Lerngruppe? Lerngruppe { get; set; }
     public string Schuljahr { get; set; } = "";
+
+    public DateOnly? GueltigVon { get; set; }
+    public DateOnly? GueltigBis { get; set; }
+    /// <summary>Hand (Gruppe der Fachlehrkraft) | Seed | SchILD; leer = ältere Zeile (wie Hand bzw. Seed).</summary>
+    public string? Quelle { get; set; }
 }
 
 /// <summary>

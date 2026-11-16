@@ -512,11 +512,12 @@ function hiZeigeThema(id, verwandt = null) {
   el("hiTitel").textContent = t.titel;
   el("hiListeKnopf").hidden = false;
   const andere = (verwandt || []).filter((v) => v.id !== t.id);
+  // Nachtrag 5.2b-1: ohne verwandte Themen kein Text „null" am Ende.
   el("hiInhalt").replaceChildren(
     ...t.inhalt.map((b) => hiBaustein(b, r)).flat(Infinity).filter(Boolean),
-    andere.length ? h("div", { class: "hi-dazu" },
+    ...(andere.length ? [h("div", { class: "hi-dazu" },
       h("h3", { class: "hi-zwischen" }, "Passt dazu"),
-      andere.map(hiThemaKnopf)) : null,
+      andere.map(hiThemaKnopf))] : []),
   );
   hiNachOben();
 }

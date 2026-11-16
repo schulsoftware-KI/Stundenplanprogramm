@@ -49,6 +49,12 @@ namespace VertretungApi.Services;
 //  Phase 3.4 (Klassenbucheinträge): eigene Speicherung, eigener Dienst
 //  (Services/KlassenbuchEintragService.cs). Die Änderungshistorie der Stunde
 //  zeigt auch die Einträge – nur, was die Person lesen darf.
+//
+//  Phase 5.2b-1 (Entscheidungen 79/81/165): Teilnehmer nach den Zugehörigkeiten, die
+//  am Tag der Stunde gelten (Services/Gueltigkeit.cs). Wer eine Anwesenheit hat, bleibt
+//  sichtbar („gehört nicht mehr zur Liste“). Kommt die Liste einer Sek-I-Gruppe ab
+//  SchildAb aus SchILD, ist sie ab dann im Gruppeneditor nur lesbar; die Liste der
+//  Fachlehrkraft bleibt ohne Datum (Entscheidung C) – Entfernen löscht wie bisher.
 // =====================================================================
 
 /// <summary>Angemeldete Person (aus der Datenbank, nicht nur aus dem Token).</summary>
@@ -191,7 +197,7 @@ public static class KlassenbuchService
                 .Where(s => ausserhalb.Contains(s.Id))
                 .Select(s => new { s.Id, s.Vorname, s.Nachname, s.Stufe })
                 .ToListAsync();
-            var klassen = await KlassenAsync(db, ausserhalb, tag.Schuljahr);
+            var klassen = await KlassenAsync(db, ausserhalb, tag.Schuljahr, tag.Datum);
             foreach (var p in personen)
             {
                 var a = eintraege[p.Id];
@@ -695,6 +701,7 @@ public static class KlassenbuchService
             ? new List<Teilnehmer>()
             : (await db.Zugehoerigkeiten.AsNoTracking()
                     .Where(z => lgIds.Contains(z.LerngruppeId))
+                    .GueltigAm(tag.Datum)                       // Phase 5.2b-1: am Tag der Stunde
                     .Select(z => new { z.SchuelerId, z.Schueler!.Vorname, z.Schueler.Nachname, z.Schueler.Stufe, z.Schueler.IstPseudo })
                     .ToListAsync())
                 .GroupBy(z => z.SchuelerId)
@@ -703,7 +710,7 @@ public static class KlassenbuchService
                 .ToList();
 
         // Klasse (Sek I) bzw. Stufe (Sek II) für Anzeige und „klassenbezogen frei".
-        var klassenJeSchueler = await KlassenAsync(db, mitglieder.Select(m => m.Id).ToList(), tag.Schuljahr);
+        var klassenJeSchueler = await KlassenAsync(db, mitglieder.Select(m => m.Id).ToList(), tag.Schuljahr, tag.Datum);
         var frei = tag.FreieKlassen.ToDictionary(f => f.Klasse, f => f.Text, Cmp);
         var ausgelassen = new Dictionary<string, (string Text, int Anzahl)>(Cmp);
         var liste = new List<Teilnehmer>();
@@ -731,18 +738,28 @@ public static class KlassenbuchService
         return (liste, offen, hinweise);
     }
 
-    /// <summary>Klasse (Lerngruppe Typ Klasse) je Schüler, bevorzugt im angegebenen Schuljahr.</summary>
-    internal static async Task<Dictionary<int, string>> KlassenAsync(AppDbContext db, List<int> schuelerIds, string schuljahr)
+    /// <summary>
+    /// Klasse (Lerngruppe Typ Klasse) je Schüler, bevorzugt im angegebenen Schuljahr. Seit 5.2b-1: die
+    /// Klasse, die am <paramref name="tag"/> gilt (Standard heute); gilt dort keine (z. B. Abgang), die
+    /// zuletzt gültige.
+    /// </summary>
+    internal static async Task<Dictionary<int, string>> KlassenAsync(
+        AppDbContext db, List<int> schuelerIds, string schuljahr, DateOnly? tag = null)
     {
         if (schuelerIds.Count == 0) return new Dictionary<int, string>();
+        var t = tag ?? Heute();
         var zeilen = await db.Zugehoerigkeiten.AsNoTracking()
             .Where(z => schuelerIds.Contains(z.SchuelerId) && z.Lerngruppe!.Typ == LerngruppeTyp.Klasse)
-            .Select(z => new { z.SchuelerId, z.Lerngruppe!.Bezeichnung, z.Lerngruppe.Schuljahr })
+            .Select(z => new { z.SchuelerId, z.Lerngruppe!.Bezeichnung, z.Lerngruppe.Schuljahr, z.GueltigVon, z.GueltigBis })
             .ToListAsync();
         return zeilen
             .GroupBy(z => z.SchuelerId)
             .ToDictionary(g => g.Key,
-                g => g.OrderByDescending(z => z.Schuljahr == schuljahr).First().Bezeichnung);
+                g => g.OrderByDescending(z => z.Schuljahr == schuljahr)
+                      .ThenByDescending(z => Gueltigkeit.GiltAm(z.GueltigVon, z.GueltigBis, t))
+                      .ThenByDescending(z => z.GueltigBis ?? DateOnly.MaxValue)
+                      .ThenByDescending(z => z.GueltigVon ?? DateOnly.MinValue)
+                      .First().Bezeichnung);
     }
 
     // =================================================================
@@ -780,9 +797,16 @@ public static class KlassenbuchService
             .Where(g => u.IstAdmin || IstGruppenLehrer(u, g))
             .ToList();
 
+        // Phase 5.2b-1: Anzahl der heute gültigen Mitglieder.
+        var heute = Heute();
         var fertig = (await db.Lerngruppen.AsNoTracking()
                 .Where(l => l.Typ == LerngruppeTyp.Gruppe && l.Schuljahr == ver.Schuljahr)
-                .Select(l => new { l.Bezeichnung, l.BearbeitetVon, l.BearbeitetAm, Anzahl = l.Mitglieder.Count })
+                .Select(l => new
+                {
+                    l.Bezeichnung, l.BearbeitetVon, l.BearbeitetAm,
+                    Anzahl = l.Mitglieder.Count(z => (z.GueltigVon == null || z.GueltigVon <= heute)
+                                                    && (z.GueltigBis == null || z.GueltigBis >= heute))
+                })
                 .ToListAsync())
             .GroupBy(l => l.Bezeichnung, Cmp)
             .ToDictionary(g => g.Key, g => g.First(), Cmp);
@@ -804,17 +828,20 @@ public static class KlassenbuchService
     /// <summary>Gruppe mit Pool (alle Schüler der genannten Klassen) und Mitgliedern.</summary>
     public static async Task<KbGruppeDto> GruppeAsync(AppDbContext db, KbNutzer u, GrundplanGruppe g)
     {
+        var heute = Heute();
         var lg = await GruppeLerngruppeAsync(db, g, mitMitgliedern: false);
+        // Phase 5.2b-1: heute gültige Mitglieder; kommt die Liste aus SchILD, nur lesbar (81).
         var mitglieder = lg == null
             ? new HashSet<int>()
             : (await db.Zugehoerigkeiten.AsNoTracking().Where(z => z.LerngruppeId == lg.Id)
+                .GueltigAm(heute)
                 .Select(z => z.SchuelerId).ToListAsync()).ToHashSet();
 
         var pool = await PoolAsync(db, g, mitglieder);
         return new KbGruppeDto(
             g.Schluessel, g.Fach, g.Schuljahr, g.Klassen, g.Lehrer,
             lg != null, lg?.BearbeitetVon, lg?.BearbeitetAm,
-            IstGruppenLehrer(u, g),
+            IstGruppenLehrer(u, g) && !(lg != null && Gueltigkeit.ListeAusSchild(lg, heute)),
             pool.Select(p => new KbPoolDto(p.Id, p.Vorname, p.Nachname, p.Klasse ?? "", mitglieder.Contains(p.Id)))
                 .OrderBy(p => p.Klasse, Cmp).ThenBy(p => p.Nachname, NamenCmp).ThenBy(p => p.Vorname, NamenCmp)
                 .ThenBy(p => p.Id)
@@ -827,8 +854,18 @@ public static class KlassenbuchService
     /// </summary>
     public static async Task<KbErgebnis> GruppeSpeichernAsync(AppDbContext db, KbNutzer u, GrundplanGruppe g, List<int> ids)
     {
+        var heute = Heute();
         var lg = await GruppeLerngruppeAsync(db, g, mitMitgliedern: true);
-        var bisher = lg?.Mitglieder.Select(z => z.SchuelerId).ToHashSet() ?? new HashSet<int>();
+        // Phase 5.2b-1 (Entscheidung 81): Kommt die Liste aus SchILD, ändert sie nur der Import.
+        if (lg != null && Gueltigkeit.ListeAusSchild(lg, heute))
+            return new KbErgebnis(400,
+                $"Diese Gruppe kommt seit {lg.SchildAb:dd.MM.yyyy} aus SchILD und lässt sich hier nicht ändern.");
+        // Bearbeitet werden nur die eigenen Zeilen (nicht aus SchILD), die heute oder später gelten.
+        var eigene = lg?.Mitglieder
+                         .Where(z => !Gueltigkeit.IstSchild(z.Quelle) && (z.GueltigBis == null || z.GueltigBis >= heute))
+                         .ToList()
+                     ?? new List<Zugehoerigkeit>();
+        var bisher = eigene.Select(z => z.SchuelerId).ToHashSet();
         var pool = await PoolAsync(db, g, bisher);
         var erlaubt = pool.Select(p => p.Id).ToHashSet();
         var neu = ids.Distinct().ToHashSet();
@@ -856,14 +893,20 @@ public static class KlassenbuchService
             historie.Add(GruppenProtokoll(u, g, null, null, $"zusammengestellt ({neu.Count} Schüler)", pseudo));
         }
 
-        foreach (var z in lg.Mitglieder.Where(z => !neu.Contains(z.SchuelerId)).ToList())
+        foreach (var z in eigene.Where(z => !neu.Contains(z.SchuelerId)).ToList())
         {
             db.Zugehoerigkeiten.Remove(z);
             historie.Add(GruppenProtokoll(u, g, z.SchuelerId, "Mitglied", "entfernt", pseudo));
         }
+        // Übernimmt SchILD die Gruppe erst künftig, endet eine neue Zeile am Vortag (81).
+        DateOnly? bis = lg.SchildAb is DateOnly ab && Gueltigkeit.IstSchild(lg.Quelle) ? ab.AddDays(-1) : null;
         foreach (var id in neu.Where(id => !bisher.Contains(id)))
         {
-            db.Zugehoerigkeiten.Add(new Zugehoerigkeit { SchuelerId = id, Lerngruppe = lg, Schuljahr = g.Schuljahr });
+            db.Zugehoerigkeiten.Add(new Zugehoerigkeit
+            {
+                SchuelerId = id, Lerngruppe = lg, Schuljahr = g.Schuljahr,
+                GueltigBis = bis, Quelle = Gueltigkeit.QuelleHand
+            });
             historie.Add(GruppenProtokoll(u, g, id, null, "aufgenommen", pseudo));
         }
 
@@ -905,6 +948,7 @@ public static class KlassenbuchService
             ? new List<Teilnehmer>()
             : (await db.Zugehoerigkeiten.AsNoTracking()
                     .Where(z => lgIds.Contains(z.LerngruppeId))
+                    .GueltigAm(Heute())                         // Phase 5.2b-1: heute in der Klasse
                     .Select(z => new { z.SchuelerId, z.LerngruppeId, z.Schueler!.Vorname, z.Schueler.Nachname, z.Schueler.IstPseudo })
                     .ToListAsync())
                 .GroupBy(z => z.SchuelerId)

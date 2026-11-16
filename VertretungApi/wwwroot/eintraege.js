@@ -684,7 +684,8 @@ async function keSchuelerLaden(o) {
 
 function keSchuelerRendern(d, o) {
   const leer = d.eintraege.length === 0;
-  el("fzKe").replaceChildren(
+  // Nachtrag 5.2b-1: replaceChildren macht aus null den Text „null" – leere Teile vorher entfernen.
+  el("fzKe").replaceChildren(...[
     h("div", { class: "fz-kopfzeile" },
       h("h3", { class: "fz-titel" }, "Einträge"),
       d.darfOhneStunde
@@ -701,7 +702,8 @@ function keSchuelerRendern(d, o) {
       ? h("p", { class: "such-info" }, "Keine Einträge in diesem Zeitraum.")
       : h("ul", { class: "k-liste ke-liste", "aria-label": "Einträge" },
           d.eintraege.map((e) => keZeile(e, { ohneName: true, nachher: () => keSchuelerLaden(o), links: true }))),
-    d.gekuerzt ? h("p", { class: "such-info" }, `Es stehen nur die neuesten ${d.eintraege.length} Einträge hier.`) : null);
+    d.gekuerzt ? h("p", { class: "such-info" }, `Es stehen nur die neuesten ${d.eintraege.length} Einträge hier.`) : null,
+  ].filter(Boolean));
 }
 
 function keOhneStundeOeffnen(o, d, knopf) {

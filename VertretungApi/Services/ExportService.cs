@@ -20,7 +20,8 @@ namespace VertretungApi.Services;
 //     Verspätungen, Minuten. Zählung wie die Konferenzübersicht (beurlaubt =
 //     entschuldigte Fehlstunde, schulische Veranstaltung zählt nicht).
 //   - Format wie die Zugangszettel: Semikolon, UTF-8 mit BOM, Formelschutz.
-//   - Die SchILD-Id ist bis Phase 5 (echte Daten) leer.
+//   - Die SchILD-Id bleibt leer: Die API kennt sie nicht (nur eine Prüfsumme, Entscheidungen
+//     72/85); den Rückweg nach SchILD erzeugt der Desktop (5.3).
 //   - Vorab: offene Fehlstunden/Verspätungen und nicht erfasste Stunden im
 //     Zeitraum (Warnung, Export bleibt erlaubt).
 //
@@ -79,7 +80,7 @@ public static class ExportService
     {
         var ids = new HashSet<int>();
         foreach (var g in gruppen)
-            ids.UnionWith((await FehlzeitenService.KlassenSchuelerAsync(db, g)).Ids);
+            ids.UnionWith((await FehlzeitenService.KlassenSchuelerAsync(db, g, von, bis)).Ids);   // 5.2b-1: im Zeitraum
         var idListe = ids.ToList();
 
         int offenFehl = 0, offenVersp = 0;
@@ -117,16 +118,14 @@ public static class ExportService
             if (neu.Count == 0) continue;
 
             var ids = neu.Select(z => z.Id).ToList();
-            var extIds = await db.Schueler.AsNoTracking()
-                .Where(s => ids.Contains(s.Id))
-                .Select(s => new { s.Id, s.ExtId })
-                .ToDictionaryAsync(s => s.Id, s => s.ExtId);
             // Kurszeilen nur für die Oberstufe (eine Stufe ohne Klasse dieses Namens).
             var kurse = istStufe && IstOberstufenStufe(g) ? await KurszeilenAsync(db, ids, von, bis) : null;
 
             foreach (var z in neu)
             {
-                string ext = extIds.TryGetValue(z.Id, out var e) ? e ?? "" : "";
+                // Phase 5.2b-1: Schueler.ExtId ist eine Prüfsumme (HMAC, Entscheidung 72), keine SchILD-Id –
+                // die Spalte bleibt leer. Den Rückweg nach SchILD erzeugt der Desktop (5.3, Entscheidung 73).
+                string ext = "";
                 string klasse = z.Klasse ?? "";
                 SummenZeile(sb, ext, z.Nachname, z.Vorname, klasse, "", z.Summe);
                 zeilen++;
@@ -152,13 +151,14 @@ public static class ExportService
     /// <summary>
     /// Summen je Schüler und Kurs (Oberstufe). Kurs = Lerngruppen-Schlüssel der Stunde, zu dem der
     /// Schüler gehört (sonst der erste der Stunde, ohne Schlüssel „Fach Lehrkraft"). Jeder Kurs, in dem
-    /// der Schüler heute eingetragen ist, bekommt eine Zeile – auch ohne Fehlzeiten.
+    /// der Schüler im Zeitraum eingetragen war (seit 5.2b-1; vorher: heute), bekommt eine Zeile – auch ohne Fehlzeiten.
     /// </summary>
     private static async Task<Dictionary<int, List<(string Kurs, FzSummeDto Summe)>>> KurszeilenAsync(
         AppDbContext db, List<int> ids, DateOnly von, DateOnly bis)
     {
         var mitglied = await db.Zugehoerigkeiten.AsNoTracking()
             .Where(z => ids.Contains(z.SchuelerId) && z.Lerngruppe!.Typ == LerngruppeTyp.Kurs)
+            .GueltigIm(von, bis)
             .Select(z => new { z.SchuelerId, z.Lerngruppe!.Bezeichnung })
             .ToListAsync();
         var kurseJe = new Dictionary<int, HashSet<string>>();

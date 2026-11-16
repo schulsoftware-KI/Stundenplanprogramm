@@ -688,7 +688,9 @@ function felderAnpassen() {
   const gew = el("kfSchuelerGewaehlt");
   gew.hidden = !g;
   gew.replaceChildren();
-  if (g) gew.append(h("span", { class: "g-name" }, nachnameZuerst(g.name) || `Schüler ${g.id}`), g.klasse ? h("span", { class: "g-klasse" }, g.klasse) : null);
+  // Nachtrag 5.2b-1: ohne Klasse kein Text „null".
+  if (g) gew.append(h("span", { class: "g-name" }, nachnameZuerst(g.name) || `Schüler ${g.id}`),
+    ...(g.klasse ? [h("span", { class: "g-klasse" }, g.klasse)] : []));
 }
 
 function formSuche(sofort) {

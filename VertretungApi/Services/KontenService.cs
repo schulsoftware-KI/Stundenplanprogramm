@@ -97,7 +97,7 @@ public static class KontenService
         return liste.Count == 0 ? null : string.Join(", ", liste);
     }
 
-    /// <summary>Klasse (Lerngruppe Typ Klasse) und Stufe je Schüler.</summary>
+    /// <summary>Klasse (Lerngruppe Typ Klasse) und Stufe je Schüler – seit 5.2b-1 die Klasse von heute.</summary>
     public static async Task<Dictionary<int, (string Name, string? Klasse, string Stufe)>> SchuelerInfoAsync(
         AppDbContext db, IEnumerable<int> ids)
     {
@@ -105,16 +105,11 @@ public static class KontenService
         if (liste.Count == 0) return new();
         var daten = await db.Schueler
             .Where(s => liste.Contains(s.Id))
-            .Select(s => new
-            {
-                s.Id, s.Vorname, s.Nachname, s.Stufe,
-                Klasse = s.Zugehoerigkeiten
-                    .Where(z => z.Lerngruppe!.Typ == LerngruppeTyp.Klasse)
-                    .Select(z => z.Lerngruppe!.Bezeichnung)
-                    .FirstOrDefault()
-            })
+            .Select(s => new { s.Id, s.Vorname, s.Nachname, s.Stufe })
             .ToListAsync();
-        return daten.ToDictionary(d => d.Id, d => ($"{d.Vorname} {d.Nachname}", d.Klasse, d.Stufe));
+        var klassen = await KlassenbuchService.KlassenAsync(db, liste, "");
+        return daten.ToDictionary(d => d.Id,
+            d => ($"{d.Vorname} {d.Nachname}", klassen.TryGetValue(d.Id, out var k) ? k : (string?)null, d.Stufe));
     }
 
     /// <summary>Ids der Schüler, die zu einer der Klassen/Stufen gehören („05A" oder „Q1").</summary>
@@ -124,10 +119,11 @@ public static class KontenService
         var g = gruppen.Select(x => x.ToUpper()).ToList();
         var inKlasse = await db.Zugehoerigkeiten
             .Where(z => z.Lerngruppe!.Typ == LerngruppeTyp.Klasse && g.Contains(z.Lerngruppe.Bezeichnung.ToUpper()))
+            .GueltigAm(KlassenbuchService.Heute())          // Phase 5.2b-1: Zuständigkeit nach der Klasse von heute
             .Select(z => z.SchuelerId)
             .ToListAsync();
         var inStufe = await db.Schueler
-            .Where(s => g.Contains(s.Stufe.ToUpper()))
+            .Where(s => g.Contains(s.Stufe.ToUpper()) && (s.Status == null || s.Status != "abgang"))
             .Select(s => s.Id)
             .ToListAsync();
         return inKlasse.Concat(inStufe).ToHashSet();

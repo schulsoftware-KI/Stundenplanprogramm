@@ -21,6 +21,8 @@ namespace VertretungApi.Services;
 //  Phase 5.2b-1: Zugehörigkeiten tragen Quelle „Seed" (ohne Datum = ganzes Schuljahr).
 //  WechselAnlegen (nur Entwicklung, seed/pseudodaten?wechsel=1) legt danach einige
 //  Wechsel mit von–bis an, damit die Gültigkeit in der App sichtbar wird.
+//  Phase 5.2b-2: Der SchILD-Import nutzt ZerlegeKursFach/HaeufigsteLehrkraft für neue Lerngruppen und
+//  LoescheVorhandene/SchuelerKontenLoesen für „Seed-Schüler entfernen“.
 // =====================================================================
 
 public static class PseudoDatenGenerator
@@ -346,7 +348,7 @@ public static class PseudoDatenGenerator
     /// Zerlegt ein Kursfach: "BI G1" -> (BI, GK), "D L2" -> (D, LK), "E Ver1" -> (E-VK, VK).
     /// Ohne erkennbares Muster (z. B. "PSF_A") ist das ganze Fach die Basis.
     /// </summary>
-    private static (string FachBasis, Kursart Kursart, string Fach) ZerlegeKursFach(string kursFach)
+    internal static (string FachBasis, Kursart Kursart, string Fach) ZerlegeKursFach(string kursFach)
     {
         string f = kursFach.Trim();
         var m = KursFachMuster.Match(f);
@@ -363,7 +365,7 @@ public static class PseudoDatenGenerator
         return (art == Kursart.VK ? fach + "-VK" : fach, art, fach);
     }
 
-    private static string? HaeufigsteLehrkraft(IEnumerable<GrundplanSlot> slots)
+    internal static string? HaeufigsteLehrkraft(IEnumerable<GrundplanSlot> slots)
         => slots.Where(s => !string.IsNullOrWhiteSpace(s.Lehrer))
                 .GroupBy(s => s.Lehrer, StringComparer.OrdinalIgnoreCase)
                 .OrderByDescending(g => g.Count())
@@ -371,7 +373,11 @@ public static class PseudoDatenGenerator
                 .Select(g => g.Key)
                 .FirstOrDefault();
 
-    private static void LoescheVorhandene(AppDbContext db)
+    /// <summary>
+    /// Entfernt alle Pseudo-Schüler samt Klassenbuchdaten, alle Zugehörigkeiten, die Pseudo-Lerngruppen und alle
+    /// Gruppenlisten – wie vor einem neuen Seed. Seit 5.2b-2 auch für „Seed-Schüler entfernen“ (nur Entwicklung).
+    /// </summary>
+    internal static void LoescheVorhandene(AppDbContext db)
     {
         // Reihenfolge wegen FK: erst Klassenbuch (Phase 3.1) und Zuordnungen, dann
         // Schüler/Lerngruppen. Klassenbuchdaten der Pseudo-Schüler passen nicht zu den neuen
@@ -389,6 +395,43 @@ public static class PseudoDatenGenerator
     }
 
     public record Ergebnis(int Schueler, int Klassen, int Kurse, int Zuordnungen);
+
+    /// <summary>
+    /// Vor dem Neu-Seeden bzw. „Seed-Schüler entfernen“ (5.2b-2): Schülerkonten, die auf Pseudo-Schüler (oder auf gar
+    /// keinen Schüler) zeigen, werden gelöscht – außer den Testkonten s05A/sQ1, die nur gelöst und von
+    /// /api/auth/seed-konten neu verknüpft werden. Konten echter Schüler bleiben unberührt.
+    /// (Bis 5.2b-1 im StammdatenController.)
+    /// </summary>
+    public static object SchuelerKontenLoesen(AppDbContext db)
+    {
+        var testkonten = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "s05A", "sQ1" };
+        var echteIds = db.Schueler.Where(x => !x.IstPseudo).Select(x => x.Id).ToHashSet();
+        int entfernt = 0, geloest = 0;
+        foreach (var k in db.Benutzer.Where(b => b.Rolle == BenutzerRolle.Schueler).ToList())
+        {
+            if (k.SchuelerId is int sid && echteIds.Contains(sid)) continue;
+            if (testkonten.Contains(k.Benutzername))
+            {
+                if (k.SchuelerId == null) continue;
+                k.SchuelerId = null;
+                k.SicherheitsStempel = KontenService.NeuerStempel();
+                geloest++;
+            }
+            else
+            {
+                KontenService.Protokoll(db, "System", KontenService.Aktion.Geloescht, k, "Pseudodaten neu erzeugt");
+                db.Benutzer.Remove(k);
+                entfernt++;
+            }
+        }
+        db.SaveChanges();
+        return new
+        {
+            entfernt,
+            geloest,
+            hinweis = geloest > 0 ? "Testkonten s05A/sQ1 neu verknüpfen: POST /api/auth/seed-konten" : null
+        };
+    }
 
     // =================================================================
     //  Phase 5.2b-1: Wechsel mit Gültigkeit (nur Entwicklung)

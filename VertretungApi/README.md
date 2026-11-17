@@ -807,6 +807,49 @@ Nur API, keine Desktop- und keine PWA-Änderung.
   hat und ab dem Stichtag aus SchILD kommt. Die Antwort nennt unter `wechsel.aenderungen` jeden Wechsel mit Namen und
   Id (Pseudodaten); mit `| ConvertTo-Json -Depth 4` anzeigen. Die Testkonten `s05A`/`sQ1` sind nicht betroffen.
 
+## SchILD-Import (Phase 5.2b-2a, API)
+
+Der Desktop liest die SchILD-Dateien auf dem Verwaltungsrechner und schickt nur, was der Server braucht (Entscheidung
+166): je Schüler HMAC-Prüfsummen (`extId` aus Nachname + Vorname + Geburtsdatum, `extIdSchild` aus der SchILD-ID, zwei
+Teil-Prüfsummen für 5.2c), Name, Jahrgang, SchILD-Status, bei Status 0 das Aufnahmedatum und die **Plan-Schlüssel** der
+Klasse und der zugeordneten Kurse/Gruppen. **Nie:** Geburtsdatum, SchILD-ID im Klartext, Noten, Kursart des Schülers,
+Lehrkräftedaten, Status 1 (Warteliste). Den Reiter „Import“ im Desktop liefert Schritt b-2b; bis dahin lässt sich der Weg
+mit fertigen Testdateien prüfen. Vorschlag und Entscheidungen: `claude/5.2b_Vorschlag.md` im Claude-Projekt.
+
+| Methode | Pfad | Zweck | Auth |
+|---|---|---|---|
+| GET | `/api/schild/status?schuljahr=..&abschnitt=..` | Betriebsart, Kalender, Grundpläne, Schülerzahlen, letzter Import, Vorschlag für „Änderungen gelten ab“ | `X-Api-Key` |
+| POST | `/api/schild/import` | Probelauf (`probelauf: true`, Standard) bzw. Import (`probelauf: false`, `vorschau`, `abgaenge`) | `X-Api-Key` |
+| POST | `/api/schild/seed-entfernen` | nur Entwicklung: alle Pseudo-Schüler samt Klassenbuchdaten entfernen (wie ein neuer Seed) | `X-Api-Key` |
+
+- **Probelauf = Import ohne Speichern** (78): dieselbe Rechnung; die Antwort enthält Zahlen, je Schüler eine Zeile je
+  Kategorie (neu · Name bzw. Geburtsdatum geändert · Klassenwechsel · Kurs-/Gruppenwechsel · Status/Jahrgang geändert ·
+  Abgang laut SchILD (vorausgewählt) · fehlt im Export (nicht vorausgewählt)), unbekannte Plan-Schlüssel, neue
+  Lerngruppen, Kurse/Gruppen, die ab „gilt ab“ aus SchILD kommen, Sperren, Hinweise, einen **Bericht ohne Namen** und
+  die **Prüfsumme der Vorschau** (Datenbankstand + Nutzlast). Der Import rechnet neu und bricht mit 409 und neuer
+  Vorschau ab, wenn sich die Prüfsumme geändert hat.
+- **Erkennung:** zuerst `extIdSchild`, dann `extId`; eine andere SchILD-ID heißt „andere Person“. Ohne SchILD-ID
+  erscheint ein geänderter Name als „neu“ + „fehlt im Export“ mit dem Hinweis „möglicherweise dieselbe Person“
+  (Zusammenführen kommt mit 5.2c).
+- **Schreiben** (eine Transaktion, 169): Wechsel enden am Vortag von „gilt ab“, neue Zeilen beginnen dann (Neuaufnahme:
+  am späteren Aufnahmedatum); beginnt eine alte Zeile erst an „gilt ab“ oder später, wird sie ersetzt; unveränderte
+  Zeilen bleiben. Fehlende Lerngruppen werden angelegt (`Quelle = SchILD`, `SchildAb`). **Gruppen ab „gilt ab“ aus
+  SchILD (81):** die Liste von Hand endet am Vortag, die Gruppe ist danach im Gruppeneditor nur lesbar; eine Sek-I-Gruppe
+  **ohne** Liste von Hand bekommt ihre Liste ab Schuljahresbeginn (genauer: seit dem Eintritt in die jetzige Klasse).
+  Nicht zugeordnete Gruppen bleiben bearbeitbar. Unbekannte Plan-Schlüssel werden übersprungen; vorhandene Zeilen dazu
+  bleiben. Status 6 (extern) = nur Kurse.
+- **Abgänge nur nach Bestätigung** (80, E): `abgaenge` = Ids aus der Vorschau. Alle offenen Zeilen enden am Vortag,
+  Status „abgang“, das **Schülerkonto wird gesperrt** (Kontenprotokoll „Abgang laut SchILD-Import“; der Admin kann
+  entsperren). Status 8/9 von Schülern, die nicht in der Datenbank sind, werden nicht angelegt.
+- **Sperren** (168): Pseudo-Kennzeichen passt nicht zur Umgebung (Entwicklung nur Pseudodaten, Echtbetrieb nur echte),
+  echte und Pseudo-Schüler gemischt, Seed-Schüler in der Datenbank (Entwicklung: „Seed-Schüler entfernen“), kein
+  Kalender/Grundplan am „gilt ab“ bzw. „gilt ab“ außerhalb des Schuljahrs, „gilt ab“ vor dem Stichtag des letzten
+  Imports, mehr als 10 % unbekannte Plan-Schlüssel, doppelte Prüfsummen, Teil-Export (ganze Klasse bzw. ganzer Jahrgang
+  fehlt oder mehr als ein Viertel der Schüler).
+- **Importprotokoll** (Tabelle `SchildImportProtokolle`): Zeit, „Desktop (Windows-Benutzer)“, Schuljahr, Abschnitt,
+  „gilt ab“, Pseudo, Zahlen, Prüfsumme des Datenbankstands – ohne Namen. Das Log nennt nur Zahlen.
+- **Keine Schemaänderung** (das Schema kam mit 5.2b-1).
+
 ## Vertretungen aus Untis (U-1b und U-2, Desktop)
 
 Übergangsphase: Die Schule plant die Vertretungen weiter in Untis; App und Klassenbuch zeigen sie trotzdem. Nur
@@ -1083,4 +1126,6 @@ Entscheidungen 158–162 (`claude/Projektstand_und_Fahrplan.md` §6).
 3. **Web-Push:** Benachrichtigung der Apps bei Änderung.
 4. ~~**Produktiv:** Schlüssel aus Umgebungsvariablen, EF-Migrations, PostgreSQL, CORS auf die
    App-Adresse einschränken, Login-Bremse hinter dem Reverse-Proxy je echter Adresse.~~ Phase 5.1.
-5. **Phase 5.2:** SchILD-NRW-3-Schnittstelle (`.dat`-Dateien) – Import per Desktop statt Pseudodaten-Seed.
+5. **Phase 5.2:** SchILD-NRW-3-Schnittstelle (`.dat`-Dateien) – Import per Desktop statt Pseudodaten-Seed
+   (5.2a Prüflauf und Zuordnung, 5.2b-1 Gültigkeit, **5.2b-2a Import in der API**; als Nächstes 5.2b-2b Reiter „Import“
+   im Desktop).

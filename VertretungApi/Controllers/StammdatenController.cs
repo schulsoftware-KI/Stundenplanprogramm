@@ -93,41 +93,8 @@ public class StammdatenController : ControllerBase
             schuelerKonten = konten });
     }
 
-    /// <summary>
-    /// Vor dem Neu-Seeden: Schülerkonten, die auf Pseudo-Schüler (oder auf gar keinen Schüler)
-    /// zeigen, werden gelöscht – außer den Testkonten s05A/sQ1, die nur gelöst und von
-    /// /api/auth/seed-konten neu verknüpft werden. Konten echter Schüler bleiben unberührt.
-    /// </summary>
-    private object SchuelerKontenLoesen()
-    {
-        var testkonten = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "s05A", "sQ1" };
-        var echteIds = _db.Schueler.Where(x => !x.IstPseudo).Select(x => x.Id).ToHashSet();
-        int entfernt = 0, geloest = 0;
-        foreach (var k in _db.Benutzer.Where(b => b.Rolle == BenutzerRolle.Schueler).ToList())
-        {
-            if (k.SchuelerId is int sid && echteIds.Contains(sid)) continue;
-            if (testkonten.Contains(k.Benutzername))
-            {
-                if (k.SchuelerId == null) continue;
-                k.SchuelerId = null;
-                k.SicherheitsStempel = KontenService.NeuerStempel();
-                geloest++;
-            }
-            else
-            {
-                KontenService.Protokoll(_db, "System", KontenService.Aktion.Geloescht, k, "Pseudodaten neu erzeugt");
-                _db.Benutzer.Remove(k);
-                entfernt++;
-            }
-        }
-        _db.SaveChanges();
-        return new
-        {
-            entfernt,
-            geloest,
-            hinweis = geloest > 0 ? "Testkonten s05A/sQ1 neu verknüpfen: POST /api/auth/seed-konten" : null
-        };
-    }
+    /// <summary>Vor dem Neu-Seeden: Schülerkonten der Pseudo-Schüler lösen bzw. entfernen (seit 5.2b-2 im Generator).</summary>
+    private object SchuelerKontenLoesen() => PseudoDatenGenerator.SchuelerKontenLoesen(_db);
 
     /// <summary>Lerngruppen (Klassen + Kurse), optional gefiltert. Nur Personal.</summary>
     [Authorize(Roles = "Admin,Lehrer,Klassenlehrer,Stufenkoordination")]

@@ -1,7 +1,7 @@
 <Window x:Class="Stundenplan_V2.Vertretung.SchildDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="SchILD-Daten prüfen"
+        Title="SchILD-Daten prüfen und importieren"
         Width="1120" Height="760"
         MinWidth="860" MinHeight="560"
         WindowStartupLocation="CenterOwner"
@@ -9,7 +9,8 @@
 
     <!-- Phase 5.2a: Prüflauf eines SchILD-NRW-3-Exports (nur lesen, nichts senden), Pseudo-Export und (5.2a-2)
          Zuordnung SchILD ↔ Plan mit Festlegungen von Hand (schild_zuordnung.json); 5.2a-3: Muster der
-         Kursbezeichnung und „gemeinsam mit …“. -->
+         Kursbezeichnung und „gemeinsam mit …“; 5.2b-2b: Reiter „Import“ (SchildDialog_Import.cs) – sendet nur
+         dort und nur Prüfsummen statt Geburtsdatum und SchILD-ID. -->
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -20,7 +21,7 @@
         </Grid.RowDefinitions>
 
         <TextBlock Grid.Row="0" TextWrapping="Wrap" Margin="0,0,0,8" Foreground="DimGray"
-                   Text="Prüft einen Export aus SchILD-NRW 3 (Textdateien .dat). Die Dateien werden nur auf diesem Rechner gelesen – es wird nichts gesendet und nichts gespeichert. Meldungen nennen bei Schülerdateien nur Datei, Zeile, Spalte und Grund."/>
+                   Text="Prüft einen Export aus SchILD-NRW 3 (Textdateien .dat). Die Dateien werden nur auf diesem Rechner gelesen. Gesendet wird nur im Reiter „Import“ – und dann statt Geburtsdatum und SchILD-ID nur Prüfsummen. Meldungen nennen bei Schülerdateien nur Datei, Zeile, Spalte und Grund."/>
 
         <DockPanel Grid.Row="1" Margin="0,0,0,6" LastChildFill="True">
             <TextBlock DockPanel.Dock="Left" Text="Ordner:" VerticalAlignment="Center" Margin="0,0,6,0"/>
@@ -152,6 +153,120 @@
                                 Margin="0,0,12,0" IsEnabled="False" Click="BtnZuSpeichern_Click"/>
                         <TextBlock x:Name="TxtZuStatus" VerticalAlignment="Center" Foreground="DimGray"
                                    TextTrimming="CharacterEllipsis"/>
+                    </DockPanel>
+                </Grid>
+            </TabItem>
+            <!-- 5.2b-2b: Import (Vorschau, Abgänge bestätigen, Importieren; Schlüssel sichern/einlesen) -->
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock x:Name="TxtImportKopf" Text="Import"/>
+                </TabItem.Header>
+                <Grid Margin="0,4,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Border Grid.Row="0" x:Name="BrdImHinweis" Background="#EEEEEE" Padding="8,4" Margin="0,0,0,6" CornerRadius="3">
+                        <TextBlock x:Name="TxtImHinweis" TextWrapping="Wrap" Text="Zuerst einen Ordner wählen und den Prüflauf starten."/>
+                    </Border>
+                    <DockPanel Grid.Row="1" Margin="0,0,0,6" LastChildFill="True">
+                        <Button DockPanel.Dock="Right" x:Name="BtnImEinstellungen" Content="Online-Einstellungen…" Padding="10,3"
+                                Margin="6,0,0,0" Click="BtnImEinstellungen_Click"/>
+                        <Button DockPanel.Dock="Right" x:Name="BtnImStatus" Content="Status abfragen" Padding="10,3"
+                                Margin="6,0,0,0" Click="BtnImStatus_Click"/>
+                        <TextBlock x:Name="TxtImServer" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="DimGray"
+                                   Text="Server: noch nicht abgefragt."/>
+                    </DockPanel>
+                    <WrapPanel Grid.Row="2" Margin="0,0,0,6">
+                        <TextBlock Text="Änderungen gelten ab:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <DatePicker x:Name="DpImGiltAb" Width="130" VerticalAlignment="Center" Margin="0,0,8,0"
+                                    SelectedDateChanged="DpImGiltAb_SelectedDateChanged"
+                                    ToolTip="Ab diesem Tag gelten Klassen-, Kurs- und Gruppenwechsel und Abgänge. Stunden davor behalten ihre Listen. Vorschlag der API: beim ersten Import eines Abschnitts dessen Beginn, sonst heute – nie vor dem letzten Import."/>
+                        <TextBlock x:Name="TxtImGiltAb" VerticalAlignment="Center" Foreground="DimGray" Margin="0,0,18,0"
+                                   TextWrapping="Wrap" MaxWidth="430"/>
+                        <TextBlock x:Name="TxtImSchluessel" VerticalAlignment="Center" Margin="0,0,8,0" TextWrapping="Wrap"
+                                   MaxWidth="380"/>
+                        <Button x:Name="BtnImSichern" Content="Schlüssel sichern…" Padding="10,3" Margin="0,0,6,0"
+                                VerticalAlignment="Center" IsEnabled="False" Click="BtnImSichern_Click"
+                                ToolTip="Schreibt den Schlüssel in eine Datei mit Kennwort (für einen neuen Rechner oder Windows-Benutzer). Auf USB-Stick bzw. im Tresor aufbewahren, nicht in OneDrive."/>
+                        <Button x:Name="BtnImEinlesen" Content="Schlüssel einlesen…" Padding="10,3" VerticalAlignment="Center"
+                                Click="BtnImEinlesen_Click"
+                                ToolTip="Liest eine Sicherung des Schlüssels ein (neuer Rechner oder anderer Windows-Benutzer)."/>
+                    </WrapPanel>
+                    <WrapPanel Grid.Row="3" Margin="0,0,0,6">
+                        <Button x:Name="BtnImVorschau" Content="Vorschau berechnen" Padding="14,3" Margin="0,0,6,0"
+                                IsEnabled="False" Click="BtnImVorschau_Click"/>
+                        <Button x:Name="BtnImImportieren" Content="Importieren…" Padding="14,3" Margin="0,0,6,0"
+                                IsEnabled="False" Click="BtnImImportieren_Click"/>
+                        <Button x:Name="BtnImBericht" Content="Bericht kopieren" Padding="10,3" Margin="0,0,6,0"
+                                IsEnabled="False" Click="BtnImBericht_Click"
+                                ToolTip="Kopiert den Bericht der Vorschau bzw. des Imports – ohne Schülernamen."/>
+                        <Button x:Name="BtnImSeed" Content="Seed-Schüler entfernen…" Padding="10,3" Margin="18,0,0,0"
+                                Visibility="Collapsed" Click="BtnImSeed_Click"
+                                ToolTip="Nur Entwicklung: entfernt alle Pseudo-Schüler der Entwicklungsdatenbank (aus dem Seed und früher importierte) samt Klassenbuchdaten."/>
+                    </WrapPanel>
+                    <Grid Grid.Row="4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="380" MinWidth="220"/>
+                            <ColumnDefinition Width="6"/>
+                            <ColumnDefinition Width="*" MinWidth="300"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox Grid.Column="0" x:Name="TxtImBericht" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True"
+                                 VerticalScrollBarVisibility="Auto" Background="#FAFAFA" Padding="4"/>
+                        <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent"/>
+                        <DockPanel Grid.Column="2">
+                            <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                                <TextBlock Text="Anzeigen:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <ComboBox x:Name="CbImAnsicht" Width="320" VerticalAlignment="Center" Margin="0,0,12,0"
+                                          SelectionChanged="CbImAnsicht_SelectionChanged"/>
+                                <TextBlock x:Name="TxtImAnzahl" VerticalAlignment="Center" Foreground="DimGray"/>
+                            </WrapPanel>
+                            <DataGrid x:Name="DgImport" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column"
+                                      CanUserAddRows="False" CanUserDeleteRows="False" GridLinesVisibility="Horizontal"
+                                      SelectionMode="Single">
+                                <DataGrid.Columns>
+                                    <DataGridTemplateColumn Header="Bestätigen" Width="80" SortMemberPath="Bestaetigt">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <CheckBox HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                          Visibility="{Binding BestaetigenSichtbar}"
+                                                          IsChecked="{Binding Bestaetigt, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                          ToolTip="Abgang bestätigen: Zugehörigkeiten enden am Vortag von „gilt ab“, das Schülerkonto wird gesperrt."/>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="Kategorie" Binding="{Binding KategorieText}" Width="150"/>
+                                    <DataGridTextColumn Header="Schüler" Binding="{Binding Name}" Width="170"/>
+                                    <DataGridTextColumn Header="Klasse" Binding="{Binding Klasse}" Width="60"/>
+                                    <DataGridTextColumn Header="Jg." Binding="{Binding Stufe}" Width="40"/>
+                                    <DataGridTemplateColumn Header="Änderung" Width="*" SortMemberPath="Aenderung">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Aenderung}" TextWrapping="Wrap"/>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTemplateColumn Header="Hinweis" Width="220" SortMemberPath="HinweisText">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding HinweisText}" TextWrapping="Wrap"/>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </DockPanel>
+                    </Grid>
+                    <DockPanel Grid.Row="5" Margin="0,6,0,0" LastChildFill="True">
+                        <Button DockPanel.Dock="Left" x:Name="BtnImAlle" Content="Alle in der Ansicht bestätigen" Padding="10,3"
+                                Margin="0,0,6,0" IsEnabled="False" Click="BtnImAlle_Click"/>
+                        <Button DockPanel.Dock="Left" x:Name="BtnImKeine" Content="Keine in der Ansicht" Padding="10,3"
+                                Margin="0,0,12,0" IsEnabled="False" Click="BtnImKeine_Click"/>
+                        <TextBlock x:Name="TxtImAuswahl" VerticalAlignment="Center" Foreground="DimGray" TextWrapping="Wrap"/>
                     </DockPanel>
                 </Grid>
             </TabItem>

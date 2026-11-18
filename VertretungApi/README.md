@@ -850,6 +850,47 @@ mit fertigen Testdateien prüfen. Vorschlag und Entscheidungen: `claude/5.2b_Vor
   „gilt ab“, Pseudo, Zahlen, Prüfsumme des Datenbankstands – ohne Namen. Das Log nennt nur Zahlen.
 - **Keine Schemaänderung** (das Schema kam mit 5.2b-1).
 
+## SchILD-Import im Desktop (Phase 5.2b-2b-1)
+
+Im Vertretungs-Wocheneditor (Button 24) → „SchILD-Daten…“ hat das Fenster (jetzt „SchILD-Daten prüfen und importieren“)
+den Reiter **„Import“**. Code: `src/Vertretung/Schild/SchildDialog_Import.cs`, `SchildNutzlast.cs`, `SchildSchluessel.cs`,
+`SchildImportClient.cs`; Verbindungsmeldungen `src/Vertretung/OnlineVerbindung.cs`. Keine API- und keine Schemaänderung.
+
+- **Voraussetzungen:** Prüflauf ohne Fehler, Zuordnung möglich und gespeichert, Abschnitt im Schuljahr des Wocheneditors.
+  Server-Adresse und API-Key wie beim Veröffentlichen (`vertretung_online.json`, Knopf „Online-Einstellungen…“).
+- **„Vorschau berechnen“:** fragt zuerst `GET /api/schild/status` ab. **Passt die Art der Daten nicht zur API
+  (Entwicklung nur Pseudodaten, Echtbetrieb nur echte), sendet der Desktop nichts** – echte Namen gehen nie an eine
+  Entwicklungs-API; echte Daten nur über HTTPS (außer an `localhost`). „Änderungen gelten ab“ = Vorschlag der API, solange
+  nicht von Hand gewählt. Dann Probelauf mit der Nutzlast (Entscheidung 166): je Schüler `extId`, `extIdSchild` (falls
+  `SchuelerLernplattformen.dat` die SchILD-ID enthält), die zwei Teil-Prüfsummen, Name, Vorname, Jahrgang, Klasse (Sek I),
+  Status, Aufnahmedatum bei Status 0, Plan-Schlüssel der Kurse/Gruppen; dazu `planSchluessel` = alle zugeordneten
+  Plan-Kurse/-Gruppen und die Sek-I-Klassen, die es im Plan und in `Klassen.dat` gibt. **Übertragen werden nur feste
+  Zuordnungen** (automatisch, ohne Lehrkraft, von Hand) ohne Zeitkonflikt; offene, Vorschläge und Konflikte nennt die
+  Vorschau unter „nicht übertragen“ (Punkt H). Status 1 (Warteliste) wird nie übertragen.
+- **Vorschau:** links der Bericht (ohne Namen) mit Sperren und „Was tun?“, rechts die Zeilen je Kategorie (Ansicht
+  wählbar); „Abgang laut SchILD“ vorausgewählt, „fehlt im Export“ nicht; „Alle in der Ansicht bestätigen“/„Keine in der
+  Ansicht“. **„Importieren…“** fragt mit allen Zahlen nach und schickt dieselbe Nutzlast mit der Prüfsumme der Vorschau und
+  den bestätigten Ids; bei veralteter Vorschau zeigt das Fenster die neue (Bestätigungen bleiben erhalten).
+- **HMAC-Schlüssel** (170, F): 32 Byte Zufall, beim ersten Import gespeichert unter
+  `%LOCALAPPDATA%\Stundenplan\schild_schluessel.dat` (Pseudodaten: `schild_schluessel_pseudo.dat`), geschützt mit DPAPI
+  für **diesen Windows-Benutzer** (direkt über `crypt32.dll`, kein Zusatzpaket); nie neben der Plandatei (OneDrive), nie
+  still überschrieben. **Kennung** (`1A2B-3C4D`) zum Vergleichen. Eingabe der Prüfsummen: getrimmt, Leerzeichen
+  zusammengefasst, NFC, Großbuchstaben, Nachname ohne `#Klasse`, Geburtsdatum `JJJJ-MM-TT`, je Art ein Präfix; Ausgabe
+  Base64 von HMAC-SHA256. Fehlt der Schlüssel, obwohl schon importierte Schüler in der Datenbank stehen, sendet der
+  Desktop nichts („Schlüssel einlesen…“).
+- **„Schlüssel sichern…“ / „Schlüssel einlesen…“:** Datei `*.schluessel` (JSON) mit Kennwort (mind. 12 Zeichen;
+  PBKDF2-SHA256 mit 600 000 Runden, AES-256-GCM, Kennung und Art als Zusatzdaten). Warnung bei einem Cloud-Ordner
+  (OneDrive, SharePoint …). Einlesen ersetzt einen vorhandenen anderen Schlüssel nur nach Rückfrage.
+- **„Seed-Schüler entfernen…“** (nur Entwicklung, sichtbar, solange Pseudo-Schüler in der Datenbank stehen): ruft
+  `POST /api/schild/seed-entfernen` und berechnet die Vorschau neu.
+- **Verbindungsfehler** (P1, gemieteter Server): Proxy (auch mit Windows-Anmeldung), Firewall, DNS, Zertifikat,
+  Zeitüberschreitung, 403/407/502–504 werden verständlich erklärt – auch beim Veröffentlichen von Grundplan und
+  Vertretungen (`OnlineSync.FehlerText`).
+- **Datenschutz:** Die Vorschau (mit Namen) bleibt im Fenster und wird beim Schließen verworfen; „Bericht kopieren“ und das
+  Log nennen nur Zahlen, Kurs- und Gruppenbezeichnungen. Der Schlüssel wird nie angezeigt, gesendet oder geloggt.
+- Als Nächstes **5.2b-2b-2:** „Folgestand erzeugen“ (Pseudo-Export mit Abgängen, Wechseln, Neuaufnahmen) zum Testen aller
+  Kategorien.
+
 ## Vertretungen aus Untis (U-1b und U-2, Desktop)
 
 Übergangsphase: Die Schule plant die Vertretungen weiter in Untis; App und Klassenbuch zeigen sie trotzdem. Nur
@@ -1127,5 +1168,5 @@ Entscheidungen 158–162 (`claude/Projektstand_und_Fahrplan.md` §6).
 4. ~~**Produktiv:** Schlüssel aus Umgebungsvariablen, EF-Migrations, PostgreSQL, CORS auf die
    App-Adresse einschränken, Login-Bremse hinter dem Reverse-Proxy je echter Adresse.~~ Phase 5.1.
 5. **Phase 5.2:** SchILD-NRW-3-Schnittstelle (`.dat`-Dateien) – Import per Desktop statt Pseudodaten-Seed
-   (5.2a Prüflauf und Zuordnung, 5.2b-1 Gültigkeit, **5.2b-2a Import in der API**; als Nächstes 5.2b-2b Reiter „Import“
-   im Desktop).
+   (5.2a Prüflauf und Zuordnung, 5.2b-1 Gültigkeit, 5.2b-2a Import in der API, **5.2b-2b-1 Reiter „Import“ im Desktop**;
+   als Nächstes 5.2b-2b-2 „Folgestand erzeugen“).

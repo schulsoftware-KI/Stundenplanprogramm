@@ -375,6 +375,7 @@ namespace Stundenplan_V2.Vertretung
             TxtZuStatus.Text = (meldung != null ? meldung + " · " : "") +
                                $"Festlegungen: {datei} ({_zuordnung.Anzahl})" +
                                (_zuordnungGeaendert ? " · NICHT GESPEICHERT" : "");
+            ImAnzeigen();   // 5.2b-2b: Voraussetzung „Zuordnung gespeichert“
         }
 
         // =====================================================

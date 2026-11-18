@@ -88,10 +88,8 @@ namespace Stundenplan_V2.Vertretung
 
     public static class GrundplanSync
     {
-        private static readonly HttpClient _http = new HttpClient
-        {
-            Timeout = TimeSpan.FromSeconds(120)
-        };
+        // P1: Proxy von Windows mit Anmeldung des Windows-Benutzers (OnlineVerbindung).
+        private static readonly HttpClient _http = OnlineVerbindung.NeuerClient(TimeSpan.FromSeconds(120));
 
         private static readonly Regex KlassenMuster =
             new(@"^\d{2}[A-Za-z]{1,2}$", RegexOptions.Compiled);

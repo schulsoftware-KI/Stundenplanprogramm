@@ -11,10 +11,12 @@ using System.Windows.Media;
 namespace Stundenplan_V2.Vertretung
 {
     /// <summary>
-    /// Phase 5.2a: Fenster „SchILD-Daten prüfen“ (Knopf „SchILD-Daten…“ im Wocheneditor).
-    /// Prüflauf eines Ordners mit SchILD-NRW-3-Dateien – liest nur, sendet nichts. Gespeichert wird nur auf
+    /// Phase 5.2a: Fenster „SchILD-Daten prüfen und importieren“ (Knopf „SchILD-Daten…“ im Wocheneditor).
+    /// Prüflauf eines Ordners mit SchILD-NRW-3-Dateien – liest nur. Gespeichert wird nur auf
     /// Wunsch: die Formatprofil-Vorlage, ein Pseudo-Export und (5.2a-2) die Festlegungen der Zuordnung
     /// (schild_zuordnung.json, ohne Personendaten; Reiter „Zuordnung“ in SchildDialog_Zuordnung.cs).
+    /// Gesendet wird nur im Reiter „Import“ (5.2b-2b, SchildDialog_Import.cs) – statt Geburtsdatum und SchILD-ID nur
+    /// HMAC-Prüfsummen mit dem Schlüssel dieses Windows-Benutzers.
     /// Die gelesenen Daten liegen nur im Arbeitsspeicher und werden beim Schließen freigegeben.
     /// </summary>
     public partial class SchildDialog : Window
@@ -64,7 +66,12 @@ namespace Stundenplan_V2.Vertretung
             "Zuordnung die Nummer des Kurses; die Vorschau zeigt drei Kurse aus dem Export. Leer = automatisch (erste Ziffernfolge " +
             "nach dem Fach). Mehrere Muster mit ; trennen. Gespeichert mit „Zuordnungen speichern“.\n\n" +
             "Der Bericht („Bericht kopieren“) enthält keine Schülerdaten: nur Zahlen, Zeilennummern, Klassen-, Kurs- " +
-            "und Fachbezeichnungen sowie Lehrkräftekürzel.";
+            "und Fachbezeichnungen sowie Lehrkräftekürzel.\n\n" +
+            "Import (Reiter „Import“, seit 5.2b-2b): Nach einem Prüflauf ohne Fehler und mit gespeicherter Zuordnung schickt " +
+            "„Vorschau berechnen“ die Schüler als Probelauf an die API, „Importieren…“ übernimmt sie. Statt Geburtsdatum und " +
+            "SchILD-ID gehen nur Prüfsummen an den Server; offene Zuordnungen werden nicht übertragen. Die Prüfsummen entstehen " +
+            "mit einem Schlüssel dieses Windows-Benutzers (…\\AppData\\Local\\Stundenplan) – nach dem ersten echten Import mit " +
+            "„Schlüssel sichern…“ sichern. Die Anleitung steht im Reiter „Import“, solange keine Vorschau da ist.";
 
         public SchildDialog(string planOrdner, string schuljahr,
                             Func<(GrundplanPushDto? Plan, string? Hinweis)> planHolen, Action<string>? log = null)
@@ -75,7 +82,9 @@ namespace Stundenplan_V2.Vertretung
             _planHolen = planHolen;
             _log = log;
             TxtDateienHilfe.Text = DateienHilfe;
+            TxtImBericht.Text = ImportHilfe;
             LadeProfil();
+            ImAnzeigen();
         }
 
         // =====================================================
@@ -183,6 +192,7 @@ namespace Stundenplan_V2.Vertretung
             _export = export;
             if (_export == null) { TxtStatus.Text = "Prüflauf fehlgeschlagen."; return; }
             LadeZuordnung(_export.IstPseudo);
+            ImNeuerExport();
             _zuErsteAnzeige = true;
 
             TxtArt.Text = _export.PseudoText;
@@ -228,6 +238,7 @@ namespace Stundenplan_V2.Vertretung
                            : "Prüflauf ohne Fehler und Warnungen.";
             BtnBericht.IsEnabled = true;
             ZeigeZuordnung();
+            ImVorschauVerwerfen(null);   // 5.2b-2b: neue Auswertung → Nutzlast ändert sich
         }
 
         private void Filter_Changed(object sender, RoutedEventArgs e) => FiltereProbleme();
@@ -495,6 +506,7 @@ namespace Stundenplan_V2.Vertretung
             BtnZuVorschlaege.IsEnabled = an && (_ergebnis?.Zuordnung?.VorschlagTexte.Count ?? 0) > 0;
             if (!an) { BtnZuFestlegen.IsEnabled = false; BtnZuEntfernen.IsEnabled = false; TxtZuMuster.IsEnabled = false; BtnZuMuster.IsEnabled = false; }
             else AktualisiereMusterVorschau();
+            ImAnzeigen();   // 5.2b-2b
         }
 
         private void BtnSchliessen_Click(object sender, RoutedEventArgs e) => Close();
@@ -517,6 +529,7 @@ namespace Stundenplan_V2.Vertretung
             DgProbleme.ItemsSource = null;
             DgZuordnung.ItemsSource = null;
             CbAbschnitt.ItemsSource = null;
+            ImSchliessen();   // 5.2b-2b: Vorschau (mit Namen) und Schlüssel freigeben
             _ergebnis = null;
             _export = null;
             base.OnClosed(e);

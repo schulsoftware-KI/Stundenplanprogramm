@@ -83,10 +83,8 @@ namespace Stundenplan_V2.Vertretung
     public class OnlineSync
     {
         private const string EinstellungDatei = "vertretung_online.json";
-        private static readonly HttpClient _http = new HttpClient
-        {
-            Timeout = TimeSpan.FromSeconds(20)
-        };
+        // P1: Proxy von Windows mit Anmeldung des Windows-Benutzers (OnlineVerbindung).
+        private static readonly HttpClient _http = OnlineVerbindung.NeuerClient(TimeSpan.FromSeconds(20));
 
         public string BaseUrl { get; set; } = "";
         public string ApiKey { get; set; } = "";
@@ -192,6 +190,20 @@ namespace Stundenplan_V2.Vertretung
                 else if (text.StartsWith("Server 404", StringComparison.Ordinal))
                     text += "\n\nPrüfe die Server-URL: nur die Adresse ohne Pfad (z. B. https://….trycloudflare.com)." +
                             "\nEinstellungen: " + EinstellungsPfad(ordner);
+                else
+                {
+                    // P1: typische Antworten eines Reverse Proxys bzw. Proxys (403, 407, 502–504)
+                    var m = System.Text.RegularExpressions.Regex.Match(text, @"^Server (\d{3})");
+                    string? s = m.Success ? OnlineVerbindung.StatusErklaerung(int.Parse(m.Groups[1].Value,
+                        System.Globalization.CultureInfo.InvariantCulture)) : null;
+                    if (s != null) text += "\n\n" + s;
+                }
+            }
+            // P1 (Entscheidung 172): Proxy, Firewall, DNS, Zertifikat, Zeitüberschreitung verständlich erklären.
+            if (!text.StartsWith("Server ", StringComparison.Ordinal))
+            {
+                string? erkl = OnlineVerbindung.Erklaerung(ex);
+                if (erkl != null) text += "\n\n" + erkl + "\nEinstellungen: " + EinstellungsPfad(ordner);
             }
             return text;
         }

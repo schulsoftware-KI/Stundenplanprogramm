@@ -10,7 +10,8 @@
     <!-- Phase 5.2a: Prüflauf eines SchILD-NRW-3-Exports (nur lesen, nichts senden), Pseudo-Export und (5.2a-2)
          Zuordnung SchILD ↔ Plan mit Festlegungen von Hand (schild_zuordnung.json); 5.2a-3: Muster der
          Kursbezeichnung und „gemeinsam mit …“; 5.2b-2b: Reiter „Import“ (SchildDialog_Import.cs) – sendet nur
-         dort und nur Prüfsummen statt Geburtsdatum und SchILD-ID. -->
+         dort und nur Prüfsummen statt Geburtsdatum und SchILD-ID; 5.2b-2b-2: „Folgestand erzeugen…“
+         (SchildDialog_Folgestand.cs). -->
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -211,7 +212,7 @@
                     </WrapPanel>
                     <Grid Grid.Row="4">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="380" MinWidth="220"/>
+                            <ColumnDefinition Width="330" MinWidth="220"/>
                             <ColumnDefinition Width="6"/>
                             <ColumnDefinition Width="*" MinWidth="300"/>
                         </Grid.ColumnDefinitions>
@@ -229,7 +230,7 @@
                                       CanUserAddRows="False" CanUserDeleteRows="False" GridLinesVisibility="Horizontal"
                                       SelectionMode="Single">
                                 <DataGrid.Columns>
-                                    <DataGridTemplateColumn Header="Bestätigen" Width="80" SortMemberPath="Bestaetigt">
+                                    <DataGridTemplateColumn Header="Bestätigen" Width="72" SortMemberPath="Bestaetigt">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
                                                 <CheckBox HorizontalAlignment="Center" VerticalAlignment="Center"
@@ -239,18 +240,31 @@
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
-                                    <DataGridTextColumn Header="Kategorie" Binding="{Binding KategorieText}" Width="150"/>
-                                    <DataGridTextColumn Header="Schüler" Binding="{Binding Name}" Width="170"/>
-                                    <DataGridTextColumn Header="Klasse" Binding="{Binding Klasse}" Width="60"/>
-                                    <DataGridTextColumn Header="Jg." Binding="{Binding Stufe}" Width="40"/>
-                                    <DataGridTemplateColumn Header="Änderung" Width="*" SortMemberPath="Aenderung">
+                                    <!-- 5.2b-2b-2: schmalere feste Spalten mit Umbruch, „Änderung“ und „Hinweis“ teilen den Rest 2 : 1 -->
+                                    <DataGridTemplateColumn Header="Kategorie" Width="118" SortMemberPath="KategorieText">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding KategorieText}" TextWrapping="Wrap"/>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTemplateColumn Header="Schüler" Width="130" SortMemberPath="Name">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Name}" TextWrapping="Wrap"/>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="Klasse" Binding="{Binding Klasse}" Width="50"/>
+                                    <DataGridTextColumn Header="Jg." Binding="{Binding Stufe}" Width="34"/>
+                                    <DataGridTemplateColumn Header="Änderung" Width="2*" MinWidth="150" SortMemberPath="Aenderung">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
                                                 <TextBlock Text="{Binding Aenderung}" TextWrapping="Wrap"/>
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
-                                    <DataGridTemplateColumn Header="Hinweis" Width="220" SortMemberPath="HinweisText">
+                                    <DataGridTemplateColumn Header="Hinweis" Width="*" MinWidth="90" SortMemberPath="HinweisText">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
                                                 <TextBlock Text="{Binding HinweisText}" TextWrapping="Wrap"/>
@@ -280,6 +294,9 @@
         <DockPanel Grid.Row="4" Margin="0,10,0,0" LastChildFill="True">
             <Button DockPanel.Dock="Left" x:Name="BtnPseudo" Content="Pseudo-Export erzeugen…" Padding="10,3"
                     Margin="0,0,6,0" Click="BtnPseudo_Click"/>
+            <!-- 5.2b-2b-2 (Entscheidung 171): Folgestand aus einem geprüften Pseudo-Ordner (SchildDialog_Folgestand.cs) -->
+            <Button DockPanel.Dock="Left" x:Name="BtnFolge" Content="Folgestand erzeugen…" Padding="10,3"
+                    Margin="0,0,6,0" IsEnabled="False" Click="BtnFolge_Click" ToolTipService.ShowOnDisabled="True"/>
             <Button DockPanel.Dock="Left" x:Name="BtnProfil" Content="Formatprofil als Datei anlegen…" Padding="10,3"
                     Margin="0,0,6,0" Click="BtnProfil_Click"/>
             <Button DockPanel.Dock="Left" x:Name="BtnBericht" Content="Bericht kopieren" Padding="10,3"

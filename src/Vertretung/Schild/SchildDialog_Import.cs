@@ -123,7 +123,10 @@ namespace Stundenplan_V2.Vertretung
             "Entwicklung sperrt die Vorschau, solange Schüler aus dem Seed in der Datenbank stehen – „Seed-Schüler entfernen…“ " +
             "löscht sie samt Klassenbuchdaten.\n\n" +
             "„Bericht kopieren“ enthält nur Zahlen, Kurs- und Gruppenbezeichnungen – keine Namen. Die Namen der Vorschau bleiben " +
-            "in diesem Fenster.";
+            "in diesem Fenster.\n\n" +
+            "Testen mit Pseudodaten: Nach dem Import eines Pseudo-Exports macht „Folgestand erzeugen…“ (unten) daraus einen " +
+            "neuen Ordner mit typischen Änderungen bis zum nächsten Export. Dann wie bei einem neuen Export: Prüflauf, Vorschau, " +
+            "Abgänge bestätigen, Importieren. Das Fenster nennt die Zahlen, die die Vorschau zeigen sollte.";
 
         internal static string KategorieText(string kategorie) => kategorie switch
         {
@@ -247,6 +250,7 @@ namespace Stundenplan_V2.Vertretung
             BtnImKeine.IsEnabled = an && _imAusgefuehrt == null && bestaetigbar;
             ImZeigeSchluessel();
             ImZeigeAuswahl();
+            FolgeAnzeigen();   // 5.2b-2b-2: „Folgestand erzeugen…“ (gleiche Anlässe: Prüflauf, Zuordnung, laufender Vorgang)
         }
 
         private void ImZeigeSchluessel()

@@ -98,19 +98,19 @@ namespace Stundenplan_V2.Vertretung
             ["MU"] = "Musik", ["SP"] = "Sport", ["WP"] = "Wahlpflicht", ["NW"] = "Naturwissenschaften"
         };
 
-        private static readonly string[] VornamenW =
+        internal static readonly string[] VornamenW =
         {
             "Mia", "Emma", "Hannah", "Lena", "Sophie", "Marie", "Lea", "Anna", "Laura", "Emily", "Clara", "Nele",
             "Ida", "Mila", "Lina", "Jana", "Sarah", "Johanna", "Pia", "Greta", "Leyla", "Aylin", "Fatima", "Sofia",
             "Marta", "Zoë", "Charlotte", "Frieda", "Paula", "Romy", "Elif", "Amelie", "Luisa", "Jule", "Merle", "Ronja"
         };
-        private static readonly string[] VornamenM =
+        internal static readonly string[] VornamenM =
         {
             "Ben", "Paul", "Leon", "Finn", "Luca", "Noah", "Elias", "Jonas", "Luis", "Felix", "Max", "Tim", "Jan",
             "Niklas", "David", "Moritz", "Julian", "Tom", "Erik", "Henry", "Amir", "Yusuf", "Mohammed", "Nino",
             "Ivan", "Jörn", "Mats", "Ole", "Emil", "Anton", "Malte", "Can", "Theo", "Karl", "Matteo", "Jakob"
         };
-        private static readonly string[] Nachnamen =
+        internal static readonly string[] Nachnamen =
         {
             "Müller", "Schmidt", "Schneider", "Fischer", "Weber", "Meyer", "Wagner", "Becker", "Schulz", "Hoffmann",
             "Koch", "Richter", "Bauer", "Klein", "Wolf", "Schröder", "Neumann", "Schwarz", "Zimmermann", "Braun",

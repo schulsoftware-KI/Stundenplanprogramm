@@ -16,7 +16,8 @@ namespace Stundenplan_V2.Vertretung
     /// Wunsch: die Formatprofil-Vorlage, ein Pseudo-Export und (5.2a-2) die Festlegungen der Zuordnung
     /// (schild_zuordnung.json, ohne Personendaten; Reiter „Zuordnung“ in SchildDialog_Zuordnung.cs).
     /// Gesendet wird nur im Reiter „Import“ (5.2b-2b, SchildDialog_Import.cs) – statt Geburtsdatum und SchILD-ID nur
-    /// HMAC-Prüfsummen mit dem Schlüssel dieses Windows-Benutzers.
+    /// HMAC-Prüfsummen mit dem Schlüssel dieses Windows-Benutzers. „Folgestand erzeugen…“ (5.2b-2b-2,
+    /// SchildDialog_Folgestand.cs) schreibt aus einem Pseudo-Ordner einen neuen Ordner mit Änderungen.
     /// Die gelesenen Daten liegen nur im Arbeitsspeicher und werden beim Schließen freigegeben.
     /// </summary>
     public partial class SchildDialog : Window
@@ -71,7 +72,12 @@ namespace Stundenplan_V2.Vertretung
             "„Vorschau berechnen“ die Schüler als Probelauf an die API, „Importieren…“ übernimmt sie. Statt Geburtsdatum und " +
             "SchILD-ID gehen nur Prüfsummen an den Server; offene Zuordnungen werden nicht übertragen. Die Prüfsummen entstehen " +
             "mit einem Schlüssel dieses Windows-Benutzers (…\\AppData\\Local\\Stundenplan) – nach dem ersten echten Import mit " +
-            "„Schlüssel sichern…“ sichern. Die Anleitung steht im Reiter „Import“, solange keine Vorschau da ist.";
+            "„Schlüssel sichern…“ sichern. Die Anleitung steht im Reiter „Import“, solange keine Vorschau da ist.\n\n" +
+            "Folgestand (nur Pseudodaten, zum Testen, seit 5.2b-2b-2): „Folgestand erzeugen…“ macht aus einem geprüften " +
+            "Pseudo-Export einen neuen Ordner „…_Folge1“ (dann „_Folge2“ …) mit typischen Änderungen bis zum nächsten Export: " +
+            "Abgänge, Klassen-, Kurs- und Gruppenwechsel, Namensänderung, korrigiertes Geburtsdatum, Neuaufnahmen, ein fehlender " +
+            "Schüler und wahlweise eine ganz fehlende Klasse. Das Fenster nennt die Änderungen und die Zahlen, die die Vorschau " +
+            "zeigen sollte; dieselbe Liste steht in FOLGESTAND.txt im neuen Ordner. Echte Exporte werden nie verändert.";
 
         public SchildDialog(string planOrdner, string schuljahr,
                             Func<(GrundplanPushDto? Plan, string? Hinweis)> planHolen, Action<string>? log = null)

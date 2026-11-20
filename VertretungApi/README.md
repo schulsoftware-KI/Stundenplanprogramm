@@ -888,8 +888,31 @@ den Reiter **„Import“**. Code: `src/Vertretung/Schild/SchildDialog_Import.cs
   Vertretungen (`OnlineSync.FehlerText`).
 - **Datenschutz:** Die Vorschau (mit Namen) bleibt im Fenster und wird beim Schließen verworfen; „Bericht kopieren“ und das
   Log nennen nur Zahlen, Kurs- und Gruppenbezeichnungen. Der Schlüssel wird nie angezeigt, gesendet oder geloggt.
-- Als Nächstes **5.2b-2b-2:** „Folgestand erzeugen“ (Pseudo-Export mit Abgängen, Wechseln, Neuaufnahmen) zum Testen aller
-  Kategorien.
+- **Spalten der Vorschau** (5.2b-2b-2): schmalere feste Spalten mit Umbruch; „Änderung“ und „Hinweis“ teilen sich den Rest.
+
+## Folgestand erzeugen (Phase 5.2b-2b-2, Desktop, nur Pseudodaten)
+
+Knopf **„Folgestand erzeugen…“** unten im Fenster „SchILD-Daten prüfen und importieren“ (Entscheidung 171). Code:
+`src/Vertretung/Schild/SchildFolgestand.cs`, `SchildDialog_Folgestand.cs`. Keine API- und keine Schemaänderung.
+
+- **Voraussetzung:** ein Ordner mit gültiger Pseudo-Markierung (`PSEUDODATEN.json`, alle Prüfsummen stimmen), Prüflauf ohne
+  Fehler, Zuordnung möglich. Echte Exporte werden weder gelesen noch verändert.
+- **Ergebnis:** neuer Ordner neben dem Ausgangsordner, `<Name>_Folge1` (dann `_Folge2` …; aus `…_Folge1` wird `…_Folge2`),
+  mit neuer Markierung (Nummer, Ausgangsordner, Änderungen nur als Zahlen) und `FOLGESTAND.txt` (Änderungen mit
+  Pseudo-Namen und erwartete Zahlen der Vorschau). Geändert werden nur `SchuelerBasisdaten.dat`,
+  `SchuelerLeistungsdaten.dat` und `SchuelerLernplattformen.dat`; alle anderen Dateien und alle übrigen Zeilen bleiben
+  byte-gleich.
+- **Änderungen** (einzeln abwählbar, Startwert 171 → wiederholbar): 3 Abgänge (Status 9; der erste ist der erste Schüler
+  der ersten Klasse in der Datei, in der Entwicklung meist mit dem Testkonto `s05A` verknüpft), 2 Klassenwechsel Sek I
+  (Leistungsdaten wie ein Mitschüler der neuen Klasse), 3 Kurswechsel Oberstufe (gleiches Fach, Grundkurs, gleiche Stufe,
+  ohne Überschneidung laut Stundenplan), 1 Gruppenwechsel Sek I (parallele Gruppe derselben Klasse), 1 Namensänderung und
+  1 korrigiertes Geburtsdatum (beide mit SchILD-ID), 2 Neuaufnahmen (Status 0, Aufnahme in zwei Wochen; Sek I und EF),
+  1 Schüler fehlt ohne Abgang; wahlweise **eine ganze Klasse fehlt** (die Vorschau muss mit „Teil-Export“ sperren).
+- **Zuordnung bleibt gleich:** benutzt werden nur feste, eindeutige Zuordnungen (bzw. von Hand), jede Liste behält genug
+  Teilnehmer, und neue Zeilen der Leistungsdaten sind Kopien der Zeilen eines anderen Schülers.
+- **Erwartete Vorschau:** Das Fenster nennt die Zahlen, die die Vorschau zeigen sollte, wenn genau der Ausgangsordner
+  importiert ist (alle Abgänge bestätigt) – Kurs-/Gruppenwechsel enthält auch Klassenwechsel, die die Gruppen ändern.
+- **Datenschutz:** Pseudo-Namen nur im Fenster und in `FOLGESTAND.txt`; das Log nennt nur Zahlen.
 
 ## Vertretungen aus Untis (U-1b und U-2, Desktop)
 
@@ -1168,5 +1191,5 @@ Entscheidungen 158–162 (`claude/Projektstand_und_Fahrplan.md` §6).
 4. ~~**Produktiv:** Schlüssel aus Umgebungsvariablen, EF-Migrations, PostgreSQL, CORS auf die
    App-Adresse einschränken, Login-Bremse hinter dem Reverse-Proxy je echter Adresse.~~ Phase 5.1.
 5. **Phase 5.2:** SchILD-NRW-3-Schnittstelle (`.dat`-Dateien) – Import per Desktop statt Pseudodaten-Seed
-   (5.2a Prüflauf und Zuordnung, 5.2b-1 Gültigkeit, 5.2b-2a Import in der API, **5.2b-2b-1 Reiter „Import“ im Desktop**;
-   als Nächstes 5.2b-2b-2 „Folgestand erzeugen“).
+   (5.2a Prüflauf und Zuordnung, 5.2b-1 Gültigkeit, 5.2b-2a Import in der API, 5.2b-2b-1 Reiter „Import“ im Desktop,
+   **5.2b-2b-2 „Folgestand erzeugen“**; als Nächstes 5.2c Abgleich-Feinheiten und Konten).

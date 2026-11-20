@@ -38,6 +38,13 @@ namespace Stundenplan_V2.Vertretung
             public string Sek1Variante { get; set; } = "";
             public Dictionary<string, string> Dateien { get; set; } = new(StringComparer.OrdinalIgnoreCase);
             public List<string> Stolpersteine { get; set; } = new();
+            /// <summary>5.2b-2b-2: 0 = Grundstand aus dem Generator, sonst Nummer des Folgestands (_Folge1 …).</summary>
+            public int Folgestand { get; set; }
+            /// <summary>5.2b-2b-2: Ordner, aus dem der Folgestand entstand (nur der Name).</summary>
+            public string Ausgangsordner { get; set; } = "";
+            public int FolgeStartwert { get; set; }
+            /// <summary>5.2b-2b-2: Änderungen gegenüber dem Ausgangsordner, nur als Zahlen (ohne Namen).</summary>
+            public List<string> Folgeaenderungen { get; set; } = new();
         }
 
         private static readonly JsonSerializerOptions JsonOpt = new()
@@ -109,7 +116,9 @@ namespace Stundenplan_V2.Vertretung
             }
 
             text = $"Pseudodaten (erzeugt am {m.ErzeugtAm}" +
-                   (m.Plan.Length > 0 ? $" aus Plan „{m.Plan}“" : "") + ") – keine echten Personen.";
+                   (m.Plan.Length > 0 ? $" aus Plan „{m.Plan}“" : "") +
+                   (m.Folgestand > 0 ? $", Folgestand {m.Folgestand} von „{m.Ausgangsordner}“" : "") +
+                   ") – keine echten Personen.";
             return true;
         }
     }

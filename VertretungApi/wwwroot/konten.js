@@ -15,6 +15,8 @@
 //             Zuständigkeit, nur per Knopf) und „SchILD-Importe" (Importprotokoll, nur lesen); Namen
 //             der Lehrkräfte laut SchILD in Liste, Detail und Sammelanlage; Filter „laut SchILD aktiv,
 //             gesperrt" (Wiedereintritt) und „Name laut SchILD geändert" mit Vorschlag zum Umbenennen.
+//             P3: Liste „SchILD-Importe“ mit den Zahlen zu Klassenleitung und Lehrkräften (Kleinigkeit a);
+//             „Konto löschen“ rot, „Protokoll dieses Kontos“ normal statt grau (Kleinigkeit b).
 //      Klassenleitung / Stufenkoordination („Schülerpasswörter"): Schülerkonten
 //             der eigenen Klasse/Stufe sehen, Passwort zurücksetzen, sperren/entsperren.
 //  - Startpasswörter erscheinen nur einmal: als Zugangszettel zum Drucken bzw.
@@ -231,6 +233,8 @@ function zeigePflicht() {
   el("klassenbuch").hidden = true;
   fehlzeitenLeeren();
   el("fehlzeiten").hidden = true;
+  einstellungenLeeren();             // P3
+  el("einstellungen").hidden = true;
   if (state.anmeldung && !state.anmeldung.mussPasswortAendern) {
     state.anmeldung.mussPasswortAendern = true;
     anmeldungSpeichern();
@@ -241,8 +245,8 @@ function zeigePflicht() {
   el("pflicht").hidden = false;
   el("aktualisieren").hidden = true;
   el("kontoKnopf").hidden = true;
-  el("titel").textContent = "Stundenplan";
-  document.title = "Passwort festlegen – Stundenplan";
+  el("titel").textContent = appName();
+  document.title = `Passwort festlegen – ${appName()}`;
   el("stand").textContent = "";
   el("grundplan").textContent = "";
   el("pwHeimat").append(el("pwForm"));
@@ -339,6 +343,7 @@ const verwaltungOffen = () => !el("verwaltung").hidden;
 function zeigeVerwaltung() {
   if (!darfKonten()) return;
   kontoSchliessen();
+  if (!einstellungenSchliessen()) return;   // P3: Einstellungen mit Ungespeichertem – abgebrochen
   if (!klassenbuchSchliessen()) return; // Klassenbuch offen mit Ungespeichertem: abgebrochen
   fehlzeitenSchliessen();
   ladenAbbrechen();
@@ -350,7 +355,7 @@ function zeigeVerwaltung() {
   const zust = (state.anmeldung && state.anmeldung.zustaendig) || "";
   const titel = admin ? "Konten verwalten" : zust ? `Schülerkonten ${zust}` : "Schülerkonten";
   el("titel").textContent = titel;
-  document.title = `${titel} – Stundenplan`;
+  document.title = `${titel} – ${appName()}`;
   el("stand").textContent = "";
   el("grundplan").textContent = "";
 
@@ -595,7 +600,8 @@ function kontoDetail(k) {
   }
   if (admin) {
     if (!k.ich) {
-      aktionen.push(knopf("Konto löschen", "leise", (e) =>
+      // P3 (Kleinigkeit b, Entscheidung 199): nicht mehr grau („leise“ sah deaktiviert aus) – Löschen rot.
+      aktionen.push(knopf("Konto löschen", "gefahr", (e) =>
         bestaetigen(e.currentTarget, "Endgültig löschen? Nochmal tippen", () =>
           kontoAktion(e.currentTarget, "DELETE", `api/konten/${k.id}`, () => {
             dialogZu(el("kDialog"));
@@ -603,7 +609,7 @@ function kontoDetail(k) {
             kontenLaden();
           }))));
     }
-    aktionen.push(knopf("Protokoll dieses Kontos", "leise", () => {
+    aktionen.push(knopf("Protokoll dieses Kontos", null, () => {
       dialogZu(el("kDialog"));
       verw.protokollKonto = { id: k.id, name: k.benutzername };
       reiterWaehlen("protokoll");
@@ -1248,6 +1254,14 @@ function importZeile(p) {
   const schluessel = p.kennung
     ? `Schlüssel ${p.kennung}` + (p.neuZuordnung && p.kennungVorher ? ` (bisher ${p.kennungVorher})` : "")
     : "Schlüssel: – (Import vor 5.2c)";
+  // P3 (Kleinigkeit a): Klassenleitung und Namen der Lehrkräfte – nur Zahlen; null = keine Angabe bzw. Import vor P3.
+  const schild = [];
+  if (p.klassenleitungKlassen != null)
+    schild.push(`Klassenleitung: ${p.klassenleitungKlassen} ${p.klassenleitungKlassen === 1 ? "Klasse" : "Klassen"} ` +
+      `(erstmals ${p.klassenleitungNeu}, geändert ${p.klassenleitungGeaendert})`);
+  if (p.lehrkraefte != null)
+    schild.push(`Namen der Lehrkräfte: ${p.lehrkraefte} (neu ${p.lehrkraefteNeu}, geändert ${p.lehrkraefteGeaendert}, ` +
+      `entfernt ${p.lehrkraefteEntfernt})`);
   return h("li", { class: "p-eintrag" },
     h("span", { class: "p-zeit" }, datumZeit(p.zeit)),
     h("span", { class: "p-text" },
@@ -1255,6 +1269,7 @@ function importZeile(p) {
       h("span", { class: "p-wer" }, ` (${p.akteur})`),
       p.neuZuordnung ? h("span", { class: "marke start" }, "Neu-Zuordnung") : null),
     h("span", { class: "p-details" }, zahlen.join(" · ")),
+    schild.length ? h("span", { class: "p-details" }, schild.join(" · ")) : null,
     h("span", { class: "p-details" }, schluessel));
 }
 

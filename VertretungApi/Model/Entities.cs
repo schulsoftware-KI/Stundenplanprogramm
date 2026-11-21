@@ -104,7 +104,8 @@ public class Benutzer
 /// <summary>
 /// Protokoll der Kontenverwaltung (Phase 2, Schritt 5): wer hat wann was mit welchem Konto
 /// gemacht (angelegt, Passwort zurückgesetzt, gesperrt, …). Passwörter stehen hier nie.
-/// Einträge älter als "Konten:ProtokollTage" (Standard 365) werden beim Start gelöscht.
+/// Einträge älter als „Aufbewahrung der Protokolle“ (Einstellungen → Datenschutz, Standard 365 Tage; bis P3
+/// „Konten:ProtokollTage“) werden beim Start und täglich gelöscht (Services/Aufraeumdienst.cs).
 /// </summary>
 public class KontoProtokoll
 {

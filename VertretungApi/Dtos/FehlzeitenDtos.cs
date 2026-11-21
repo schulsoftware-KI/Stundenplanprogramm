@@ -94,7 +94,7 @@ public record FzRechteDto(
     bool Admin,
     IReadOnlyList<string> Klassen,         // wählbare Klassen/Stufen (Zuständigkeit bzw. Admin: alle)
     DateOnly ErfassungAb,
-    bool Berichte);                        // Phase 4.2: darf PDFs herunterladen (Berichte:NurAdmin)
+    bool Berichte);                        // Phase 4.2: darf PDFs herunterladen (Einstellung „Downloads nur für die Verwaltung“)
 
 /// <summary>Nicht erfasste Stunden (offen ab dem Folgetag); Phase 3.3: auch Stunden ohne Thema.</summary>
 public record FzNichtErfasstDto(

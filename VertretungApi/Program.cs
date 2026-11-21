@@ -146,6 +146,11 @@ builder.Services.AddAuthorization(o =>
 
 builder.Services.AddSingleton<LoginBremse>();
 
+// P3 (E-1): Schuleinstellungen aus der Datenbank (mit Zwischenspeicher, wirken ohne Neustart) und das tägliche
+// Aufräumen nach Fristen (3 Uhr). Der Lauf beim Start steht in DatenbankStart.
+builder.Services.AddSingleton<Schuleinstellungen>();
+builder.Services.AddHostedService<Aufraeumdienst>();
+
 var app = builder.Build();
 
 // Datenbank anlegen bzw. auf den Stand des Programms bringen, Protokolle aufräumen
@@ -218,6 +223,32 @@ app.Use(async (ctx, next) =>
         "base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
     if (ctx.Request.Path.StartsWithSegments("/api"))
         h["Cache-Control"] = "no-store";
+    await next();
+});
+
+// P3 (E-1): Das Manifest der PWA erzeugt die API – Name der App = Kurzname der Schule (Einstellungen).
+// Eine alte Datei wwwroot/manifest.webmanifest wird dadurch nicht mehr ausgeliefert.
+app.Use(async (ctx, next) =>
+{
+    if ((HttpMethods.IsGet(ctx.Request.Method) || HttpMethods.IsHead(ctx.Request.Method))
+        && ctx.Request.Path.Equals("/manifest.webmanifest", StringComparison.OrdinalIgnoreCase))
+    {
+        SchulWerte? werte = null;
+        try
+        {
+            werte = await ctx.RequestServices.GetRequiredService<Schuleinstellungen>()
+                .LesenAsync(ctx.RequestServices.GetRequiredService<AppDbContext>(), ctx.RequestAborted);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            app.Logger.LogWarning(ex, "Manifest: Einstellungen nicht lesbar – Standardname.");
+        }
+        ctx.Response.ContentType = "application/manifest+json; charset=utf-8";
+        ctx.Response.Headers.CacheControl = "no-cache";
+        if (HttpMethods.IsGet(ctx.Request.Method))
+            await ctx.Response.WriteAsync(PwaManifest.Json(werte), ctx.RequestAborted);
+        return;
+    }
     await next();
 });
 

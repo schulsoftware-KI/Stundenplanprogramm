@@ -20,11 +20,13 @@ public class StammdatenController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration _cfg;
+    private readonly Schuleinstellungen _einst;
 
-    public StammdatenController(AppDbContext db, IConfiguration cfg)
+    public StammdatenController(AppDbContext db, IConfiguration cfg, Schuleinstellungen einst)
     {
         _db = db;
         _cfg = cfg;
+        _einst = einst;
     }
 
     /// <summary>
@@ -48,7 +50,7 @@ public class StammdatenController : ControllerBase
             return Conflict(new { fehler = "Es sind echte Schülerdaten vorhanden – Pseudodaten werden nicht erzeugt." });
 
         string sj = string.IsNullOrWhiteSpace(schuljahr)
-            ? (_cfg["DefaultSchuljahr"] ?? "2026/27")
+            ? _einst.Lesen(_db).Schuljahr   // P3 (E-1): aktuelles Schuljahr aus den Einstellungen
             : schuljahr;
 
         // Schritt 5: Schülerkonten der alten Pseudo-Schüler lösen bzw. entfernen, bevor die

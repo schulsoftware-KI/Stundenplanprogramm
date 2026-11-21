@@ -238,7 +238,7 @@ public static class ExportService
     /// </summary>
     public static async Task<ArchivErgebnis> ArchivSchreibenAsync(
         AppDbContext db, KbNutzer u, DateOnly von, DateOnly bis, bool schuelerEintraege,
-        Stream ziel, ILogger log, CancellationToken ct)
+        Stream ziel, ILogger log, CancellationToken ct, string? schule = null)
     {
         var bisEff = BisHoechstensHeute(bis);
         var tage = await WochenplanService.TageAsync(db, von, bisEff);
@@ -314,7 +314,7 @@ public static class ExportService
                 try
                 {
                     var bericht = await BerichtService.KlassenbuchAsync(db, u, k, von, bisEff, schuelerEintraege, tage);
-                    var pdf = KlassenbuchPdf.Erzeuge(bericht);
+                    var pdf = KlassenbuchPdf.Erzeuge(bericht, schule);
                     string name = Eindeutig("Klassen/" + BerichtService.Dateiname(bericht.Kopf));
                     Schreibe(zip, name, pdf);
                     dateienKlassen.Add(name);
@@ -335,7 +335,7 @@ public static class ExportService
                 {
                     var bericht = await BerichtService.KursheftAsync(db, u, kurs.UNr, kurs.Lehrer, kurs.Fach, kurs.Klassen,
                         von, bisEff, schuelerEintraege, tage);
-                    var pdf = KlassenbuchPdf.Erzeuge(bericht);
+                    var pdf = KlassenbuchPdf.Erzeuge(bericht, schule);
                     string datei = BerichtService.SichererName(
                         $"Kursheft_{kurs.Fach}_{string.Join("_", kurs.Klassen)}_{kurs.Lehrer}_UNr{kurs.UNr}_{von:yyyy-MM-dd}_{bisEff:yyyy-MM-dd}",
                         ".pdf");

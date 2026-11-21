@@ -305,7 +305,7 @@ public class KlassenbuchEintrag
 /// <summary>
 /// Phase 4.2 (Entscheidung 50): Protokoll der Downloads mit Schülerdaten (PDF, später CSV/Archiv).
 /// Gespeichert wird nur wer, wann, was und welcher Zeitraum – nie der Inhalt. Tabelle
-/// "DownloadProtokolle", aufgeräumt nach „Konten:ProtokollTage" (wie das Kontenprotokoll).
+/// "DownloadProtokolle", aufgeräumt nach „Aufbewahrung der Protokolle“ (Einstellungen, wie das Kontenprotokoll).
 /// </summary>
 public class DownloadProtokoll
 {

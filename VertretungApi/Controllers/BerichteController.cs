@@ -20,7 +20,8 @@ namespace VertretungApi.Controllers;
 ///   GET api/berichte/fehlzeiten-csv?klasse=|alle=true&amp;von=&amp;bis=          CSV (KL/SK zuständig, Admin; „alle" nur Admin)
 ///   GET api/berichte/archiv?von=&amp;bis=&amp;schuelerEintraege=               Jahresarchiv als Zip (nur Admin)
 /// Zeitraum ohne von/bis: das laufende Schuljahr; er endet spätestens heute.
-/// „Berichte:NurAdmin" = true: Downloads nur für Admin (Entscheidung 50, vorbereitet).
+/// „Downloads nur für die Verwaltung“ (Einstellungen → Datenschutz, seit P3; vorher „Berichte:NurAdmin“): nur Admin
+/// (Entscheidung 50).
 /// Jeder Download wird protokolliert (wer, wann, was, Zeitraum – ohne Inhalt).
 /// </summary>
 [ApiController]
@@ -29,24 +30,18 @@ namespace VertretungApi.Controllers;
 public class BerichteController : ControllerBase
 {
     private readonly AppDbContext _db;
-    private readonly IConfiguration _cfg;
     private readonly ILogger<BerichteController> _log;
+    private readonly Schuleinstellungen _einst;
 
-    public BerichteController(AppDbContext db, IConfiguration cfg, ILogger<BerichteController> log)
+    public BerichteController(AppDbContext db, ILogger<BerichteController> log, Schuleinstellungen einst)
     {
         _db = db;
-        _cfg = cfg;
         _log = log;
+        _einst = einst;
     }
 
-    private bool NurAdmin => _cfg.GetValue("Berichte:NurAdmin", false);
-
-    /// <summary>Ab diesem Tag gelten Stunden ohne Anwesenheit als „nicht erfasst" (wie in den Fehlzeiten).</summary>
-    private DateOnly ErfassungAb()
-        => DateOnly.TryParseExact(_cfg["Klassenbuch:ErfassungAb"], "yyyy-MM-dd", CultureInfo.InvariantCulture,
-               DateTimeStyles.None, out var d)
-            ? d
-            : new DateOnly(2026, 11, 2);
+    /// <summary>P3 (E-1): „Downloads nur für die Verwaltung“ aus den Schuleinstellungen (wirkt sofort).</summary>
+    private async Task<bool> NurAdminAsync() => (await _einst.LesenAsync(_db)).BerichteNurAdmin;
 
     [HttpGet("unterrichte")]
     public async Task<IActionResult> Unterrichte([FromQuery] string? klasse)
@@ -65,7 +60,7 @@ public class BerichteController : ControllerBase
     {
         var u = await NutzerAsync();
         if (u == null) return Unauthorized();
-        if (NurAdmin && !u.IstAdmin) return Gesperrt();
+        if (!u.IstAdmin && await NurAdminAsync()) return Gesperrt();
         if (string.IsNullOrWhiteSpace(klasse)) return BadRequest(new { fehler = "Die Klasse fehlt." });
         if (!BerichtService.DarfKlassenbuch(u, klasse))
             return StatusCode(403, new { fehler = "Das Klassenbuch drucken die Klassenleitung bzw. Stufenkoordination und die Verwaltung." });
@@ -82,7 +77,7 @@ public class BerichteController : ControllerBase
     {
         var u = await NutzerAsync();
         if (u == null) return Unauthorized();
-        if (NurAdmin && !u.IstAdmin) return Gesperrt();
+        if (!u.IstAdmin && await NurAdminAsync()) return Gesperrt();
         if (string.IsNullOrWhiteSpace(lehrer)) return BadRequest(new { fehler = "Die Lehrkraft fehlt." });
 
         var info = await BerichtService.UnterrichtInfoAsync(_db, unr, lehrer);
@@ -138,7 +133,7 @@ public class BerichteController : ControllerBase
     /// </summary>
     private async Task<(List<string>? Gruppen, IActionResult? Fehler)> CsvGruppenAsync(KbNutzer u, string? klasse, bool alle)
     {
-        if (NurAdmin && !u.IstAdmin) return (null, Gesperrt());
+        if (!u.IstAdmin && await NurAdminAsync()) return (null, Gesperrt());
         if (alle)
         {
             if (!u.IstAdmin)
@@ -168,7 +163,7 @@ public class BerichteController : ControllerBase
         // Nur zum Zählen: die Admin-Sicht von „nicht erfasst", gefiltert auf die oben geprüfte Klasse/Stufe
         // (bzw. ungefiltert bei „alle", das nur der Admin darf). Zurück geht allein die Anzahl.
         var zaehler = new KbNutzer(u.Name, BenutzerRolle.Admin, null, Array.Empty<string>());
-        var erfassungAb = ErfassungAb();
+        var erfassungAb = (await _einst.LesenAsync(_db)).ErfassungAb;
         var ne = await FehlzeitenService.NichtErfasstAsync(_db, zaehler, "alle", null, alle ? null : gruppen![0],
             erfassungAb, erfassungAb, "anwesenheit", v, bisEff);
         return Ok(await ExportService.PruefenAsync(_db, gruppen!, v, bisEff, ne.Anzahl, erfassungAb));
@@ -230,7 +225,8 @@ public class BerichteController : ControllerBase
         {
             datei = new FileStream(Path.Combine(Path.GetTempPath(), $"klassenbuch-archiv-{Guid.NewGuid():N}.zip"),
                 FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 81920, FileOptions.DeleteOnClose);
-            var erg = await ExportService.ArchivSchreibenAsync(_db, u, v, b, schuelerEintraege, datei, _log, ct);
+            var erg = await ExportService.ArchivSchreibenAsync(_db, u, v, b, schuelerEintraege, datei, _log, ct,
+                (await _einst.LesenAsync(_db, ct)).SchuleName);
 
             string was = $"{Anzahl(erg.Klassen, "Klassenbuch", "Klassenbücher")}, {Anzahl(erg.Kurse, "Kursheft", "Kurshefte")}"
                          + (erg.Fehler.Count > 0 ? $", {erg.Fehler.Count} nicht erstellt" : "");
@@ -276,7 +272,7 @@ public class BerichteController : ControllerBase
         byte[] pdf;
         try
         {
-            pdf = KlassenbuchPdf.Erzeuge(bericht);
+            pdf = KlassenbuchPdf.Erzeuge(bericht, (await _einst.LesenAsync(_db)).SchuleName);
         }
         catch (Exception ex)
         {

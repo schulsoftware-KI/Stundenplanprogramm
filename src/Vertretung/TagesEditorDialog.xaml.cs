@@ -270,6 +270,23 @@ namespace Stundenplan_V2.Vertretung
 
             int anz = tp.Zellen.Count(z => z.IstGeaendert);
 
+            // P3 (Kleinigkeit c, Entscheidung 199): Passt der geladene Plan zum Grundplan, der in der App an diesem Tag gilt?
+            bool planOk;
+            BtnOnlinePush.IsEnabled = false;
+            SetzeInfo("Prüfe den Grundplan in der App …");
+            try
+            {
+                planOk = await GrundplanAbgleich.FragenAsync(this, einst, _daten.Schuljahr ?? "", _plan?.GewaehltePlanSpalte ?? "",
+                    CbPlan.SelectedItem as string, tag, tag, "Online veröffentlichen");
+            }
+            finally { BtnOnlinePush.IsEnabled = true; }
+            if (!planOk)
+            {
+                SetzeInfo("Nicht veröffentlicht (der Plan passt nicht zum Grundplan in der App).");
+                return;
+            }
+            SetzeInfo("");
+
             // U-1b (Entscheidung 120): Kommen die Vertretungen aus Untis, ersetzt dieser Tag die Untis-Vertretungen.
             if (einst.QuelleIstUntis)
             {

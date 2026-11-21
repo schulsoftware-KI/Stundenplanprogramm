@@ -51,6 +51,8 @@
   <!-- Anmeldung (Phase 2, Schritt 4) -->
   <main id="anmeldung" class="anmeldung" hidden>
     <form id="anmeldeForm" class="karte" novalidate>
+      <!-- P3 (E-1, Entscheidung 201): Name der Schule aus den Einstellungen -->
+      <p id="schulName" class="schul-name" hidden></p>
       <h2 class="karte-titel">Anmelden</h2>
       <p id="anmeldeHinweis" class="hinweis" role="status" hidden></p>
 
@@ -65,11 +67,11 @@
         <button id="zeigen" class="textknopf klein" type="button" aria-controls="passwort" aria-pressed="false">Anzeigen</button>
       </div>
 
-      <label class="schalter bleiben">
+      <label id="bleibenBox" class="schalter bleiben">
         <input id="bleiben" type="checkbox" />
         <span>Angemeldet bleiben</span>
       </label>
-      <p class="kleingedruckt">Nur auf dem eigenen Gerät. Sonst endet die Anmeldung, wenn du den Browser schließt.</p>
+      <p id="bleibenText" class="kleingedruckt">Nur auf dem eigenen Gerät. Sonst endet die Anmeldung, wenn du den Browser schließt.</p>
 
       <p id="anmeldeFehler" class="fehler" role="alert" hidden></p>
 
@@ -262,8 +264,8 @@
     <!-- Phase 4.3 (Entscheidung 65): Download-Protokoll -->
     <section id="vDownloads" class="verw-bereich" aria-label="Downloads" hidden>
       <p class="kleingedruckt ohne-einzug">Wer hat wann welche Datei mit Schülerdaten geladen – PDFs, CSV-Dateien
-        und Jahresarchive. Gespeichert wird nur, was geladen wurde, nicht der Inhalt. Einträge werden nach einem
-        Jahr gelöscht.</p>
+        und Jahresarchive. Gespeichert wird nur, was geladen wurde, nicht der Inhalt. Einträge werden nach der
+        Aufbewahrungsfrist gelöscht (Einstellungen → Datenschutz, Standard ein Jahr).</p>
       <div class="k-filter d-filter">
         <label for="dArt" class="vh">Art</label>
         <select id="dArt" class="eingabe">
@@ -279,6 +281,37 @@
       </div>
       <p id="dInfo" class="such-info" role="status"></p>
       <ul id="dListe" class="p-liste" aria-label="Downloads"></ul>
+    </section>
+  </main>
+
+  <!-- P3 (E-1): Schuleinstellungen, nur Admin (Entscheidungen 138–141, 199–203). Karten baut einstellungen.js. -->
+  <main id="einstellungen" class="verwaltung einstellungen" hidden>
+    <div class="verw-kopf">
+      <button id="esZurueck" class="textknopf" type="button">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Zum Plan
+      </button>
+    </div>
+
+    <div id="esReiter" class="modi verw-reiter" role="tablist" aria-label="Bereich">
+      <button type="button" role="tab" data-reiter="werte" aria-selected="true">Einstellungen</button>
+      <button type="button" role="tab" data-reiter="protokoll" aria-selected="false">Protokoll</button>
+    </div>
+
+    <section id="esWerte" class="verw-bereich" aria-label="Einstellungen">
+      <p class="kleingedruckt ohne-einzug">Werte der Schule – sie gelten sofort, ohne Neustart, und jede Änderung steht im
+        Protokoll. Leer bzw. „Standard“ heißt: wie bisher. Was vor dem Start feststehen muss (Datenbank, Schlüssel,
+        Adresse), steht weiter in der Einstellungsdatei des Servers.</p>
+      <p id="esInfo" class="such-info" role="status"></p>
+      <div id="esHinweise"></div>
+      <div id="esGruppen" class="es-gruppen"></div>
+    </section>
+
+    <section id="esProtokoll" class="verw-bereich" aria-label="Protokoll der Einstellungen" hidden>
+      <p class="kleingedruckt ohne-einzug">Wer hat wann welche Einstellung geändert – alter und neuer Wert. Einträge werden
+        nach der Aufbewahrungsfrist gelöscht (Datenschutz → „Aufbewahrung der Protokolle“).</p>
+      <p id="esPInfo" class="such-info" role="status"></p>
+      <ul id="esPListe" class="p-liste" aria-label="Änderungen der Einstellungen"></ul>
     </section>
   </main>
 
@@ -653,6 +686,7 @@
     <button id="haKnopf" class="menuepunkt" type="button" hidden>Hausaufgaben</button>
     <button id="fzKnopf" class="menuepunkt" type="button" hidden>Klassenbuch</button>
     <button id="kontenKnopf" class="menuepunkt" type="button" hidden>Konten verwalten</button>
+    <button id="esKnopf" class="menuepunkt" type="button" hidden>Einstellungen</button>
     <button id="hilfeMenue" class="menuepunkt" type="button" aria-haspopup="dialog">Hilfe</button>
     <button id="pwAendernKnopf" class="menuepunkt" type="button">Passwort ändern</button>
     <button id="abmelden" class="menuepunkt" type="button">Abmelden</button>
@@ -950,6 +984,7 @@
   <script src="fehlzeiten.js"></script>
   <script src="hausaufgaben.js"></script>
   <script src="eintraege.js"></script>
+  <script src="einstellungen.js"></script>
   <script src="hilfe.js"></script>
   <script src="app.js"></script>
 </body>

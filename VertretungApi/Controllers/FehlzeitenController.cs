@@ -33,46 +33,24 @@ namespace VertretungApi.Controllers;
 public class FehlzeitenController : ControllerBase
 {
     private readonly AppDbContext _db;
-    private readonly IConfiguration _cfg;
+    private readonly Schuleinstellungen _einst;
 
-    public FehlzeitenController(AppDbContext db, IConfiguration cfg)
+    public FehlzeitenController(AppDbContext db, Schuleinstellungen einst)
     {
         _db = db;
-        _cfg = cfg;
+        _einst = einst;
     }
 
-    /// <summary>Ab diesem Tag gelten Stunden ohne Anwesenheit als „nicht erfasst" (Klassenbuch:ErfassungAb).</summary>
-    private DateOnly ErfassungAb()
-        => DateOnly.TryParseExact(_cfg["Klassenbuch:ErfassungAb"], "yyyy-MM-dd", CultureInfo.InvariantCulture,
-               DateTimeStyles.None, out var d)
-            ? d
-            : new DateOnly(2026, 11, 2);
-
-    /// <summary>
-    /// Phase 3.3: Ab diesem Tag gelten erfasste Stunden ohne Thema als offen (Klassenbuch:ThemaAb);
-    /// fehlt die Einstellung, gilt ErfassungAb.
-    /// </summary>
-    private DateOnly ThemaAb()
-        => DateOnly.TryParseExact(_cfg["Klassenbuch:ThemaAb"], "yyyy-MM-dd", CultureInfo.InvariantCulture,
-               DateTimeStyles.None, out var d)
-            ? d
-            : ErfassungAb();
-
-    /// <summary>
-    /// Phase 4.1: erster Tag des 2. Halbjahres (Klassenbuch:HalbjahrAb); fehlt die Einstellung oder
-    /// liegt sie nicht im Schuljahr, gilt der 1. Februar.
-    /// </summary>
-    private DateOnly? HalbjahrAb()
-        => DateOnly.TryParseExact(_cfg["Klassenbuch:HalbjahrAb"], "yyyy-MM-dd", CultureInfo.InvariantCulture,
-               DateTimeStyles.None, out var d)
-            ? d
-            : null;
+    // P3 (E-1): „Anwesenheit erfasst ab“, „Thema erfasst ab“ und „2. Halbjahr ab“ kommen aus den Schuleinstellungen
+    // (vorher Klassenbuch:ErfassungAb/ThemaAb/HalbjahrAb in appsettings). Standard: erster Schultag laut Kalender,
+    // Thema wie Anwesenheit, 2. Halbjahr ab 1. Februar (FehlzeitenService.HalbjahrAb).
+    private Task<SchulWerte> WerteAsync() => _einst.LesenAsync(_db);
 
     /// <summary>Phase 4.1 (Entscheidung 40): wählbare Zeiträume – auch für Schülerkonten.</summary>
     [Authorize]
     [HttpGet("zeitraeume")]
     public async Task<IActionResult> Zeitraeume()
-        => Ok(await FehlzeitenService.ZeitraeumeAsync(_db, HalbjahrAb()));
+        => Ok(await FehlzeitenService.ZeitraeumeAsync(_db, (await WerteAsync()).HalbjahrAb));
 
     [Authorize(Roles = Rollen.Personal)]
     [HttpGet("rechte")]
@@ -80,7 +58,8 @@ public class FehlzeitenController : ControllerBase
     {
         var u = await NutzerAsync();
         if (u == null) return Unauthorized();
-        return Ok(await FehlzeitenService.RechteAsync(_db, u, ErfassungAb(), _cfg.GetValue("Berichte:NurAdmin", false)));
+        var w = await WerteAsync();
+        return Ok(await FehlzeitenService.RechteAsync(_db, u, w.ErfassungAb, w.BerichteNurAdmin));
     }
 
     [Authorize(Roles = Rollen.Personal)]
@@ -102,7 +81,8 @@ public class FehlzeitenController : ControllerBase
         if (!erlaubt) return StatusCode(403, new { fehler = "Diese Übersicht steht dir nicht zur Verfügung." });
         string was = (art ?? "alle").Trim().ToLowerInvariant();
         if (was is not ("alle" or "anwesenheit" or "thema")) was = "alle";
-        return Ok(await FehlzeitenService.NichtErfasstAsync(_db, u, a, lehrer, klasse, ErfassungAb(), ThemaAb(), was, von, bis));
+        var w = await WerteAsync();
+        return Ok(await FehlzeitenService.NichtErfasstAsync(_db, u, a, lehrer, klasse, w.ErfassungAb, w.ThemaAb, was, von, bis));
     }
 
     [Authorize(Roles = Rollen.Personal)]

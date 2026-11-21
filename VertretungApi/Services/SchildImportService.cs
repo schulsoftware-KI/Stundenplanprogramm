@@ -1463,7 +1463,15 @@ public sealed class SchildImportLauf
             NeuZuordnung = _dto.Neuzuordnung,
             KennungVorher = _dto.Neuzuordnung ? _letzteKennung : null,
             Zusammengefuehrt = Zusammengefuehrt,
-            NeuZugeordnet = NeuZugeordnet
+            NeuZugeordnet = NeuZugeordnet,
+            // P3 (Kleinigkeit a): Klassenleitung und Namen der Lehrkräfte – dieselben Zahlen wie in Bericht und Log
+            KlassenleitungKlassen = _dto.Klassenleitungen?.Count,
+            KlassenleitungNeu = KlassenleitungNeu,
+            KlassenleitungGeaendert = KlassenleitungGeaendert,
+            Lehrkraefte = _dto.Lehrkraefte is { Count: > 0 } ? LehrkraefteGesamt : null,
+            LehrkraefteNeu = LehrkraefteNeu,
+            LehrkraefteGeaendert = LehrkraefteGeaendert,
+            LehrkraefteEntfernt = LehrkraefteEntfernt
         };
         db.SchildImportProtokolle.Add(p);
         return p;

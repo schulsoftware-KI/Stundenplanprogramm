@@ -67,7 +67,7 @@ function hausaufgabenOeffnen() {
   el("hausaufgaben").hidden = false;
   el("aktualisieren").hidden = false;
   el("titel").textContent = "Hausaufgaben";
-  document.title = "Hausaufgaben – Stundenplan";
+  document.title = `Hausaufgaben – ${appName()}`;
   el("stand").textContent = "";
   el("grundplan").textContent = "";
   window.scrollTo(0, 0);

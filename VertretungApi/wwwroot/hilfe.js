@@ -72,8 +72,10 @@ const HI_THEMEN = [
     id: "anmelden", gruppe: "alle", titel: "Anmelden", ohneAnmeldung: true,
     inhalt: [
       "Melde dich mit deinem Benutzernamen an – Groß- und Kleinschreibung ist egal.",
-      "**Angemeldet bleiben** nur auf deinem eigenen Gerät: Dann bleibst du 30 Tage angemeldet. Sonst endet die " +
-        "Anmeldung, wenn du den Browser schließt.",
+      // P3: Dauer aus den Einstellungen der Schule ({bleibenTage}); 0 = „Angemeldet bleiben“ gibt es nicht.
+      { nur: "bleiben", teile: ["**Angemeldet bleiben** nur auf deinem eigenen Gerät: Dann bleibst du bis zu " +
+        "{bleibenTage} angemeldet. Sonst endet die Anmeldung, wenn du den Browser schließt."] },
+      { nur: "ohneBleiben", teile: ["Die Anmeldung endet, wenn du den Browser schließt."] },
       "Nach mehreren falschen Versuchen musst du kurz warten, bevor es wieder geht.",
       "Mit einem **Startpasswort** legst du beim ersten Anmelden ein eigenes Passwort fest – erst danach geht es weiter.",
       "**Passwort vergessen?** Ein neues Startpasswort bekommst du von deiner Klassenleitung bzw. " +
@@ -346,7 +348,8 @@ const HI_THEMEN = [
       "**Konten:** anlegen, bearbeiten, Passwort zurücksetzen, sperren, auf allen Geräten abmelden, löschen.",
       "**Sammelanlage:** Lehrkräfte aus dem Grundplan bzw. Schüler je Klasse oder Stufe. Danach die Zugangszettel " +
         "drucken oder als CSV speichern, bevor du die Liste schließt – die Startpasswörter sind danach weg.",
-      "**Protokoll:** wer wann was an welchem Konto geändert hat – ohne Passwörter, ein Jahr lang.",
+      "**Protokoll:** wer wann was an welchem Konto geändert hat – ohne Passwörter. Wie lange es aufbewahrt wird, " +
+        "steht unter Kontomenü → „Einstellungen“ → Datenschutz (Standard ein Jahr).",
       "**Downloads:** wer wann welche Datei mit Schülerdaten geladen hat.",
       "**SchILD:** Vorschläge für Klassenleitungen laut SchILD und die Liste der SchILD-Importe (siehe eigene Themen).",
       "Bei Lehrkräften steht der **Name laut SchILD** neben dem Kürzel (nur für dich und die Lehrkraft selbst sichtbar); " +
@@ -384,6 +387,35 @@ const HI_THEMEN = [
     ],
   },
   {
+    // P3 (E-1, Entscheidungen 138–141, 199–203)
+    id: "einstellungen", gruppe: "admin", titel: "Einstellungen der Schule",
+    inhalt: [
+      "Kontomenü → „Einstellungen“: die Werte deiner Schule. Sie gelten **sofort**, ohne Neustart. Jede Änderung " +
+        "steht im Reiter „Protokoll“ (wer, wann, alter und neuer Wert).",
+      "Gespeichert wird je Karte mit „Speichern“; „Verwerfen“ stellt die Karte wieder her. **Standard** leert ein Feld – " +
+        "dann gilt wieder das bisherige Verhalten (unter jedem Feld steht, was das ist und was gerade gilt).",
+      { zwischen: "Schule" },
+      "**Name der Schule** steht auf der Anmeldeseite und im Kopf der PDFs. Der **Kurzname** ist der Name der App im " +
+        "Fenstertitel und auf dem Startbildschirm – am besten höchstens 12 Zeichen. Beides ist auch vor der Anmeldung " +
+        "sichtbar. Eine schon installierte App behält ihren Namen meist, bis sie neu installiert wird.",
+      { zwischen: "Schuljahr" },
+      "**Aktuelles Schuljahr**, **Anwesenheit erfasst ab**, **Thema erfasst ab** und **2. Halbjahr ab** gelten für das " +
+        "ganze Schuljahr. Die Daten müssen im Schuljahr laut Kalender liegen; der Kalender kommt mit „Grundplan " +
+        "veröffentlichen…“ aus dem Desktop.",
+      { zwischen: "Datenschutz und Anmeldung" },
+      "Diese Werte vor dem Echtbetrieb mit der bzw. dem **Datenschutzbeauftragten** abstimmen und „Abgestimmt am“ und " +
+        "„mit“ eintragen. Änderst du später einen dieser Werte, entfällt die Abstimmung – dann neu eintragen.",
+      "**Löschfrist** und **Aufbewahrung der Protokolle:** Eine kürzere Frist löscht ältere Daten gleich beim " +
+        "Speichern. Vorher steht da, wie viele – „Speichern“ musst du dann ein zweites Mal tippen. Danach räumt der " +
+        "Server jede Nacht auf.",
+      "**Dauer einer Anmeldung** und **„Angemeldet bleiben“** gelten für neue Anmeldungen; wer schon angemeldet ist, " +
+        "bleibt es bis zum Ende der bisherigen Dauer. 0 Tage bei „Angemeldet bleiben“ blendet den Haken auf der " +
+        "Anmeldeseite aus.",
+      "Was vor dem Start des Servers feststehen muss (Datenbank, Schlüssel, Adresse), steht weiter in der " +
+        "Einstellungsdatei des Servers und ist hier nicht zu sehen.",
+    ],
+  },
+  {
     id: "gruppenlisten", gruppe: "admin", titel: "Gruppenlisten",
     inhalt: [
       "Kontomenü → „Gruppenlisten“: alle Schülergruppen aus dem Plan an einem Ort.",
@@ -410,7 +442,8 @@ const HI_THEMEN = [
       "Konten verwalten → „Downloads“ zeigt, wer wann welche Datei mit Schülerdaten geladen hat: Klassenbuch- und " +
         "Kursheft-PDFs, Fehlzeiten-CSV und Jahresarchive – mit Zeitraum und ob Schülereinträge enthalten waren.",
       "Filtern kannst du nach Art und nach Person (Teil des Benutzernamens).",
-      "Gespeichert wird nur, was geladen wurde, nicht der Inhalt. Einträge werden nach einem Jahr gelöscht.",
+      "Gespeichert wird nur, was geladen wurde, nicht der Inhalt. Einträge werden nach der Aufbewahrungsfrist " +
+        "gelöscht (Einstellungen → Datenschutz, Standard ein Jahr).",
     ],
   },
 ];
@@ -459,6 +492,8 @@ function hiNur(nur, r) {
   if (nur === "admin") return r.admin;
   if (nur === "app") return alsApp();
   if (nur === "keineApp") return !alsApp();
+  if (nur === "bleiben") return state.bleibenTage > 0;       // P3
+  if (nur === "ohneBleiben") return !(state.bleibenTage > 0);
   return true;
 }
 
@@ -472,6 +507,7 @@ function hiKontext() {
   const r = hiRollen();
   if (hiSichtbar("anmeldung")) return { themen: ["anmelden", "startbildschirm"] };
   if (hiSichtbar("pflicht")) return { themen: ["konto", "anmelden"] };
+  if (hiSichtbar("einstellungen")) return { themen: ["einstellungen", "konten", "downloads"] };   // P3
   if (hiSichtbar("verwaltung")) {
     if (r.admin && verw.reiter === "downloads") return { themen: ["downloads", "konten"] };
     if (r.admin && verw.reiter === "schild")
@@ -527,7 +563,10 @@ function hiKontextThemen() {
 
 /** „**fett**" -> <strong>; sonst reiner Text (kein innerHTML). */
 function hiText(s) {
-  return String(s).split("**").map((t, i) => (i % 2 ? h("strong", null, t) : t));
+  // P3: Platzhalter aus den Einstellungen der Schule
+  const tage = state.bleibenTage;
+  const text = String(s).replace("{bleibenTage}", `${tage} ${tage === 1 ? "Tag" : "Tage"}`);
+  return text.split("**").map((t, i) => (i % 2 ? h("strong", null, t) : t));
 }
 
 function hiBaustein(b, r) {

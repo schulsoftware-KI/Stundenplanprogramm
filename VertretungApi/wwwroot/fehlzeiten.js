@@ -100,7 +100,7 @@ const fzZeitraumText = (von, bis) =>
 
 function fzTitel(text) {
   el("titel").textContent = text;
-  document.title = `${text} – Stundenplan`;
+  document.title = `${text} – ${appName()}`;
 }
 
 // ---------------------------------------------------------------------
@@ -119,6 +119,7 @@ function fehlzeitenMenueAnpassen() {
 
 async function fehlzeitenOeffnen() {
   kontoSchliessen();
+  if (!einstellungenSchliessen()) return;   // P3: Einstellungen mit Ungespeichertem – abgebrochen
   if (verwaltungOffen()) {
     if (!startpasswoerterVerwerfen()) return;
     verwaltungLeeren();

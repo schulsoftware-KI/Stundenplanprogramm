@@ -32,13 +32,16 @@ public class SchildController : ControllerBase
     private readonly IConfiguration _cfg;
     private readonly IHostEnvironment _env;
     private readonly ILogger<SchildController> _log;
+    private readonly Schuleinstellungen _einst;
 
-    public SchildController(AppDbContext db, IConfiguration cfg, IHostEnvironment env, ILogger<SchildController> log)
+    public SchildController(AppDbContext db, IConfiguration cfg, IHostEnvironment env, ILogger<SchildController> log,
+        Schuleinstellungen einst)
     {
         _db = db;
         _cfg = cfg;
         _env = env;
         _log = log;
+        _einst = einst;
     }
 
     private bool Produktiv => Betrieb.Produktiv(_env);
@@ -50,7 +53,9 @@ public class SchildController : ControllerBase
         if (!ApiSchluessel.Gueltig(Request, _cfg))
             return Unauthorized(ApiSchluessel.Fehlertext);
 
-        string sj = string.IsNullOrWhiteSpace(schuljahr) ? (_cfg["DefaultSchuljahr"] ?? "2026/27") : schuljahr.Trim();
+        // P3 (E-1): aktuelles Schuljahr und 2. Halbjahr aus den Schuleinstellungen (vorher appsettings).
+        var werte = await _einst.LesenAsync(_db);
+        string sj = string.IsNullOrWhiteSpace(schuljahr) ? werte.Schuljahr : schuljahr.Trim();
         int ab = abschnitt is >= 1 and <= 4 ? abschnitt.Value : 1;
         bool pseudo = !Produktiv;
         var heute = KlassenbuchService.Heute();
@@ -77,8 +82,7 @@ public class SchildController : ControllerBase
             .OrderByDescending(p => p.Zeit).ThenByDescending(p => p.Id)
             .Select(p => p.SchluesselKennung).FirstOrDefaultAsync();
 
-        DateOnly? halbjahrAb = DateOnly.TryParseExact(_cfg["Klassenbuch:HalbjahrAb"], "yyyy-MM-dd",
-            CultureInfo.InvariantCulture, DateTimeStyles.None, out var hj) ? hj : null;
+        DateOnly? halbjahrAb = werte.HalbjahrAb;
 
         // Entscheidung 79: beim ersten Import eines Abschnitts dessen Beginn, sonst heute – nie vor dem letzten Import.
         DateOnly? vorschlag = null;
@@ -231,7 +235,12 @@ public class SchildController : ControllerBase
                 giltAb = p.GiltAb, pseudo = p.IstPseudo, kennung = p.SchluesselKennung, kennungVorher = p.KennungVorher,
                 neuZuordnung = p.NeuZuordnung, neu = p.Neu, geaendert = p.Geaendert, klassenwechsel = p.Klassenwechsel,
                 kurswechsel = p.Kurswechsel, abgaenge = p.Abgaenge, unveraendert = p.Unveraendert,
-                uebersprungen = p.Uebersprungen, zusammengefuehrt = p.Zusammengefuehrt, neuZugeordnet = p.NeuZugeordnet
+                uebersprungen = p.Uebersprungen, zusammengefuehrt = p.Zusammengefuehrt, neuZugeordnet = p.NeuZugeordnet,
+                // P3 (Kleinigkeit a): null = keine Angabe bzw. Import vor P3
+                klassenleitungKlassen = p.KlassenleitungKlassen, klassenleitungNeu = p.KlassenleitungNeu,
+                klassenleitungGeaendert = p.KlassenleitungGeaendert, lehrkraefte = p.Lehrkraefte,
+                lehrkraefteNeu = p.LehrkraefteNeu, lehrkraefteGeaendert = p.LehrkraefteGeaendert,
+                lehrkraefteEntfernt = p.LehrkraefteEntfernt
             })
             .ToListAsync();
         int gesamt = await _db.SchildImportProtokolle.CountAsync();

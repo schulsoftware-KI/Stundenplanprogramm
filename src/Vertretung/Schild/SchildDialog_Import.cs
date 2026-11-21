@@ -693,6 +693,17 @@ namespace Stundenplan_V2.Vertretung
             // 3. „Änderungen gelten ab“
             DateOnly giltAb = ImGiltAbSetzen(st);
 
+            // 3a. P3 (Kleinigkeit c, Entscheidung 199): Passt die im Wocheneditor gewählte Plan-Spalte zum Grundplan, der am
+            //     Stichtag in der App gilt? Sonst rechnen Zuordnung und Vorschau mit den Kursen eines anderen Plans.
+            string? planWarnung = ImPlanWarnung(st, plan.Bezeichnung, giltAb);
+            if (planWarnung != null &&
+                MessageBox.Show(this, planWarnung + "\n\nTrotzdem berechnen?", "SchILD-Import – Plan", MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
+            {
+                ImVorschauVerwerfen("Nicht berechnet: " + planWarnung);
+                return null;
+            }
+
             // 4. Schlüssel (170): vorhandenen nehmen; neu nur, wenn noch niemand importiert ist.
             //    5.2c-1: bei der Neu-Zuordnung der Schlüssel aus „Schlüssel verloren – neu zuordnen…“.
             string art = SchildSchluessel.ArtText(pseudo);
@@ -753,6 +764,23 @@ namespace Stundenplan_V2.Vertretung
                          $"{v.Zahlen.Zusammengefuehrt + v.Zahlen.NeuZugeordnet})" + (_imNeuzuordnung ? ", Neu-Zuordnung" : "") +
                          (v.Gesperrt ? $", gesperrt ({string.Join(", ", v.Sperren.Select(s => s.Art))})" : "") + ".");
             return null;
+        }
+
+        /// <summary>
+        /// P3 (Kleinigkeit c): Warntext, wenn am Stichtag in der App ein Grundplan mit einer anderen Plan-Spalte gilt; null =
+        /// passt bzw. noch kein Grundplan (das meldet die API selbst).
+        /// </summary>
+        private static string? ImPlanWarnung(SchildStatusAntwort st, string planSpalte, DateOnly giltAb)
+        {
+            if (st.Grundplaene.Count == 0 || string.IsNullOrWhiteSpace(planSpalte)) return null;
+            var versionen = st.Grundplaene
+                .Select(g => new GrundplanAbgleich.PlanVersion { Bezeichnung = g.Bezeichnung, GueltigAb = g.GueltigAb }).ToList();
+            var erg = GrundplanAbgleich.Pruefen(versionen, planSpalte, giltAb, giltAb);
+            if (erg.KeinGrundplan || erg.Andere.Count == 0) return null;
+            return $"Im Wocheneditor ist der Plan „{planSpalte}“ gewählt, in der App gilt am {Dat(giltAb)} der Grundplan " +
+                   $"{GrundplanAbgleich.Liste(erg.Andere)}. Zuordnung und Vorschau rechnen dann mit den Kursen eines anderen " +
+                   "Plans – das gibt viele Kurswechsel bzw. unbekannte Kurse.\n\nAbhilfe: dieses Fenster schließen, im " +
+                   "Wocheneditor im Feld „Plan“ den Grundplan wählen und „SchILD-Daten…“ neu öffnen.";
         }
 
         /// <param name="behalten">Bestätigungen aus einer früheren Vorschau (Kategorie|Id → an/aus), sonst null.</param>
@@ -901,6 +929,10 @@ namespace Stundenplan_V2.Vertretung
                 $"Import ausführen?\n\nSchuljahr {nutzlast.Schuljahr} · Abschnitt {nutzlast.Abschnitt} · Änderungen gelten ab " +
                 $"{Dat(nutzlast.GiltAb)} · {art}\n" +
                 (v.Grundplan != null ? $"Grundplan „{v.Grundplan}“" + (v.GrundplanAb is DateOnly ga ? $" (ab {Dat(ga)})" : "") + "\n" : "") +
+                // P3 (Kleinigkeit c): anderer Plan als der Grundplan – die Warnung vor der Vorschau wurde mit „Ja“ übergangen
+                (v.Grundplan != null && _planInfo != null &&
+                 !string.Equals(v.Grundplan.Trim(), _planInfo.Bezeichnung.Trim(), StringComparison.OrdinalIgnoreCase)
+                    ? $"ACHTUNG: Im Wocheneditor ist der Plan „{_planInfo.Bezeichnung}“ gewählt – nicht der Grundplan.\n" : "") +
                 $"\nneu: {zz.Neu} · Name/Geburtsdatum geändert: {zz.NameGeaendert} · Klassenwechsel: {zz.Klassenwechsel} · " +
                 $"Kurs-/Gruppenwechsel: {zz.Kurswechsel} · Status/Jahrgang: {zz.StatusGeaendert}\n" +
                 $"Abgänge bestätigt: {bestaetigt.Count} von {kandidaten} (Schülerkonten, die gesperrt werden: {konten})\n" +

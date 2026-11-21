@@ -45,6 +45,10 @@
 //  Hilfe (Entscheidungen 52–59, Code in hilfe.js): „?" im Kopf, Kontomenü
 //  „Hilfe", Kurzkarten beim ersten Besuch; gespeichert wird nur der Merker
 //  „Kurzkarte gesehen" (bleibt beim Abmelden).
+//  Einstellungen (P3, E-1, Code in einstellungen.js): Kontomenü „Einstellungen"
+//  (nur Admin). Name und Kurzname der Schule und die Dauer von „Angemeldet
+//  bleiben" kommen ohne Anmeldung aus /api/auth/optionen (Entscheidung 201):
+//  Name der App im Titel (appName()), Schulname auf der Anmeldeseite.
 // =====================================================================
 
 const MODI = {
@@ -87,6 +91,11 @@ const STATUS = {
 
 const SUCH_MAX = 20; // so viele Suchtreffer werden gezeigt
 
+/** P3 (E-1): Name der App – Kurzname der Schule aus den Einstellungen, sonst „Stundenplan". */
+function appName() {
+  return (state.schule && state.schule.app) || "Stundenplan";
+}
+
 const sortierer = new Intl.Collator("de", { numeric: true, sensitivity: "base" });
 const el = (id) => document.getElementById(id);
 
@@ -96,6 +105,8 @@ const state = {
   anmeldung: null,       // { token, benutzername, rolle, anzeige, lehrerKuerzel, zustaendig,
                          //   mussPasswortAendern, passwortRegel, dauerhaft, gueltigBis }
   anmeldungNoetig: true, // laut Server (/api/auth/optionen)
+  schule: { name: "", kurzname: "", app: "Stundenplan" }, // P3: laut Server (/api/auth/optionen)
+  bleibenTage: 30,       // P3: „Angemeldet bleiben" in Tagen (0 = gibt es nicht)
   modus: "klasse",
   werte: leereWerte(),   // zuletzt gewählter Wert je Ansicht (schueler: Id)
   montag: "",            // ISO-Datum des Montags der angezeigten Woche
@@ -705,7 +716,7 @@ function zielName() {
     return k ? `Mein Plan · ${k}` : "Mein Plan";
   }
   const wert = state.werte[state.modus];
-  if (!wert) return "Stundenplan";
+  if (!wert) return appName();
   if (state.modus === "schueler") {
     if (!state.person) return "Schülerplan";
     const k = personKlasse(state.person);
@@ -844,7 +855,7 @@ function render() {
 function renderKopf() {
   const name = zielName();
   el("titel").textContent = name;
-  document.title = name === "Stundenplan" ? "Stundenplan" : `${name} – Stundenplan`;
+  document.title = name === appName() ? name : `${name} – ${appName()}`;
 
   const erlaubt = erlaubteModi();
   el("auswahl").hidden = state.modus === "ich";
@@ -1034,17 +1045,20 @@ function zeigeAnmeldung(hinweis) {
   klassenbuchLeeren();
   fehlzeitenLeeren();
   hausaufgabenLeeren();
+  einstellungenLeeren();
   el("inhalt").hidden = true;
   el("verwaltung").hidden = true;
   el("klassenbuch").hidden = true;
   el("fehlzeiten").hidden = true;
   el("hausaufgaben").hidden = true;
+  el("einstellungen").hidden = true;
   el("pflicht").hidden = true;
   el("anmeldung").hidden = false;
   el("aktualisieren").hidden = true;
   el("kontoKnopf").hidden = true;
-  el("titel").textContent = "Stundenplan";
-  document.title = "Anmelden – Stundenplan";
+  el("titel").textContent = appName();
+  document.title = `Anmelden – ${appName()}`;
+  schuleAnzeigen();
   el("stand").textContent = "";
   el("grundplan").textContent = "";
   anmeldeHinweis(hinweis);
@@ -1155,7 +1169,7 @@ function anmeldungUebernehmen(d, dauerhaft) {
     zustaendig: d.zustaendig || null,
     mussPasswortAendern: !!d.mussPasswortAendern,
     passwortRegel: d.passwortRegel || null,
-    dauerhaft,
+    dauerhaft: dauerhaft && d.angemeldetBleiben !== false,   // P3: der Server kann „Angemeldet bleiben“ abschalten
     gueltigBis: d.gueltigBis || null,
   };
   anmeldungSpeichern();
@@ -1186,9 +1200,37 @@ async function ladeOptionen() {
     if (!resp.ok) return;
     const d = await resp.json();
     state.anmeldungNoetig = d.anmeldungNoetig !== false;
-    lokal.schreiben("optionen", { anmeldungNoetig: state.anmeldungNoetig });
+    optionenUebernehmen(d);
+    lokal.schreiben("optionen", { anmeldungNoetig: state.anmeldungNoetig, schule: state.schule, bleibenTage: state.bleibenTage });
     if (!el("anmeldung").hidden) el("ohneAnmeldung").hidden = state.anmeldungNoetig;
+    schuleAnzeigen();
   } catch { /* offline: der zuletzt bekannte Wert gilt */ }
+}
+
+/** P3 (E-1): Name der Schule und „Angemeldet bleiben" aus /api/auth/optionen bzw. dem Browser-Speicher. */
+function optionenUebernehmen(d) {
+  const s = (d && d.schule) || {};
+  const name = typeof s.name === "string" ? s.name : "";
+  const kurz = typeof s.kurzname === "string" ? s.kurzname : "";
+  state.schule = { name, kurzname: kurz, app: (typeof s.app === "string" && s.app) || kurz || "Stundenplan" };
+  const t = d ? Number(d.angemeldetBleibenTage ?? d.bleibenTage) : NaN;
+  state.bleibenTage = Number.isFinite(t) && t >= 0 ? Math.floor(t) : 30;
+}
+
+/** Schulname auf der Anmeldeseite, „Angemeldet bleiben" (aus bei 0 Tagen), Titel vor der Anmeldung. */
+function schuleAnzeigen() {
+  el("schulName").textContent = state.schule.name;
+  el("schulName").hidden = !state.schule.name;
+  const ohneBleiben = state.bleibenTage <= 0;
+  el("bleibenBox").hidden = ohneBleiben;
+  el("bleibenText").hidden = ohneBleiben;
+  if (ohneBleiben) el("bleiben").checked = false;
+  el("bleibenText").textContent = `Nur auf dem eigenen Gerät – dann bis zu ${state.bleibenTage} ${state.bleibenTage === 1 ? "Tag" : "Tage"}. ` +
+    "Sonst endet die Anmeldung, wenn du den Browser schließt.";
+  if (!el("anmeldung").hidden) {
+    el("titel").textContent = appName();
+    document.title = `Anmelden – ${appName()}`;
+  }
 }
 
 function passwortVerbergen() {
@@ -1230,6 +1272,7 @@ function kontoOeffnen() {
   el("kontoInfo").textContent = info.join(" · ");
   el("meinPlan").hidden = !(istPersonal() && eigenesKuerzel());
   kontoMenueAnpassen();
+  einstellungenMenueAnpassen();
   klassenbuchMenueAnpassen();
   fehlzeitenMenueAnpassen();
   hausaufgabenMenueAnpassen();
@@ -1338,6 +1381,7 @@ el("nurAenderungen").addEventListener("change", (e) => {
 });
 
 el("aktualisieren").addEventListener("click", () => {
+  if (einstellungenOffen()) { esAktualisieren(); return; }
   if (verwaltungOffen()) { verwaltungAktualisieren(); return; }
   if (klassenbuchOffen()) { kbAktualisieren(); return; }
   if (fehlzeitenOffen()) { fzAktualisieren(); return; }
@@ -1390,6 +1434,10 @@ konto.addEventListener("click", (e) => {
 });
 el("meinPlan").addEventListener("click", () => {
   kontoSchliessen();
+  if (einstellungenOffen()) {
+    if (!einstellungenSchliessen()) return;
+    el("inhalt").hidden = false;
+  }
   if (verwaltungOffen()) {
     if (!startpasswoerterVerwerfen()) return;
     verwaltungLeeren();
@@ -1495,11 +1543,15 @@ async function start() {
   fehlzeitenInit();
   hausaufgabenInit();
   eintraegeInit();
+  einstellungenInit();
   hilfeInit();
   altlastenEntfernen();
   state.anmeldung = anmeldungLesen();
-  state.anmeldungNoetig = lokal.lesen("optionen", { anmeldungNoetig: true }).anmeldungNoetig !== false;
+  const gemerkt = lokal.lesen("optionen", { anmeldungNoetig: true });
+  state.anmeldungNoetig = gemerkt.anmeldungNoetig !== false;
+  optionenUebernehmen(gemerkt);   // P3: zuletzt bekannter Schulname (offline)
   el("bleiben").checked = alsApp(); // installierte App: meist das eigene Handy
+  schuleAnzeigen();
 
   const optionen = ladeOptionen();
   if (!state.anmeldung) await Promise.race([optionen, new Promise((r) => setTimeout(r, 4000))]);

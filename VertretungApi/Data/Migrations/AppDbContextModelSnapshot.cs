@@ -172,6 +172,67 @@ namespace VertretungApi.Data.Migrations
                     b.ToTable("DownloadProtokolle", (string)null);
                 });
 
+            modelBuilder.Entity("VertretungApi.Model.Einstellung", b =>
+                {
+                    b.Property<string>("Schluessel")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateOnly?>("AbgestimmtAm")
+                        .HasColumnType("date");
+
+                    b.Property<string>("AbgestimmtMit")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("GeaendertAm")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("GeaendertVon")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Wert")
+                        .HasColumnType("text");
+
+                    b.HasKey("Schluessel");
+
+                    b.ToTable("Einstellungen", (string)null);
+                });
+
+            modelBuilder.Entity("VertretungApi.Model.EinstellungsProtokoll", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Akteur")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Alt")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Details")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Neu")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Schluessel")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("Zeit")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Zeit");
+
+                    b.ToTable("EinstellungsProtokolle", (string)null);
+                });
+
             modelBuilder.Entity("VertretungApi.Model.Entschuldigung", b =>
                 {
                     b.Property<int>("Id")
@@ -756,10 +817,31 @@ namespace VertretungApi.Data.Migrations
                     b.Property<string>("KennungVorher")
                         .HasColumnType("text");
 
+                    b.Property<int>("KlassenleitungGeaendert")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("KlassenleitungKlassen")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("KlassenleitungNeu")
+                        .HasColumnType("integer");
+
                     b.Property<int>("Klassenwechsel")
                         .HasColumnType("integer");
 
                     b.Property<int>("Kurswechsel")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("Lehrkraefte")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("LehrkraefteEntfernt")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("LehrkraefteGeaendert")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("LehrkraefteNeu")
                         .HasColumnType("integer");
 
                     b.Property<int>("Neu")

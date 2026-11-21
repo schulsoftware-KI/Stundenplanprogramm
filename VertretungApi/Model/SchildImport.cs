@@ -40,6 +40,18 @@ public class SchildImportProtokoll
     public int Zusammengefuehrt { get; set; }
     /// <summary>Bei einer Neu-Zuordnung: Schüler, die über Name + Klasse neu zugeordnet wurden.</summary>
     public int NeuZugeordnet { get; set; }
+
+    // ---- P3 (Kleinigkeit a, Entscheidung 199; Migration „Einstellungen“): Klassenleitung und Namen der Lehrkräfte
+    //      aus 5.2c-2 – nur Zahlen. null = keine Angabe (ohne Klassen.dat bzw. Lehrkraefte.dat) bzw. Import vor P3.
+    /// <summary>Klassen mit Klassenleitung laut Klassen.dat in diesem Import.</summary>
+    public int? KlassenleitungKlassen { get; set; }
+    public int KlassenleitungNeu { get; set; }
+    public int KlassenleitungGeaendert { get; set; }
+    /// <summary>Lehrkräfte mit Namen laut Lehrkraefte.dat (nur Kürzel des Grundplans).</summary>
+    public int? Lehrkraefte { get; set; }
+    public int LehrkraefteNeu { get; set; }
+    public int LehrkraefteGeaendert { get; set; }
+    public int LehrkraefteEntfernt { get; set; }
 }
 
 // =====================================================================

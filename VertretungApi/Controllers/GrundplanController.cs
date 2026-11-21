@@ -14,6 +14,7 @@ namespace VertretungApi.Controllers;
 ///   GET  api/grundplan/versionen – vorhandene Versionen (Kontrolle).
 ///   GET  api/grundplan/kalender  – Schuljahreskalender samt freien Zeiten.
 ///   GET  api/grundplan/slots     – Slots einer Version, filterbar (Kontrolle; Wochen-Endpunkte folgen in Schritt 2).
+///   GET  api/grundplan/veroeffentlicht?schuljahr= – P3: Plan-Spalten und „gilt ab“ der Versionen (X-Api-Key, Desktop).
 ///
 /// Versionierung: (Schuljahr, GueltigAb) ist eindeutig. Gleicher Schlüssel = Version wird ersetzt,
 /// anderes GueltigAb = neue Version. Der Kalender wird je Schuljahr ersetzt.
@@ -132,6 +133,26 @@ public class GrundplanController : ControllerBase
             KalenderUebertragen = dto.Kalender != null,
             KalenderErsetzt = kalenderErsetzt
         });
+    }
+
+    /// <summary>
+    /// P3 (Kleinigkeit c, Entscheidung 199): veröffentlichte Grundplan-Versionen eines Schuljahres (Plan-Spalte und
+    /// „gilt ab“) für den Desktop – mit dem X-Api-Key, ohne Personendaten. Der Wocheneditor warnt damit, wenn der
+    /// gewählte Plan nicht zum veröffentlichten Grundplan passt.
+    /// </summary>
+    [HttpGet("veroeffentlicht")]
+    public async Task<IActionResult> Veroeffentlicht([FromQuery] string? schuljahr)
+    {
+        if (!ApiSchluessel.Gueltig(Request, _cfg))
+            return Unauthorized(ApiSchluessel.Fehlertext);
+        if (string.IsNullOrWhiteSpace(schuljahr)) return BadRequest("Schuljahr fehlt.");
+        string sj = schuljahr.Trim();
+        var liste = await _db.GrundplanVersionen.AsNoTracking()
+            .Where(v => v.Schuljahr == sj)
+            .OrderBy(v => v.GueltigAb).ThenBy(v => v.Id)
+            .Select(v => new { bezeichnung = v.Bezeichnung, gueltigAb = v.GueltigAb })
+            .ToListAsync();
+        return Ok(new { schuljahr = sj, versionen = liste });
     }
 
     [Authorize(Policy = Rollen.PlanLesen)]

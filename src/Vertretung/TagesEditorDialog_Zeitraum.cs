@@ -122,6 +122,7 @@ namespace Stundenplan_V2.Vertretung
 
             List<ZeitraumTag> tage = new();
             bool laeuft = false;
+            bool pruefe = false;   // P3: Abfrage des Grundplans läuft
             CancellationTokenSource? abbruch = null;
 
             void Anzeigen()
@@ -159,6 +160,7 @@ namespace Stundenplan_V2.Vertretung
             };
             win.Closing += (_, ce) =>
             {
+                if (pruefe) { ce.Cancel = true; return; }
                 if (!laeuft) return;
                 ce.Cancel = true;
                 txtFortschritt.Text = "Bitte warten oder „Abbrechen“ wählen – es wird gerade veröffentlicht.";
@@ -184,6 +186,24 @@ namespace Stundenplan_V2.Vertretung
                     OnlineSync.SpeichereEinstellungen(_ordner, neu);
                     einst = neu;
                 }
+
+                // P3 (Kleinigkeit c, Entscheidung 199): Passt der geladene Plan zum Grundplan der App im Zeitraum?
+                bool planOk;
+                pruefe = true;
+                btnLos.IsEnabled = false;
+                txtFortschritt.Text = "Prüfe den Grundplan in der App …";
+                try
+                {
+                    planOk = await GrundplanAbgleich.FragenAsync(win, einst, _daten.Schuljahr ?? "", _plan?.GewaehltePlanSpalte ?? "",
+                        CbPlan.SelectedItem as string, von.Date, bis.Date, "Zeitraum veröffentlichen");
+                }
+                finally
+                {
+                    pruefe = false;
+                    btnLos.IsEnabled = tage.Count > 0;
+                }
+                if (!planOk) { txtFortschritt.Text = "Nicht veröffentlicht (der Plan passt nicht zum Grundplan in der App)."; return; }
+                txtFortschritt.Text = "";
 
                 if (!FrageZeitraum(win, einst, tage, von.Date, bis.Date)) { txtFortschritt.Text = "Nicht veröffentlicht."; return; }
 

@@ -31,7 +31,8 @@ namespace VertretungApi.Services;
 //    Stufenkoordination, Admin. Schülereinträge – nur Verfasser,
 //    Klassenleitung/Stufenkoordination des Schülers, Admin.
 //  Schüler sehen keine Einträge (36). Keine Automatik, nur Zähler (38).
-//  Löschfrist (39): "Klassenbuch:EintraegeLoeschenNachTagen" (0 = aus).
+//  Löschfrist (39): „Löschfrist der Klassenbucheinträge“ (Einstellungen → Datenschutz, 0 = aus; bis P3
+//    "Klassenbuch:EintraegeLoeschenNachTagen").
 // =====================================================================
 
 public static class KlassenbuchEintragService

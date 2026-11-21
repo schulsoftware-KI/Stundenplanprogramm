@@ -26,6 +26,8 @@ public class AppDbContext : DbContext
     public DbSet<DownloadProtokoll> DownloadProtokolle => Set<DownloadProtokoll>();           // Phase 4.2
     public DbSet<SchildImportProtokoll> SchildImportProtokolle => Set<SchildImportProtokoll>(); // Phase 5.2b
     public DbSet<Lehrkraft> Lehrkraefte => Set<Lehrkraft>();                     // Phase 5.2c
+    public DbSet<Einstellung> Einstellungen => Set<Einstellung>();                // P3 (E-1)
+    public DbSet<EinstellungsProtokoll> EinstellungsProtokolle => Set<EinstellungsProtokoll>(); // P3 (E-1)
 
     // Grundplan + Kalender (Phase 2, Schritt 1)
     public DbSet<GrundplanVersion> GrundplanVersionen => Set<GrundplanVersion>();
@@ -78,6 +80,13 @@ public class AppDbContext : DbContext
         b.Entity<SchildImportProtokoll>().HasIndex(p => p.Zeit);
         // Phase 5.2c (Entscheidung 193): ein Name je Kürzel und Art (Pseudo/echt).
         b.Entity<Lehrkraft>().HasIndex(l => new { l.Kuerzel, l.IstPseudo }).IsUnique();
+
+        // P3 – E-1 Schuleinstellungen (Migration „Einstellungen“): Schlüssel als Primärschlüssel, Protokoll nach Zeit.
+        b.Entity<Einstellung>().ToTable("Einstellungen");
+        b.Entity<Einstellung>().HasKey(e => e.Schluessel);
+        b.Entity<Einstellung>().Property(e => e.Schluessel).HasMaxLength(100);
+        b.Entity<EinstellungsProtokoll>().ToTable("EinstellungsProtokolle");
+        b.Entity<EinstellungsProtokoll>().HasIndex(p => p.Zeit);
 
         // Phase 3.1: neue Tabelle. Die alte Phase-1A-Tabelle "Lektionen" (eine Lerngruppe je
         // Lektion, nie benutzt) bleibt in bestehenden Entwicklungs-DBs ungenutzt liegen.

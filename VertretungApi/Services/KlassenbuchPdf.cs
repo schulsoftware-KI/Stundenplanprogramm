@@ -35,7 +35,8 @@ public static class KlassenbuchPdf
     // oder ein eigener Farbtyp): leise = Grey.Darken1, Linie = Grey.Lighten2,
     // rot = Red.Darken2, orange = Orange.Darken3.
 
-    public static byte[] Erzeuge(Bericht b)
+    /// <param name="schule">P3 (E-1): Name der Schule aus den Einstellungen – klein über dem Titel (leer = ohne).</param>
+    public static byte[] Erzeuge(Bericht b, string? schule = null)
         => Document.Create(container =>
         {
             container.Page(page =>
@@ -44,7 +45,7 @@ public static class KlassenbuchPdf
                 page.Margin(1.4f, Unit.Centimetre);
                 page.DefaultTextStyle(t => t.FontSize(8.5f));
 
-                page.Header().Element(c => Kopf(c, b.Kopf));
+                page.Header().Element(c => Kopf(c, b.Kopf, schule));
                 page.Content().PaddingTop(8).Element(c => Inhalt(c, b));
                 page.Footer().Element(c => Fuss(c, b.Kopf));
             });
@@ -54,7 +55,7 @@ public static class KlassenbuchPdf
     //  Kopf und Fuß
     // -----------------------------------------------------------------
 
-    private static void Kopf(IContainer c, BerichtKopf k)
+    private static void Kopf(IContainer c, BerichtKopf k, string? schule)
     {
         c.Column(col =>
         {
@@ -62,6 +63,8 @@ public static class KlassenbuchPdf
             {
                 row.RelativeItem().Column(links =>
                 {
+                    if (!string.IsNullOrWhiteSpace(schule))
+                        links.Item().Text(schule).FontSize(8).FontColor(Colors.Grey.Darken1);
                     links.Item().Text($"{k.Art} · {k.Titel}").FontSize(14).SemiBold();
                     if (!string.IsNullOrWhiteSpace(k.Zusatz))
                         links.Item().Text(k.Zusatz).FontSize(9).FontColor(Colors.Grey.Darken1);

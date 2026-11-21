@@ -227,7 +227,7 @@ function zeigeKlassenbuch(ansicht) {
     : ansicht === "gruppe" ? "Gruppenliste"
     : state.anmeldung && state.anmeldung.rolle === "Admin" ? "Gruppenlisten" : "Meine Gruppen";
   el("titel").textContent = titel;
-  document.title = `${titel} – Stundenplan`;
+  document.title = `${titel} – ${appName()}`;
   el("stand").textContent = "";
   el("grundplan").textContent = "";
   const zurueck = ansicht === "gruppe" && kb.gruppeZurueck === "stunde" ? "Zurück zur Stunde"
@@ -1265,6 +1265,7 @@ function klassenbuchInit() {
   window.addEventListener("resize", kbHaHoehe);
   el("kbGruppenKnopf").addEventListener("click", () => {
     kontoSchliessen();
+    if (!einstellungenSchliessen()) return;   // P3
     fehlzeitenSchliessen();
     if (verwaltungOffen()) {
       if (!startpasswoerterVerwerfen()) return;

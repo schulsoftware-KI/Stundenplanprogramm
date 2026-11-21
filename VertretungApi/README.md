@@ -40,14 +40,16 @@ API dann unter `http://localhost:5080`, OpenAPI-Doc unter `http://localhost:5080
   **Vor produktivem Einsatz ändern.**
 - `Jwt:Key` – Signaturschlüssel der Anmelde-Tokens (mind. 32 Zeichen). **Vor produktivem
   Einsatz ändern** und nicht ins (öffentliche) Repo stellen.
-- `Jwt:StundenGueltig` (12) – Gültigkeit einer Anmeldung ohne „angemeldet bleiben".
-- `Jwt:TageAngemeldetBleiben` (30) – Gültigkeit mit „angemeldet bleiben".
+- `Jwt:StundenGueltig` (12) / `Jwt:TageAngemeldetBleiben` (30) – **seit P3 nur noch Startwerte** für die
+  Schuleinstellungen „Dauer einer Anmeldung“ und „Angemeldet bleiben“ (siehe „Schuleinstellungen (P3, E-1)“).
 - `Woche:OhneLogin` (`false`) – `true` macht Lehrer-/Klassen-/Kurspläne auch ohne Anmeldung
   abrufbar (z. B. für einen Aushang-Bildschirm im Schulnetz). Wirkt nach Neustart der API.
 - `Database:SchemaNachruesten` (`true`) – fehlende Tabellen/Spalten beim Start ergänzen (nur
   Entwicklung; produktiv mit EF-Migrations auf `false`).
-- `Konten:ProtokollTage` (365) – so lange bleiben Einträge im Kontenprotokoll; ältere werden
-  beim Start gelöscht.
+- `Konten:ProtokollTage` (365), `DefaultSchuljahr`, `Klassenbuch:ErfassungAb`, `Klassenbuch:ThemaAb`,
+  `Klassenbuch:HalbjahrAb`, `Klassenbuch:EintraegeLoeschenNachTagen`, `Berichte:NurAdmin` – **seit P3 nur noch
+  Startwerte**: Beim ersten Start mit P3 übernimmt die API sie in die Schuleinstellungen; danach gilt, was der Admin in
+  der App einstellt (Kontomenü → „Einstellungen“), und die Dateiwerte werden ignoriert (Hinweis im Log, wenn sie abweichen).
 - `Betrieb:HttpsErzwingen` (`true`) – im Echtbetrieb HSTS und Umleitung auf https (Phase 5.1).
 - `Proxy:Aktiv` (`false`) / `Proxy:BekannteProxys` (`[]`) – hinter einem Reverse Proxy die echte
   Absenderadresse übernehmen (Phase 5.1).
@@ -987,6 +989,49 @@ Entscheidungen 191–197 (`claude/5.2c_Vorschlag.md` §5–§7). API: `Services/
 - **Folgestand** (Standard aus): „Klassenleitung wechselt“ (eine Klasse in `Klassen.dat`, möglichst zu „L2“) und
   „Lehrkraft heißt anders“ (ein Nachname in `Lehrkraefte.dat`, möglichst „L1“).
 - **`seed-konten`** setzt Rolle, Kürzel und Zuständigkeit der Standard-Testkonten wieder auf den Standard (Passwort bleibt).
+
+## Schuleinstellungen (P3, E-1)
+
+Entscheidungen 138–141 (`claude/Einrichtung_Vorschlag.md`) und 199–203 (`claude/E-1_Vorschlag.md`). API:
+`Model/Einstellungen.cs`, `Services/Schuleinstellungen.cs` (Katalog, Zwischenspeicher, Übernahme),
+`Services/Aufraeumdienst.cs`, `Controllers/EinstellungenController.cs`, `Helpers/PwaManifest.cs`; PWA:
+`einstellungen.js`, `app.js`, `hilfe.js`. **Migration `Einstellungen`** (Tabellen `Einstellungen`,
+`EinstellungsProtokolle`, sieben Spalten in `SchildImportProtokolle`).
+
+- **Zwei Orte (139):** Was vor dem Start feststehen muss (Datenbank, Schlüssel, Adresse, Proxy, HTTPS, CORS,
+  `Woche:OhneLogin`), steht weiter in der Einstellungsdatei. Die Schulwerte stehen in der Tabelle `Einstellungen`:
+  | Gruppe | Schlüssel | Standard (Startwert aus appsettings) |
+  |---|---|---|
+  | Schule | `Schule.Name`, `Schule.Kurzname` | leer bzw. „Stundenplan“ |
+  | Schuljahr | `Schuljahr.Aktuell` | nach dem Datum, ab 1. August das neue (`DefaultSchuljahr`) |
+  | | `Schuljahr.ErfassungAb`, `Schuljahr.ThemaAb`, `Schuljahr.HalbjahrAb` | erster Schultag laut Kalender, wie Erfassung, 1. Februar (`Klassenbuch:…`) |
+  | Datenschutz | `Datenschutz.EintraegeLoeschenNachTagen` | 0 = aus (`Klassenbuch:EintraegeLoeschenNachTagen`) |
+  | | `Datenschutz.ProtokollTage` | 365 – Konten-, Download- und Einstellungsprotokoll (`Konten:ProtokollTage`) |
+  | | `Datenschutz.BerichteNurAdmin` | aus (`Berichte:NurAdmin`) |
+  | Anmeldung | `Anmeldung.SitzungStunden`, `Anmeldung.AngemeldetBleibenTage` | 12 Stunden, 30 Tage – 0 = kein „Angemeldet bleiben“ (`Jwt:…`) |
+- **Übernahme (140):** Beim ersten Start legt `DatenbankStart` die Zeilen an – mit dem Wert aus appsettings, sonst
+  Standard (Eintrag „Startwerte angelegt“ im Protokoll). Danach gilt die Datenbank.
+- **Sofort wirksam:** `Schuleinstellungen` hält die Zeilen im Speicher; jede Änderung verwirft ihn. Sitzungsdauer und
+  „Angemeldet bleiben“ wirken auf neue Anmeldungen.
+- **Endpunkte (nur Admin, JWT):** `GET /api/einstellungen` (alle mit Hilfetext, Standard, „gilt jetzt“, Abstimmung),
+  `PUT /api/einstellungen` `{ aenderungen: [{ schluessel, wert, abgestimmtAm?, abgestimmtMit? }], bestaetigt }` (400 mit
+  `felder` = Felder prüfen; 409 mit `loeschen` = eine kürzere Frist löscht Daten → mit `bestaetigt: true`),
+  `GET /api/einstellungen/protokoll?limit=`. Ohne Anmeldung (201): `GET /api/auth/optionen` liefert zusätzlich
+  `schule { name, kurzname, app }` und `angemeldetBleibenTage`; `/manifest.webmanifest` erzeugt die API (Name der App).
+- **Datenschutz (141):** Einstellungen mit Datenschutzwirkung zeigen die Frage an den DSB und „abgestimmt am / mit“.
+  Ändert sich ihr Wert, entfällt die Abstimmung, wenn sie nicht im selben Schritt neu eingetragen wird. Eine kürzere
+  Frist zählt vorher die betroffenen Datensätze (409) und räumt nach der Bestätigung sofort auf.
+- **Aufräumen:** beim Start (wie bisher) und täglich um 3 Uhr (`Aufraeumdienst`); das Einstellungsprotokoll hat
+  dieselbe Frist wie das Kontenprotokoll (202).
+- **Prüfungen:** Schuljahr „2026/27“; Daten im Schuljahr laut Kalender (2. Halbjahr nach dem ersten Schultag); „Thema
+  erfasst ab“ nicht vor „Anwesenheit erfasst ab“; Zahlen im erlaubten Bereich; Texte ohne Steuerzeichen.
+- **PDF:** Name der Schule klein über dem Titel (Klassenbuch, Kursheft, Jahresarchiv).
+- **SchILD-Importe (Kleinigkeit a):** `SchildImportProtokolle` + `KlassenleitungKlassen`, `KlassenleitungNeu`,
+  `KlassenleitungGeaendert`, `Lehrkraefte`, `LehrkraefteNeu`, `LehrkraefteGeaendert`, `LehrkraefteEntfernt`; die Liste
+  in der App zeigt sie (null = keine Angabe bzw. Import vor P3).
+- **Desktop (Kleinigkeit c):** `GET /api/grundplan/veroeffentlicht?schuljahr=` (X-Api-Key) liefert Plan-Spalte und „gilt
+  ab“ der Grundplan-Versionen; „Online veröffentlichen“, „Zeitraum veröffentlichen…“ und die SchILD-Vorschau warnen, wenn
+  der Plan im Wocheneditor nicht zum veröffentlichten Grundplan passt.
 
 ## Vertretungen aus Untis (U-1b und U-2, Desktop)
 

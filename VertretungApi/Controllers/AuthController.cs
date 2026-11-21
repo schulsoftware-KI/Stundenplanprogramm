@@ -14,7 +14,8 @@ namespace VertretungApi.Controllers;
 
 // =====================================================================
 //  Auth (Phase 1C, erweitert in Phase 2 Schritt 4):
-//    GET  api/auth/optionen                – braucht die App eine Anmeldung? (offen)
+//    GET  api/auth/optionen                – braucht die App eine Anmeldung? (offen); seit P3 auch Name und
+//                                            Kurzname der Schule und die Dauer von „Angemeldet bleiben“ (201)
 //    POST api/auth/login                   – Login -> JWT (mit „angemeldet bleiben")
 //    GET  api/auth/me                      – wer bin ich (JWT)
 //    POST api/auth/ueberall-abmelden       – eigene Tokens auf allen Geräten ungültig machen
@@ -37,27 +38,38 @@ public class AuthController : ControllerBase
     private readonly AppDbContext _db;
     private readonly IConfiguration _cfg;
     private readonly LoginBremse _bremse;
+    private readonly Schuleinstellungen _einst;
 
     // Vergleichs-Hash für unbekannte Benutzernamen: Die Antwort dauert dann genauso lange
     // wie bei einem falschen Passwort, verrät also nicht, ob es das Konto gibt.
     private static readonly string Attrappe = PasswortHasher.Hash(Guid.NewGuid().ToString());
 
-    public AuthController(AppDbContext db, IConfiguration cfg, LoginBremse bremse)
+    public AuthController(AppDbContext db, IConfiguration cfg, LoginBremse bremse, Schuleinstellungen einst)
     {
         _db = db;
         _cfg = cfg;
         _bremse = bremse;
+        _einst = einst;
     }
 
     public record LoginDto(string Benutzername, string Passwort, bool AngemeldetBleiben = false);
 
-    /// <summary>Ob die Pläne nur mit Anmeldung abrufbar sind (Schalter "Woche:OhneLogin").</summary>
+    /// <summary>
+    /// Ob die Pläne nur mit Anmeldung abrufbar sind (Schalter "Woche:OhneLogin"). P3 (E-1, Entscheidung 201): dazu Name
+    /// und Kurzname der Schule und wie lange „Angemeldet bleiben“ gilt (0 = gibt es nicht) – sonst nichts Schulinternes.
+    /// </summary>
     [AllowAnonymous]
     [HttpGet("optionen")]
-    public IActionResult Optionen() => Ok(new
+    public async Task<IActionResult> Optionen()
     {
-        anmeldungNoetig = !_cfg.GetValue<bool>("Woche:OhneLogin")
-    });
+        var w = await _einst.LesenAsync(_db);
+        return Ok(new
+        {
+            anmeldungNoetig = !_cfg.GetValue<bool>("Woche:OhneLogin"),
+            schule = new { name = w.SchuleName, kurzname = w.SchuleKurzname, app = w.AppName },
+            angemeldetBleibenTage = w.AngemeldetBleibenTage
+        });
+    }
 
     [AllowAnonymous]
     [HttpPost("login")]
@@ -329,14 +341,18 @@ public class AuthController : ControllerBase
     /// <summary>Antwort von Login und Passwortänderung: Token + Kontodaten für die App.</summary>
     private async Task<object> LoginAntwort(Benutzer u, bool angemeldetBleiben)
     {
-        var gueltigBis = angemeldetBleiben
-            ? DateTime.UtcNow.AddDays(Zahl("Jwt:TageAngemeldetBleiben", 30))
-            : DateTime.UtcNow.AddHours(Zahl("Jwt:StundenGueltig", 12));
+        // P3 (E-1, Entscheidung 200): Dauer aus den Schuleinstellungen; 0 Tage = kein „Angemeldet bleiben“.
+        var w = await _einst.LesenAsync(_db);
+        bool bleiben = angemeldetBleiben && w.AngemeldetBleibenTage > 0;
+        var gueltigBis = bleiben
+            ? DateTime.UtcNow.AddDays(w.AngemeldetBleibenTage)
+            : DateTime.UtcNow.AddHours(w.SitzungStunden);
 
         return new
         {
             token = ErzeugeToken(u, gueltigBis),
             gueltigBis,
+            angemeldetBleiben = bleiben,
             benutzername = u.Benutzername,
             rolle = u.Rolle.ToString(),
             lehrerKuerzel = u.LehrerKuerzel,
@@ -400,10 +416,6 @@ public class AuthController : ControllerBase
 
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
-
-    private double Zahl(string schluessel, double ersatz)
-        => double.TryParse(_cfg[schluessel], System.Globalization.NumberStyles.Float,
-               System.Globalization.CultureInfo.InvariantCulture, out var z) && z > 0 ? z : ersatz;
 
     private static string NeuerStempel() => KontenService.NeuerStempel();
 

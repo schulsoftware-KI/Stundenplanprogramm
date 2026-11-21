@@ -1719,3 +1719,47 @@ main.klassenbuch > .hi-karte, main.fehlzeiten > .hi-karte { margin-top: 2px; }
 }
 /* Tippflächen ≥ 44 px auch für die Reiter in „Konten verwalten" (wie die Klassenbuch-Reiter) */
 #verwReiter button { min-height: 44px; }
+
+/* =====================================================================
+   P3 (E-1): Schuleinstellungen (Kontomenü „Einstellungen“, nur Admin), Name der Schule auf der
+   Anmeldeseite; Kleinigkeit (b): „Konto löschen“ rot statt grau
+   ===================================================================== */
+.schul-name { margin: 0 0 4px 0; font-size: 0.95rem; font-weight: 650; color: var(--leise); overflow-wrap: anywhere; }
+#esReiter { display: flex; flex-wrap: wrap; }
+#esReiter button { flex: 1 1 0; min-width: max-content; min-height: 44px; }
+.es-gruppen { display: grid; gap: 12px; margin-top: 8px; }
+.es-karte { padding: 18px 16px 16px 16px; }
+.es-feld { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--linie); }
+.es-feld > div > .feld { margin-top: 2px; }
+.es-eingabe { display: flex; align-items: center; gap: 8px; }
+.es-eingabe .eingabe { flex: 1 1 auto; min-width: 0; }
+.es-eingabe input[type="number"], .es-eingabe input[type="date"] { flex: 0 1 13rem; }
+.es-standard { flex: none; min-height: 44px; }
+.es-einheit { font-weight: 500; color: var(--leise); }
+.es-schalter { min-height: 44px; font-weight: 650; }
+.es-info { margin: 6px 0 0 0; font-size: 0.86rem; color: var(--leise); overflow-wrap: anywhere; }
+.es-info strong { color: var(--tinte); }
+.es-info.leise { font-size: 0.8rem; }
+.es-dsb {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-left: 4px solid var(--verlegung);
+  background: var(--seite);
+  border-radius: 0 8px 8px 0;
+}
+.es-dsb-frage { margin: 0; font-size: 0.9rem; overflow-wrap: anywhere; }
+.es-dsb-stand { margin: 6px 0 0 0; font-size: 0.86rem; color: var(--leise); overflow-wrap: anywhere; }
+.es-dsb-felder { display: grid; grid-template-columns: 1fr; column-gap: 12px; }
+.es-dsb-felder .feld { margin: 10px 0 4px 0; font-size: 0.88rem; }
+.es-dsb-felder .eingabe { background: var(--papier); }
+@media (min-width: 560px) {
+  .es-dsb-felder { grid-template-columns: minmax(0, 13rem) 1fr; }
+}
+.es-dsb-hinweis { margin: 8px 0 0 0; font-size: 0.86rem; font-weight: 600; color: var(--rot); }
+.es-hinweis { margin: 0 0 8px 0; }
+.es-karte .fehler.klein { margin: 6px 0 0 0; }
+.es-karte .hinweis { margin-top: 12px; }
+.es-karte .hauptknopf:disabled { cursor: default; }
+.es-karte .knopfreihe .hauptknopf, .es-karte .knopfreihe .textknopf { min-height: 44px; }
+.hauptknopf.warnung { background: var(--rot); }
+.menuepunkt.gefahr { color: var(--rot); }

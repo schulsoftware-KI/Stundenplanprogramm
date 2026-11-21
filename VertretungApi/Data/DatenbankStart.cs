@@ -18,7 +18,9 @@ namespace VertretungApi.Data;
 //      im Echtbetrieb startet die API dann nicht.
 //  SQLite (Entwicklung): EnsureCreated + Schema-Nachrüstung wie bisher.
 //
-//  Danach wie bisher: Protokolle nach Frist aufräumen, Löschfrist für Einträge.
+//  Danach wie bisher: Protokolle nach Frist aufräumen, Löschfrist für Einträge. Seit P3 (E-1) kommen die
+//  Fristen aus den Schuleinstellungen der App; vorher legt Uebernehmen() beim ersten Start die Einstellungen
+//  mit den Werten aus appsettings an (Entscheidung 140). Täglich räumt Services/Aufraeumdienst.cs auf.
 //
 //  Nachtrag 5.1 (Test 07.11.2026): Scheitert der Start an PostgreSQL, nennt das Log die Ursache
 //  (Anmeldung abgelehnt, Datenbank fehlt, fehlende Rechte, Dienst nicht erreichbar …) statt immer
@@ -105,7 +107,21 @@ public static class DatenbankStart
             }
         }
 
-        Aufraeumen(db, app.Configuration, log);
+        // P3 (E-1, Entscheidung 140): Einstellungen anlegen bzw. Startwerte aus appsettings übernehmen.
+        try
+        {
+            Schuleinstellungen.Uebernehmen(db, app.Configuration, log);
+        }
+        catch (Exception ex)
+        {
+            log.LogError(ex, "Die Schuleinstellungen konnten nicht angelegt werden – es gelten die Werte aus appsettings " +
+                "bzw. der Standard. Abhilfe: bei PostgreSQL die Migration „Einstellungen“ erzeugen (README), bei SQLite " +
+                "Database:SchemaNachruesten = true.");
+        }
+
+        var einstellungen = app.Services.GetRequiredService<Schuleinstellungen>();
+        einstellungen.Verwerfen();
+        Aufraeumen.Ausfuehren(db, einstellungen.Lesen(db), log);
         return true;
     }
 
@@ -205,36 +221,5 @@ public static class DatenbankStart
         Exception? e = ex;
         for (int i = 0; e != null && i < 20; i++, e = e.InnerException)
             yield return e;
-    }
-
-    private static void Aufraeumen(AppDbContext db, IConfiguration cfg, ILogger log)
-    {
-        // Protokoll der Kontenverwaltung nur begrenzt aufbewahren (Datensparsamkeit).
-        try
-        {
-            int tage = cfg.GetValue("Konten:ProtokollTage", 365);
-            int geloescht = KontenService.ProtokollAufraeumen(db, tage);
-            if (geloescht > 0) log.LogInformation("{Anzahl} alte Protokolleinträge gelöscht.", geloescht);
-            // Phase 4.2: Download-Protokoll mit derselben Frist.
-            int downloads = BerichtService.ProtokollAufraeumen(db, tage);
-            if (downloads > 0) log.LogInformation("{Anzahl} alte Einträge im Download-Protokoll gelöscht.", downloads);
-        }
-        catch (Exception ex)
-        {
-            log.LogWarning(ex, "Kontenprotokoll konnte nicht aufgeräumt werden.");
-        }
-
-        // Phase 3.4: Löschfrist für Klassenbucheinträge – vorbereitet, Standard aus (0).
-        // Die Frist legt die Schule mit der/dem Datenschutzbeauftragten fest.
-        try
-        {
-            int tage = cfg.GetValue("Klassenbuch:EintraegeLoeschenNachTagen", 0);
-            int geloescht = KlassenbuchEintragService.Aufraeumen(db, tage);
-            if (geloescht > 0) log.LogInformation("{Anzahl} Klassenbucheinträge nach Ablauf der Frist gelöscht.", geloescht);
-        }
-        catch (Exception ex)
-        {
-            log.LogWarning(ex, "Alte Klassenbucheinträge konnten nicht gelöscht werden.");
-        }
     }
 }

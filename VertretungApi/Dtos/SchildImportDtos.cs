@@ -7,9 +7,10 @@ namespace VertretungApi.Dtos;
 //  Vorschau samt Prüfsumme. Dann als Import (Probelauf = false) mit derselben Nutzlast,
 //  der Prüfsumme der Vorschau und den bestätigten Abgängen.
 //
-//  Nie dabei: Geburtsdatum, SchILD-ID im Klartext, Noten, Kursart des Schülers, Daten der
-//  Lehrkräfte, Status 1 (Warteliste). Schüler werden über HMAC-Prüfsummen erkannt, die nur
-//  der Desktop bilden kann (Schlüssel auf dem Verwaltungsrechner).
+//  Nie dabei: Geburtsdatum, SchILD-ID im Klartext, Noten, Kursart des Schülers, Status 1
+//  (Warteliste). Schüler werden über HMAC-Prüfsummen erkannt, die nur der Desktop bilden kann
+//  (Schlüssel auf dem Verwaltungsrechner). Von den Lehrkräften seit 5.2c-2 nur die Klassenleitung
+//  je Klasse (Kürzel) und Kürzel, Nachname und Vorname der Lehrkräfte des Grundplans (191, 193).
 // =====================================================================
 
 public class SchildImportDto
@@ -46,6 +47,33 @@ public class SchildImportDto
     /// die die Vorschau angewendet hat.
     /// </summary>
     public List<SchildPaarDto>? Paare { get; set; }
+
+    // ---- Phase 5.2c-2 (Entscheidungen 191, 193) ----
+    /// <summary>
+    /// Klassenleitung laut Klassen.dat je Sek-I-Klasse des Plans (Plan-Kürzel, übersetzt über die Kürzeltabelle). null =
+    /// keine Angabe – die gespeicherten Klassenleitungen bleiben; Klassen ohne Eintrag bleiben ebenfalls, wie sie sind.
+    /// </summary>
+    public List<SchildKlassenleitungDto>? Klassenleitungen { get; set; }
+    /// <summary>
+    /// Namen der Lehrkräfte aus Lehrkraefte.dat – nur Kürzel, Nachname, Vorname und nur Kürzel des Grundplans (193). null
+    /// bzw. leer = keine Datei – der Bestand bleibt; sonst wird die Liste dieser Art (Pseudo/echt) ganz ersetzt.
+    /// </summary>
+    public List<SchildLehrkraftDto>? Lehrkraefte { get; set; }
+}
+
+/// <summary>5.2c-2 (191): Klassenleitung einer Klasse laut Klassen.dat (Plan-Kürzel, mehrere mit Komma).</summary>
+public class SchildKlassenleitungDto
+{
+    public string Klasse { get; set; } = "";
+    public string Kuerzel { get; set; } = "";
+}
+
+/// <summary>5.2c-2 (193): Name einer Lehrkraft laut Lehrkraefte.dat – nur Kürzel (Plan), Nachname, Vorname.</summary>
+public class SchildLehrkraftDto
+{
+    public string Kuerzel { get; set; } = "";
+    public string Nachname { get; set; } = "";
+    public string Vorname { get; set; } = "";
 }
 
 public class SchildPaarDto

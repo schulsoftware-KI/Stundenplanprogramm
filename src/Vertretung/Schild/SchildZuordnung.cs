@@ -155,6 +155,11 @@ namespace Stundenplan_V2.Vertretung
         public List<SchildPlanOhneZeile> PlanOhne { get; } = new();
         /// <summary>SchILD-Kürzel → vorgeschlagenes Plan-Kürzel.</summary>
         public Dictionary<string, string> VorschlagKuerzel { get; } = new(StringComparer.OrdinalIgnoreCase);
+        /// <summary>
+        /// 5.2c-2: feste Übersetzung SchILD-Kürzel (Großbuchstaben) → Plan-Kürzel (Schreibweise des Plans) – von Hand bzw.
+        /// gleich, ohne Vorschläge, nur Kürzel des Plans. Für Klassenleitung und Namen der Lehrkräfte (191, 193).
+        /// </summary>
+        public Dictionary<string, string> KuerzelFest { get; } = new(StringComparer.OrdinalIgnoreCase);
         /// <summary>SchILD-Fach → vollständige vorgeschlagene Liste der Plan-Fächer.</summary>
         public Dictionary<string, List<string>> VorschlagFaecher { get; } = new(StringComparer.OrdinalIgnoreCase);
         /// <summary>5.2a-3 (136): vorgeschlagene „gemeinsam“-Festlegungen (Jahrgang und KursBez wie in Kurse.dat, Plan-Schlüssel).</summary>
@@ -327,6 +332,15 @@ namespace Stundenplan_V2.Vertretung
 
                 Zeilen(res, km, fm);
                 Meldungen(res, km, noetigF, noetigK);
+
+                // 5.2c-2: feste Kürzel-Übersetzung (von Hand bzw. gleich) für alle Kürzel aus SchILD, auch die nur in
+                // Lehrkraefte.dat – Vorschläge zählen nicht (es wird nur übertragen, was feststeht).
+                var fest = KMap(false);
+                foreach (var S in _kAlle.OrderBy(x => x, StringComparer.Ordinal))
+                {
+                    string? p = fest(S);
+                    if (p != null && _plan.Kuerzel.Contains(p)) _e.KuerzelFest[S] = _plan.KuerzelText(p);
+                }
                 return _e;
             }
 

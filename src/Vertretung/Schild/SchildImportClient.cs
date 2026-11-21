@@ -114,6 +114,15 @@ namespace Stundenplan_V2.Vertretung
         public int Zusammengefuehrt { get; set; }
         public int ZuordnungPaare { get; set; }
         public int NeuZugeordnet { get; set; }
+        // 5.2c-2
+        public int KlassenleitungNeu { get; set; }
+        public int KlassenleitungGeaendert { get; set; }
+        public int Lehrkraefte { get; set; }
+        public int LehrkraefteNeu { get; set; }
+        public int LehrkraefteGeaendert { get; set; }
+        public int LehrkraefteEntfernt { get; set; }
+        public int PaarGruppen { get; set; }
+        public int PaarGruppenMitVorschlag { get; set; }
     }
 
     /// <summary>Zeile der Vorschau (enthält Namen – bleibt im Fenster, nie im Bericht oder Log).</summary>
@@ -132,6 +141,10 @@ namespace Stundenplan_V2.Vertretung
         public string? PartnerExtId { get; set; }
         /// <summary>5.2c-1: Paar ist in dieser Vorschau angewendet.</summary>
         public bool Gewaehlt { get; set; }
+        /// <summary>5.2c-2: Gruppe voneinander abhängiger Paare (Namensgleiche); null = eindeutiges Paar.</summary>
+        public int? Gruppe { get; set; }
+        /// <summary>5.2c-2: gehört zum Vorschlag seiner Gruppe (Neu-Zuordnung, „Vorschlag übernehmen“).</summary>
+        public bool Vorschlag { get; set; }
     }
 
     public sealed class SchildUnbekanntDto

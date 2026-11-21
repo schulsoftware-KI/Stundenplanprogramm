@@ -43,6 +43,14 @@ namespace VertretungApi.Services;
 //    über Name + Klasse bzw. Jahrgang (eindeutig = vorausgewählt, Namensgleiche nur von Hand, gleicher
 //    Name in einer anderen Klasse desselben Jahrgangs nur von Hand); zugeordnete Datensätze bekommen
 //    alle neuen Prüfsummen.
+//
+//  Phase 5.2c-2 (Entscheidungen 191–197):
+//  - Klassenleitung laut Klassen.dat (Plan-Kürzel) wird an der Klassen-Lerngruppe gespeichert; Änderungen
+//    erscheinen als Hinweis. Die Konten ändern sich nicht – Vorschläge macht die Kontenverwaltung (192).
+//  - Namen der Lehrkräfte (Kürzel, Nachname, Vorname) nur für Kürzel des Grundplans; mit Lehrkraefte.dat wird die
+//    Liste dieser Art ganz ersetzt (193). Sichtbar nur für den Admin und die Lehrkraft selbst (194).
+//  - Neu-Zuordnung: Namensgleiche bilden Gruppen (Zeilen untereinander); je Gruppe ein Vorschlag (passender Eintritt,
+//    dann die meisten gemeinsamen Kurse) – nur, wenn er eindeutig ist. Angewendet wird er erst nach Bestätigung.
 // =====================================================================
 
 public static class SchildImportService
@@ -100,6 +108,20 @@ public static class SchildImportService
         if (dto.Paare != null)
             foreach (var p in dto.Paare.Where(x => x != null))
                 p.ExtId = (p.ExtId ?? "").Trim();
+        // 5.2c-2 (191, 193)
+        if (dto.Klassenleitungen != null)
+            foreach (var k in dto.Klassenleitungen.Where(x => x != null))
+            {
+                k.Klasse = Leerraum.Replace((k.Klasse ?? "").Trim(), " ").ToUpperInvariant();
+                k.Kuerzel = KuerzelText(k.Kuerzel) ?? "";
+            }
+        if (dto.Lehrkraefte != null)
+            foreach (var l in dto.Lehrkraefte.Where(x => x != null))
+            {
+                l.Kuerzel = (l.Kuerzel ?? "").Trim();
+                l.Nachname = Leerraum.Replace((l.Nachname ?? "").Trim(), " ");
+                l.Vorname = Leerraum.Replace((l.Vorname ?? "").Trim(), " ");
+            }
         if (dto.Schueler == null) return;
         foreach (var s in dto.Schueler)
         {
@@ -135,6 +157,26 @@ public static class SchildImportService
         if (dto.Paare != null && (dto.Paare.Count > MaxSchueler
                                   || dto.Paare.Any(p => p == null || p.Id <= 0 || !PruefsummeMuster.IsMatch(p.ExtId))))
             f.Add("Die gewählten Paare (paare) sind unvollständig oder fehlerhaft.");
+        // 5.2c-2 (191, 193): Klassenleitungen und Namen der Lehrkräfte – Meldungen ohne Namen.
+        if (dto.Klassenleitungen != null)
+        {
+            if (dto.Klassenleitungen.Count > MaxSchluessel) f.Add($"Höchstens {MaxSchluessel} Klassenleitungen.");
+            else if (dto.Klassenleitungen.Any(k => k == null || k.Klasse.Length == 0 || k.Klasse.Length > 20
+                                                   || k.Kuerzel.Length == 0 || k.Kuerzel.Length > 100))
+                f.Add("Die Klassenleitungen (klassenleitungen) sind unvollständig oder fehlerhaft.");
+            else if (dto.Klassenleitungen.GroupBy(k => k.Klasse, StringComparer.OrdinalIgnoreCase).Any(g => g.Count() > 1))
+                f.Add("Eine Klasse steht mehrfach in den Klassenleitungen.");
+        }
+        if (dto.Lehrkraefte != null)
+        {
+            if (dto.Lehrkraefte.Count > MaxSchluessel) f.Add($"Höchstens {MaxSchluessel} Lehrkräfte.");
+            else if (dto.Lehrkraefte.Any(l => l == null || l.Kuerzel.Length == 0 || l.Kuerzel.Length > 20
+                                              || l.Kuerzel.Contains(',') || l.Nachname.Length == 0
+                                              || l.Nachname.Length > 100 || l.Vorname.Length > 100))
+                f.Add("Die Namen der Lehrkräfte (lehrkraefte) sind unvollständig oder fehlerhaft.");
+            else if (dto.Lehrkraefte.GroupBy(l => l.Kuerzel, StringComparer.OrdinalIgnoreCase).Any(g => g.Count() > 1))
+                f.Add("Ein Kürzel steht mehrfach in den Namen der Lehrkräfte.");
+        }
         if (dto.Schueler == null || dto.Schueler.Count == 0)
         {
             f.Add("Keine Schüler übermittelt.");
@@ -190,6 +232,18 @@ public static class SchildImportService
     /// <summary>Name zum Vergleichen (5.2c): wie die Eingabe der Prüfsumme – NFC, Leerzeichen zusammengefasst, groß.</summary>
     internal static string NameNorm(string? s)
         => Leerraum.Replace((s ?? "").Normalize(NormalizationForm.FormC).Trim(), " ").ToUpperInvariant();
+
+    /// <summary>5.2c-2: Kürzel-Liste „L23,l41 ; L23“ → „L23, l41“ (ohne Doppelte, Groß-/Kleinschreibung egal); leer = null.</summary>
+    public static string? KuerzelText(string? s)
+    {
+        var teile = KuerzelListe(s);
+        return teile.Count == 0 ? null : string.Join(", ", teile);
+    }
+
+    /// <summary>5.2c-2: Kürzel einer Liste (Komma, Semikolon oder Leerzeichen getrennt), ohne Doppelte.</summary>
+    public static List<string> KuerzelListe(string? s)
+        => (s ?? "").Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 }
 
 /// <summary>Grund, aus dem die Vorschau den Import sperrt (Entscheidung 168).</summary>
@@ -212,6 +266,10 @@ public sealed class SchildVorschauZeile
     public string? PartnerExtId { get; init; }
     /// <summary>5.2c-1: Paar ist in dieser Vorschau angewendet (zusammengeführt bzw. zugeordnet).</summary>
     public bool Gewaehlt { get; init; }
+    /// <summary>5.2c-2: Nummer der Gruppe von Paaren, die voneinander abhängen (Namensgleiche); leer = eindeutiges Paar.</summary>
+    public int? Gruppe { get; init; }
+    /// <summary>5.2c-2: Bei der Neu-Zuordnung gehört das Paar zum Vorschlag seiner Gruppe („Vorschlag übernehmen“).</summary>
+    public bool Vorschlag { get; init; }
 }
 
 /// <summary>Ein Plan-Schlüssel des Grundplans, der am „gilt ab“ gilt.</summary>
@@ -326,6 +384,9 @@ public sealed class SchildImportLauf
         AbgangLautSchild, FehltImExport, Unveraendert, AbgangNichtInDatenbank;
     // 5.2c-1: Paare „dieselbe Person?“ (normal) bzw. der Neu-Zuordnung
     public int DieselbePerson, Zusammengefuehrt, ZuordnungPaare, NeuZugeordnet;
+    // 5.2c-2: Klassenleitungen (erstmals eingetragen, geändert), Namen der Lehrkräfte; Gruppen der Neu-Zuordnung
+    public int KlassenleitungNeu, KlassenleitungGeaendert, LehrkraefteNeu, LehrkraefteGeaendert, LehrkraefteEntfernt,
+        LehrkraefteGesamt, PaarGruppen, PaarGruppenMitVorschlag;
 
     public List<(string Schluessel, string Art, int Schueler)> Unbekannt { get; } = new();
     public List<(string Typ, string Schluessel)> NeueLerngruppen { get; } = new();
@@ -421,8 +482,10 @@ public sealed class SchildImportLauf
             .Where(p => p.IstPseudo == dto.Pseudo && p.SchluesselKennung != null)
             .OrderByDescending(p => p.Zeit).ThenByDescending(p => p.Id)
             .Select(p => p.SchluesselKennung).FirstOrDefaultAsync();
+        // 5.2c-2 (193): Namen der Lehrkräfte dieser Art (werden mit Lehrkraefte.dat ganz ersetzt).
+        var lehrkraefte = await db.Lehrkraefte.Where(l => l.IstPseudo == dto.Pseudo).ToListAsync();
 
-        Stand = StandPruefsumme(version, schueler, lerngruppen, zug, protokolle);
+        Stand = StandPruefsumme(version, schueler, lerngruppen, zug, protokolle, lehrkraefte);
         VorschauPruefsumme = SchildImportService.Sha(Stand + "|" + NutzlastPruefsumme(dto));
 
         if (dto.Pseudo && schueler.Any(s => !s.IstPseudo))
@@ -647,6 +710,12 @@ public sealed class SchildImportLauf
                 Hinweise.Add($"„{lg.Bezeichnung}“ kam bisher aus SchILD, steht aber nicht mehr in der Zuordnung – die " +
                              $"Zugehörigkeiten von {n} Schülern enden am {D(_vortag)}; die Liste bleibt nur lesbar.");
         }
+
+        // ---- 7b. Klassenleitung laut Klassen.dat (5.2c-2, Entscheidung 191) ----
+        KlassenleitungVormerken(plan, ziel);
+
+        // ---- 7c. Namen der Lehrkräfte aus Lehrkraefte.dat (5.2c-2, Entscheidung 193) ----
+        LehrkraefteVormerken(slots, lehrkraefte);
 
         // ---- 8. Gefundene Schüler: Änderungen ermitteln ----
         var getroffen = new HashSet<int>();
@@ -919,6 +988,7 @@ public sealed class SchildImportLauf
 
         var rang = SchildImportService.Kategorie.Reihenfolge.Select((k, i) => (k, i)).ToDictionary(x => x.k, x => x.i);
         var sortiert = Zeilen.OrderBy(z => rang.TryGetValue(z.Kategorie, out var r) ? r : 99)
+            .ThenBy(z => _paarFolge.TryGetValue(z, out var pf) ? pf : 0)    // 5.2c-2: Paare in ihrer Reihenfolge (Gruppen)
             .ThenBy(z => z.Klasse ?? z.Stufe, Cmp).ThenBy(z => z.Name, Cmp).ToList();
         Zeilen.Clear();
         Zeilen.AddRange(sortiert);
@@ -929,6 +999,8 @@ public sealed class SchildImportLauf
     // ----------------------------------------------------------------
 
     private readonly Dictionary<int, List<string>> _paarHinweiseDb = new();
+    /// <summary>5.2c-2: Reihenfolge der Paar-Zeilen (Gruppen untereinander) – gilt auch nach dem Sortieren der Vorschau.</summary>
+    private readonly Dictionary<SchildVorschauZeile, int> _paarFolge = new();
 
     private sealed record PaarKandidat(Eingang E, Schueler S, string Signal, bool Stark, bool GleicheGruppe, string GruppeDb);
 
@@ -1058,11 +1130,8 @@ public sealed class SchildImportLauf
         // Bei unsicheren Paaren helfen der Vergleich der Kurse/Gruppen und der Eintritt (bisher ↔ im Export) beim Entscheiden.
         string KurseVergleich(PaarKandidat p)
         {
-            var bisher = zeilenVon(p.S.Id).Where(z => OffenAb(z) && lgById[z.LerngruppeId].Typ != LerngruppeTyp.Klasse)
-                .Select(z => lgById[z.LerngruppeId].Bezeichnung.Trim()).ToHashSet(Cmp);
-            var export = p.E.Kurse.Select(k => k.Schluessel).ToHashSet(Cmp);
-            int n = Math.Max(bisher.Count, export.Count);
-            string kurse = n == 0 ? "" : $" · gemeinsame Kurse/Gruppen: {bisher.Count(export.Contains)} von {n}";
+            var (gemeinsam, n) = KursZahlen(p, zeilenVon, lgById);
+            string kurse = n == 0 ? "" : $" · gemeinsame Kurse/Gruppen: {gemeinsam} von {n}";
             // Eintritt: bisher seit … (Beginn der ersten Zeile; leer = Schuljahresbeginn) ↔ im Export Neuaufnahme ab …
             var vonListe = zeilenVon(p.S.Id).Select(z => z.GueltigVon).ToList();
             DateOnly? seit = vonListe.Count == 0 || vonListe.Any(v => v == null) ? null : vonListe.Min();
@@ -1072,12 +1141,45 @@ public sealed class SchildImportLauf
             return kurse + (eintritt.Length > 0 ? " · " + eintritt : "");
         }
 
+        // 5.2c-2: Gruppen voneinander abhängiger Paare (Namensgleiche) – ihre Zeilen stehen untereinander, je Schüler des
+        // Exports zusammen. Bei der Neu-Zuordnung bekommt jede Gruppe einen Vorschlag, wenn er eindeutig ist.
+        var gruppeVon = Komponenten(paare);
+        var komponenten = paare.GroupBy(x => gruppeVon[x]).ToDictionary(g => g.Key, g => g.ToList());
+        var vorschlagPaare = new HashSet<PaarKandidat>();
+        var mitVorschlag = new HashSet<int>();
+        if (neuZu)
+            foreach (var (komp, liste) in komponenten)
+            {
+                var best = BesterVorschlag(liste, zeilenVon, lgById);
+                if (best == null) continue;
+                vorschlagPaare.UnionWith(best);
+                mitVorschlag.Add(komp);
+            }
+        // Reihenfolge: Gruppe (an der Stelle ihres ersten Paars nach Klasse und Name), darin Export-Nr., dann Datensatz.
+        var ersteStelle = new Dictionary<int, int>();
+        int stelle = 0;
+        foreach (var x in paare.OrderBy(y => y.E.D.Klasse ?? y.E.D.Stufe, Cmp).ThenBy(y => Name(y.E.D), Cmp).ThenBy(y => y.S.Id))
+            ersteStelle.TryAdd(gruppeVon[x], stelle++);
+        var reihe = paare.OrderBy(x => ersteStelle[gruppeVon[x]]).ThenBy(x => x.E.Nr).ThenBy(x => x.S.Id).ToList();
+
         string kat = neuZu ? SchildImportService.Kategorie.Zuordnung : SchildImportService.Kategorie.DieselbePerson;
         string ansicht = neuZu ? "Neu-Zuordnung" : "dieselbe Person?";
-        foreach (var p in paare.OrderBy(x => x.E.D.Klasse ?? x.E.D.Stufe, Cmp).ThenBy(x => Name(x.E.D), Cmp).ThenBy(x => x.S.Id))
+        var gruppenNr = new Dictionary<int, int>();
+        foreach (var p in reihe)
         {
             bool an = angewendet.Contains(p);
-            Zeilen.Add(new SchildVorschauZeile
+            int komp = gruppeVon[p];
+            int? gruppe = null;
+            if (komponenten[komp].Count > 1)
+            {
+                if (!gruppenNr.TryGetValue(komp, out int gn)) gruppenNr[komp] = gn = gruppenNr.Count + 1;
+                gruppe = gn;
+            }
+            string? hinweis = Eindeutig(p) ? null
+                : neuZu && gruppe != null && !mitVorschlag.Contains(komp)
+                    ? "mehrere mögliche Partner – kein eindeutiger Vorschlag (gleich gut): bitte in SchILD nachsehen"
+                    : "mehrere mögliche Partner – höchstens einen wählen";
+            var zeile = new SchildVorschauZeile
             {
                 Kategorie = kat, Id = p.S.Id, PartnerExtId = p.E.D.ExtId, Name = Name(p.E.D),
                 Klasse = p.E.Klasse?.Schluessel ?? p.E.D.Klasse, Stufe = p.E.D.Stufe,
@@ -1086,13 +1188,17 @@ public sealed class SchildImportLauf
                             // Nachbesserung 21.11.: bei mehreren Partnern unterscheidbar machen, welche Zeilen zusammengehören
                             (Eindeutig(p) ? "" : $" · Datensatz Nr. {p.S.Id} ↔ Export Nr. {p.E.Nr}"),
                 Vorausgewaehlt = Vorauswahl(p), Gewaehlt = an,
-                Hinweis = Eindeutig(p) ? null : "mehrere mögliche Partner – höchstens einen wählen"
-            });
+                Hinweis = hinweis, Gruppe = gruppe, Vorschlag = vorschlagPaare.Contains(p)
+            };
+            _paarFolge[zeile] = _paarFolge.Count + 1;
+            Zeilen.Add(zeile);
             if (an) continue;
             p.E.PaarHinweise.Add($"möglicherweise dieselbe Person wie „{p.S.Vorname} {p.S.Nachname}“ – siehe „{ansicht}“");
             if (!_paarHinweiseDb.TryGetValue(p.S.Id, out var l)) _paarHinweiseDb[p.S.Id] = l = new List<string>();
             l.Add($"möglicherweise dieselbe Person wie „{Name(p.E.D)}“ – siehe „{ansicht}“");
         }
+        PaarGruppen = komponenten.Count(kv => kv.Value.Count > 1);
+        PaarGruppenMitVorschlag = komponenten.Count(kv => kv.Value.Count > 1 && mitVorschlag.Contains(kv.Key));
 
         int mehrdeutig = paare.Count(p => !Eindeutig(p));
         if (neuZu)
@@ -1102,6 +1208,13 @@ public sealed class SchildImportLauf
             Hinweise.Add($"Neu-Zuordnung über Name + Klasse: {angewendet.Count} von {offeneDb.Count} bisherigen Schülern zugeordnet" +
                          (mehrdeutig > 0 ? $"; {mehrdeutig} Paare sind nicht eindeutig (Namensgleiche bzw. andere Klasse – von Hand wählen)" : "") +
                          ". Zugeordnete Schüler bekommen die Prüfsummen des neuen Schlüssels; Konten und Klassenbuchdaten bleiben.");
+            if (PaarGruppen > 0)
+                Hinweise.Add($"{PaarGruppen} Gruppen Namensgleicher (Zeilen untereinander, Spalte „Hinweis“: Gruppe) – für " +
+                             $"{PaarGruppenMitVorschlag} gibt es einen eindeutigen Vorschlag (passender Eintritt, dann die meisten " +
+                             "gemeinsamen Kurse): Knopf „Vorschlag übernehmen“ setzt die Häkchen, danach „Vorschau berechnen“." +
+                             (PaarGruppen > PaarGruppenMitVorschlag
+                                 ? $" {PaarGruppen - PaarGruppenMitVorschlag} Gruppen sind gleich gut – dort bitte in SchILD nachsehen."
+                                 : ""));
         }
         else
         {
@@ -1111,6 +1224,204 @@ public sealed class SchildImportLauf
                          $"{angewendet.Count} werden zusammengeführt: der bisherige Datensatz bekommt Name und Prüfsummen aus dem " +
                          "Export, Konto und Klassenbuchdaten bleiben. Häkchen ändern und „Vorschau berechnen“ rechnet neu.");
         }
+    }
+
+    /// <summary>5.2c-2: Gemeinsame Kurse/Gruppen eines Paars (bisher offen ↔ im Export) und die größere der beiden Zahlen.</summary>
+    private (int Gemeinsam, int Von) KursZahlen(PaarKandidat p, Func<int, List<Zugehoerigkeit>> zeilenVon,
+        Dictionary<int, Lerngruppe> lgById)
+    {
+        var bisher = zeilenVon(p.S.Id).Where(z => OffenAb(z) && lgById[z.LerngruppeId].Typ != LerngruppeTyp.Klasse)
+            .Select(z => lgById[z.LerngruppeId].Bezeichnung.Trim()).ToHashSet(Cmp);
+        var export = p.E.Kurse.Select(k => k.Schluessel).ToHashSet(Cmp);
+        return (bisher.Count(export.Contains), Math.Max(bisher.Count, export.Count));
+    }
+
+    /// <summary>
+    /// 5.2c-2: Passt der Eintritt? +1 = ja (Neuaufnahme ab demselben Tag bzw. beide seit Schuljahresbeginn), −1 = nein
+    /// (Neuaufnahme im Export, bisher seit Schuljahresbeginn), 0 = unklar.
+    /// </summary>
+    private int Eintritt(PaarKandidat p, Func<int, List<Zugehoerigkeit>> zeilenVon)
+    {
+        var von = zeilenVon(p.S.Id).Select(z => z.GueltigVon).ToList();
+        if (von.Count == 0) return 0;
+        DateOnly? seit = von.Any(v => v == null) ? null : von.Min();
+        bool abBeginn = seit == null || seit <= _kalStart;
+        if (p.E.D.Status == 0 && p.E.D.Aufnahme is DateOnly auf && auf > _kalStart)
+            return seit == auf ? 1 : abBeginn ? -1 : 0;
+        return abBeginn ? 1 : 0;
+    }
+
+    /// <summary>5.2c-2: Paare, die über einen gemeinsamen Schüler (Export oder Datenbank) zusammenhängen → Nummer der Gruppe.</summary>
+    private static Dictionary<PaarKandidat, int> Komponenten(List<PaarKandidat> paare)
+    {
+        var nachEx = paare.GroupBy(x => x.E).ToDictionary(g => g.Key, g => g.ToList());
+        var nachDb = paare.GroupBy(x => x.S.Id).ToDictionary(g => g.Key, g => g.ToList());
+        var komp = new Dictionary<PaarKandidat, int>();
+        int n = 0;
+        foreach (var start in paare)
+        {
+            if (komp.ContainsKey(start)) continue;
+            var stapel = new Stack<PaarKandidat>();
+            stapel.Push(start);
+            komp[start] = n;
+            while (stapel.Count > 0)
+            {
+                var q = stapel.Pop();
+                foreach (var r in nachEx[q.E].Concat(nachDb[q.S.Id]))
+                    if (komp.TryAdd(r, n)) stapel.Push(r);
+            }
+            n++;
+        }
+        return komp;
+    }
+
+    /// <summary>
+    /// 5.2c-2: Vorschlag für eine Gruppe der Neu-Zuordnung – die Auswahl (je Schüler höchstens ein Partner) mit den meisten
+    /// Paaren, bei Gleichstand mit dem besten Wert: passender Eintritt vor gemeinsamen Kursen vor gleicher Klasse. Paare mit
+    /// unpassendem Eintritt werden nie vorgeschlagen. null = kein eindeutiger Vorschlag (zwei Auswahlen gleich gut, zu groß).
+    /// </summary>
+    private List<PaarKandidat>? BesterVorschlag(List<PaarKandidat> gruppe, Func<int, List<Zugehoerigkeit>> zeilenVon,
+        Dictionary<int, Lerngruppe> lgById)
+    {
+        var kanten = gruppe.Where(x => Eintritt(x, zeilenVon) >= 0).ToList();
+        if (kanten.Count == 0 || kanten.Count > 16) return null;
+        var wert = kanten.ToDictionary(x => x,
+            x => Eintritt(x, zeilenVon) * 100 + KursZahlen(x, zeilenVon, lgById).Gemeinsam * 2 + (x.GleicheGruppe ? 1 : 0));
+        (int Anzahl, int Wert) best = (0, int.MinValue);
+        int gleichGut = 0;
+        List<PaarKandidat>? bestListe = null;
+        var wahl = new List<PaarKandidat>();
+        var exBelegt = new HashSet<Eingang>();
+        var dbBelegt = new HashSet<int>();
+
+        void Suche(int i, int summe)
+        {
+            if (i == kanten.Count)
+            {
+                if (wahl.Count == 0) return;
+                if (wahl.Count > best.Anzahl || (wahl.Count == best.Anzahl && summe > best.Wert))
+                {
+                    best = (wahl.Count, summe);
+                    bestListe = wahl.ToList();
+                    gleichGut = 1;
+                }
+                else if (wahl.Count == best.Anzahl && summe == best.Wert) gleichGut++;
+                return;
+            }
+            Suche(i + 1, summe);                                   // Paar i nicht nehmen
+            var k = kanten[i];
+            if (exBelegt.Contains(k.E) || dbBelegt.Contains(k.S.Id)) return;
+            exBelegt.Add(k.E);
+            dbBelegt.Add(k.S.Id);
+            wahl.Add(k);
+            Suche(i + 1, summe + wert[k]);                         // Paar i nehmen
+            wahl.RemoveAt(wahl.Count - 1);
+            exBelegt.Remove(k.E);
+            dbBelegt.Remove(k.S.Id);
+        }
+
+        Suche(0, 0);
+        return gleichGut == 1 ? bestListe : null;
+    }
+
+    // ----------------------------------------------------------------
+    //  5.2c-2: Klassenleitung (191) und Namen der Lehrkräfte (193)
+    // ----------------------------------------------------------------
+
+    /// <summary>
+    /// Klassenleitung laut Klassen.dat an den Klassen-Lerngruppen vormerken. Klassen ohne Angabe behalten ihren Wert.
+    /// Änderungen erscheinen als Hinweis (nur Kürzel). Die Konten ändern sich nicht – Vorschläge macht die Kontenverwaltung.
+    /// </summary>
+    private void KlassenleitungVormerken(SchildPlanIndex plan, Dictionary<string, Lerngruppe> ziel)
+    {
+        var liste = _dto.Klassenleitungen;
+        if (liste == null) return;
+        var aenderungen = new List<string>();
+        int ohneKlasse = 0;
+        foreach (var k in liste.OrderBy(x => x.Klasse, Cmp))
+        {
+            var p = plan.Klasse(k.Klasse);
+            if (p == null || !ziel.TryGetValue(p.Id, out var lg)) { ohneKlasse++; continue; }
+            string? alt = SchildImportService.KuerzelText(lg.Klassenleitung);
+            string neu = k.Kuerzel;
+            if (Cmp.Equals(alt ?? "", neu)) continue;
+            if (alt == null) KlassenleitungNeu++;
+            else aenderungen.Add($"Klassenleitung {p.Schluessel}: {alt} → {neu}");
+            var klasse = lg;
+            _schreiben.Add(_ => klasse.Klassenleitung = neu);
+        }
+        KlassenleitungGeaendert = aenderungen.Count;
+        if (KlassenleitungNeu > 0)
+            Hinweise.Add($"Klassenleitung laut SchILD (Klassen.dat) für {KlassenleitungNeu} Klassen erstmals eingetragen.");
+        foreach (var a in aenderungen.Take(12)) Hinweise.Add(a);
+        if (aenderungen.Count > 12) Hinweise.Add($"… und {aenderungen.Count - 12} weitere Klassenleitungen geändert.");
+        if (KlassenleitungNeu + KlassenleitungGeaendert > 0)
+            Hinweise.Add("Die Konten ändern sich dadurch nicht. Vorschläge für Rolle und Zuständigkeit: App → Kontomenü → " +
+                         "„Konten verwalten“ → Reiter „SchILD“.");
+        if (ohneKlasse > 0)
+            Hinweise.Add($"{ohneKlasse} Klassenleitungen gehören zu keiner Klasse des Grundplans und werden übersprungen.");
+    }
+
+    /// <summary>
+    /// Namen der Lehrkräfte vormerken: nur Kürzel des Grundplans (Datensparsamkeit); die Liste dieser Art wird ganz ersetzt –
+    /// wer fehlt, wird gelöscht. Ohne Lehrkraefte.dat (null bzw. leer) bleibt der Bestand. Hinweise nur mit Kürzeln.
+    /// </summary>
+    private void LehrkraefteVormerken(List<GrundplanSlot> slots, List<Lehrkraft> bisher)
+    {
+        var liste = _dto.Lehrkraefte;
+        if (liste == null) return;
+        if (liste.Count == 0)
+        {
+            Hinweise.Add("Lehrkraefte.dat enthält keine Lehrkraft des Grundplans – die gespeicherten Namen bleiben.");
+            return;
+        }
+        var imPlan = new HashSet<string>(slots.Where(s => !string.Equals(s.Art, "Sperre", StringComparison.OrdinalIgnoreCase))
+            .Select(s => (s.Lehrer ?? "").Trim()).Where(x => x.Length > 0), Cmp);
+        var neuListe = liste.Where(x => imPlan.Contains(x.Kuerzel)).ToList();
+        int ausserhalb = liste.Count - neuListe.Count;
+        var jeKuerzel = bisher.GroupBy(x => x.Kuerzel.Trim(), Cmp)
+            .ToDictionary(g => g.Key, g => g.OrderBy(y => y.Id).ToList(), Cmp);
+        var bleiben = new HashSet<int>();
+        var geaendert = new List<string>();
+        foreach (var neu in neuListe.OrderBy(x => x.Kuerzel, Cmp))
+        {
+            if (jeKuerzel.TryGetValue(neu.Kuerzel, out var vorhanden))
+            {
+                var t = vorhanden[0];
+                bleiben.Add(t.Id);
+                if (t.Nachname == neu.Nachname && t.Vorname == neu.Vorname) continue;
+                geaendert.Add(t.Kuerzel.Trim());
+                string nach = neu.Nachname, vor = neu.Vorname;
+                _schreiben.Add(_ =>
+                {
+                    t.Nachname = nach;
+                    t.Vorname = vor;
+                    t.ImportAm = _jetzt;
+                });
+            }
+            else
+            {
+                LehrkraefteNeu++;
+                var n = new Lehrkraft
+                {
+                    Kuerzel = neu.Kuerzel, Nachname = neu.Nachname, Vorname = neu.Vorname, IstPseudo = _dto.Pseudo,
+                    ImportAm = _jetzt
+                };
+                _schreiben.Add(d => d.Lehrkraefte.Add(n));
+            }
+        }
+        var weg = bisher.Where(x => !bleiben.Contains(x.Id)).ToList();
+        if (weg.Count > 0) _schreiben.Add(d => d.Lehrkraefte.RemoveRange(weg));
+        LehrkraefteGesamt = neuListe.Count;
+        LehrkraefteGeaendert = geaendert.Count;
+        LehrkraefteEntfernt = weg.Count;
+        Hinweise.Add($"Namen der Lehrkräfte (Lehrkraefte.dat, nur Lehrkräfte des Grundplans): {neuListe.Count} – neu " +
+                     $"{LehrkraefteNeu}, geändert {geaendert.Count}" +
+                     (geaendert.Count > 0 ? $" ({string.Join(", ", geaendert.Take(12))}{(geaendert.Count > 12 ? " …" : "")})" : "") +
+                     $", entfernt {weg.Count}. Sichtbar nur für die Verwaltung (Konten) und die Lehrkraft selbst.");
+        if (ausserhalb > 0)
+            Hinweise.Add($"{ausserhalb} Lehrkräfte aus Lehrkraefte.dat unterrichten laut Grundplan nicht – ihre Namen werden " +
+                         "nicht übernommen.");
     }
 
     // ----------------------------------------------------------------
@@ -1180,7 +1491,16 @@ public sealed class SchildImportLauf
         dieselbePerson = DieselbePerson,
         zusammengefuehrt = Zusammengefuehrt,
         zuordnungPaare = ZuordnungPaare,
-        neuZugeordnet = NeuZugeordnet
+        neuZugeordnet = NeuZugeordnet,
+        // 5.2c-2
+        klassenleitungNeu = KlassenleitungNeu,
+        klassenleitungGeaendert = KlassenleitungGeaendert,
+        lehrkraefte = LehrkraefteGesamt,
+        lehrkraefteNeu = LehrkraefteNeu,
+        lehrkraefteGeaendert = LehrkraefteGeaendert,
+        lehrkraefteEntfernt = LehrkraefteEntfernt,
+        paarGruppen = PaarGruppen,
+        paarGruppenMitVorschlag = PaarGruppenMitVorschlag
     };
 
     /// <summary>Vorschau für den Desktop (Probelauf, Sperre oder veraltete Vorschau).</summary>
@@ -1265,6 +1585,15 @@ public sealed class SchildImportLauf
         b.AppendLine($"  unverändert: {Unveraendert}");
         if (AbgangNichtInDatenbank > 0) b.AppendLine($"  Abgang laut SchILD, nicht in der Datenbank: {AbgangNichtInDatenbank}");
         if (p != null) b.AppendLine($"Abgänge bestätigt: {p.Abgaenge} · übersprungen: {p.Uebersprungen}");
+        // 5.2c-2: Gruppen der Neu-Zuordnung, Klassenleitungen, Namen der Lehrkräfte (nur Zahlen)
+        if (_dto.Neuzuordnung && PaarGruppen > 0)
+            b.AppendLine($"Gruppen Namensgleicher: {PaarGruppen} (mit eindeutigem Vorschlag: {PaarGruppenMitVorschlag})");
+        if (_dto.Klassenleitungen != null)
+            b.AppendLine($"Klassenleitung (Klassen.dat): {_dto.Klassenleitungen.Count} Klassen – erstmals eingetragen " +
+                         $"{KlassenleitungNeu}, geändert {KlassenleitungGeaendert}");
+        if (_dto.Lehrkraefte is { Count: > 0 })
+            b.AppendLine($"Namen der Lehrkräfte (Lehrkraefte.dat): {LehrkraefteGesamt} – neu {LehrkraefteNeu}, geändert " +
+                         $"{LehrkraefteGeaendert}, entfernt {LehrkraefteEntfernt}");
         if (NeueLerngruppen.Count > 0)
             b.AppendLine("Neue Lerngruppen: " + string.Join(", ", NeueLerngruppen.GroupBy(n => n.Typ)
                 .Select(g => $"{g.Count()} {g.Key}")));
@@ -1406,9 +1735,10 @@ public sealed class SchildImportLauf
 
     private static string D(DateOnly d) => SchildImportService.Datum(d);
 
-    /// <summary>Prüfsumme des Datenbankstands (78): Schüler, Lerngruppen und Zugehörigkeiten des Schuljahrs, Grundplan, Importe.</summary>
+    /// <summary>Prüfsumme des Datenbankstands (78): Schüler, Lerngruppen (seit 5.2c-2 mit Klassenleitung) und
+    /// Zugehörigkeiten des Schuljahrs, Grundplan, Importe, seit 5.2c-2 die Namen der Lehrkräfte dieser Art.</summary>
     private static string StandPruefsumme(GrundplanVersion v, List<Schueler> schueler, List<Lerngruppe> lerngruppen,
-        List<Zugehoerigkeit> zug, List<SchildImportProtokoll> protokolle)
+        List<Zugehoerigkeit> zug, List<SchildImportProtokoll> protokolle, List<Lehrkraft> lehrkraefte)
     {
         var b = new StringBuilder();
         b.Append("V|").Append(v.Id).Append('|').Append(v.Erstellt.UtcTicks).Append('\n');
@@ -1419,7 +1749,11 @@ public sealed class SchildImportLauf
              .Append(s.IstPseudo ? '1' : '0').Append('\n');
         foreach (var l in lerngruppen.OrderBy(x => x.Id))
             b.Append("L|").Append(l.Id).Append('|').Append((int)l.Typ).Append('|').Append(l.Bezeichnung).Append('|')
-             .Append(l.Quelle).Append('|').Append(SchildImportService.Iso(l.SchildAb)).Append('\n');
+             .Append(l.Quelle).Append('|').Append(SchildImportService.Iso(l.SchildAb)).Append('|')
+             .Append(l.Klassenleitung).Append('\n');
+        foreach (var t in lehrkraefte.OrderBy(x => x.Id))
+            b.Append("T|").Append(t.Id).Append('|').Append(t.Kuerzel).Append('|').Append(t.Nachname).Append('|')
+             .Append(t.Vorname).Append('\n');
         foreach (var z in zug.OrderBy(x => x.Id))
             b.Append("Z|").Append(z.Id).Append('|').Append(z.SchuelerId).Append('|').Append(z.LerngruppeId).Append('|')
              .Append(SchildImportService.Iso(z.GueltigVon)).Append('|').Append(SchildImportService.Iso(z.GueltigBis)).Append('|')
@@ -1448,6 +1782,19 @@ public sealed class SchildImportLauf
              .Append(string.Join(",", (s.Kurse ?? new List<string>()).Select(x => x.ToUpperInvariant()).Distinct()
                  .OrderBy(x => x, StringComparer.Ordinal)))
              .Append('\n');
+        // 5.2c-2: Klassenleitungen und Namen der Lehrkräfte (null = keine Angabe, leer = leere Liste).
+        if (dto.Klassenleitungen != null)
+        {
+            b.Append("KL\n");
+            foreach (var k in dto.Klassenleitungen.OrderBy(x => x.Klasse, StringComparer.Ordinal))
+                b.Append("C|").Append(k.Klasse).Append('|').Append(k.Kuerzel.ToUpperInvariant()).Append('\n');
+        }
+        if (dto.Lehrkraefte != null)
+        {
+            b.Append("LK\n");
+            foreach (var l in dto.Lehrkraefte.OrderBy(x => x.Kuerzel.ToUpperInvariant(), StringComparer.Ordinal))
+                b.Append("T|").Append(l.Kuerzel).Append('|').Append(l.Nachname).Append('|').Append(l.Vorname).Append('\n');
+        }
         return SchildImportService.Sha(b.ToString());
     }
 }

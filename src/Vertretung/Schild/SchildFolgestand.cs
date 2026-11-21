@@ -39,6 +39,12 @@ namespace Stundenplan_V2.Vertretung
     //   - 1 Vorname korrigiert (Sek I), 1 Nachname geändert + Klassenwechsel (Sek I),
     //     1 Neuaufnahme mit demselben Namen wie ein Mitschüler derselben Klasse
     //     (Namensgleiche – für die Neu-Zuordnung über Name + Klasse)
+    //  Seit 5.2c-2 (Entscheidungen 191, 193, Standard aus; ändern keine Schüler):
+    //   - „Klassenleitung wechselt“: eine Sek-I-Klasse bekommt in Klassen.dat eine
+    //     andere Klassenleitung – möglichst die Lehrkraft mit dem Plan-Kürzel „L2“
+    //     (Testkonten L2 und koQ1), sonst eine, die noch keine Klasse leitet
+    //   - „Lehrkraft heißt anders“: ein Nachname in Lehrkraefte.dat ändert sich –
+    //     möglichst bei Plan-Kürzel „L1“ (Testkonten L1 und kl05A)
     //
     //  Damit die Zuordnung SchILD ↔ Plan gleich bleibt: nur feste Zuordnungen
     //  (eindeutig bzw. von Hand, nicht „gemeinsam“), jede Liste behält genug
@@ -70,6 +76,9 @@ namespace Stundenplan_V2.Vertretung
         public bool Vorname { get; set; }
         public bool NameUndKlasse { get; set; }
         public bool Namensgleiche { get; set; }
+        // 5.2c-2 (Standard aus): Klassen.dat bzw. Lehrkraefte.dat – ändern keine Schüler
+        public bool KlassenleitungWechselt { get; set; }
+        public bool LehrkraftHeisstAnders { get; set; }
     }
 
     public sealed class SchildFolgestandErgebnis
@@ -107,6 +116,11 @@ namespace Stundenplan_V2.Vertretung
         /// <summary>Wechsel, die erst nach dem Häkchen bei einem nicht vorausgewählten Paar erscheinen.</summary>
         public int KlassenwechselPaar { get; set; }
         public int KurswechselPaar { get; set; }
+        // 5.2c-2: erwartete Hinweise (nur Kürzel)
+        /// <summary>„07B: L57 → L2“ – Klassenleitung laut Klassen.dat gewechselt.</summary>
+        public string? KlassenleitungText { get; set; }
+        /// <summary>Plan-Kürzel der Lehrkraft mit anderem Nachnamen.</summary>
+        public string? LehrkraftText { get; set; }
 
         public string ErwartungText()
         {
@@ -126,6 +140,13 @@ namespace Stundenplan_V2.Vertretung
             if (OhneSchildId)
                 sb.AppendLine("Änderungen ohne SchILD-ID: Namens- und Datumsänderungen erscheinen als Paare „dieselbe Person?“ " +
                               "statt als „Name bzw. Geburtsdatum geändert“.");
+            if (KlassenleitungText != null || LehrkraftText != null)
+                sb.AppendLine("Ist der Ausgangsordner schon mit 5.2c-2 importiert (Klassenleitungen und Namen der Lehrkräfte " +
+                              "gespeichert), zeigen die Hinweise der Vorschau:" +
+                              (KlassenleitungText != null ? $" „Klassenleitung {KlassenleitungText}“ (die Konten ändern sich nicht)" : "") +
+                              (KlassenleitungText != null && LehrkraftText != null ? " und" : "") +
+                              (LehrkraftText != null ? $" „Namen der Lehrkräfte … geändert 1 ({LehrkraftText})“" : "") +
+                              ". Sonst erscheinen alle als „erstmals eingetragen“ bzw. „neu“.");
             if (AusFolgestand)
                 sb.AppendLine($"Der Ausgangsordner ist selbst ein Folgestand: Von den {AbgangNichtInDb} Schülern mit Status 8/9 daraus zählen " +
                               "die, deren Abgang schon importiert ist, bei „unverändert“ statt bei „nicht in der Datenbank“; Schüler, " +
@@ -354,6 +375,7 @@ namespace Stundenplan_V2.Vertretung
 
             private readonly Roh _ba, _le;
             private readonly Roh? _lp;
+            private Roh? _kl, _lk;   // 5.2c-2: Klassen.dat bzw. Lehrkraefte.dat – nur gelesen und geschrieben, wenn geändert
             private readonly int bN, bV, bG, bGe, bS, bAuf, bJ, bA, bJg, bKl, bEin;
             private readonly int lN, lV, lG, lJ, lA, lFach, lLehrer, lArt, lKurs;
             private readonly int pN, pV, pG, pId, pBen;
@@ -686,6 +708,9 @@ namespace Stundenplan_V2.Vertretung
                 if (_opt.Namensgleiche) Namensgleiche();
                 if (_opt.FehltOhneAbgang) FehltOhneAbgang();
                 if (_opt.KlasseFehlt) KlasseFehlt();
+                // 5.2c-2: zuletzt, damit der Zufall der übrigen Änderungen gleich bleibt (Folgestände aus 5.2b/5.2c-1 wiederholbar)
+                if (_opt.KlassenleitungWechselt) KlassenleitungWechselt();
+                if (_opt.LehrkraftHeisstAnders) LehrkraftHeisstAnders();
                 if (_opt.OhneSchildId && E.Paare > 0) E.Uebersicht.Add($"{E.Paare} Änderungen ohne SchILD-ID");
 
                 // ---- Erwartung (Ausgangsordner importiert, alle Abgänge bestätigt) ----
@@ -1121,6 +1146,99 @@ namespace Stundenplan_V2.Vertretung
             }
 
             // ---------------------------------------------------------------
+            //  5.2c-2: Klassenleitung und Namen der Lehrkräfte
+            // ---------------------------------------------------------------
+
+            /// <summary>Eine Sek-I-Klasse bekommt in Klassen.dat eine andere Klassenleitung (Plan-Kürzel „L2“, sonst frei).</summary>
+            private void KlassenleitungWechselt()
+            {
+                string name = SchildProfil.Standard().Fuer(SchildDateiArt.Klassen).Datei;
+                if (!_marker.Dateien.ContainsKey(name))
+                {
+                    E.NichtMoeglich.Add($"Klassenleitung wechselt: {name} fehlt im Pseudo-Export.");
+                    return;
+                }
+                var kl = Lies(_ex.Ordner, name);
+                int iBez = kl.SpPflicht("InternBez"), iLehrer = kl.SpPflicht("Klassenlehrer"), iJg = kl.Sp("Jahrgang"),
+                    iJ = kl.Sp("Jahr"), iA = kl.Sp("Abschnitt");
+                var fest = _zu.KuerzelFest;   // SchILD-Kürzel → Plan-Kürzel (fest)
+                var klassen = new List<(int Zeile, string Klasse, string Alt)>();
+                for (int i = 0; i < kl.Zeilen.Count; i++)
+                {
+                    var z = kl.Zeilen[i];
+                    if (!ImAbschnitt(z, iJ, iA)) continue;
+                    string k = SchildText.KlasseNorm(Roh.W(z, iBez));
+                    if (k.Length == 0 || Oberstufe.Contains(k) || Oberstufe.Contains(Roh.W(z, iJg)) || !_plan.Klassen.Contains(k))
+                        continue;
+                    string alt = Roh.W(z, iLehrer);
+                    if (alt.Length > 0 && fest.ContainsKey(alt)) klassen.Add((i, k, alt));
+                }
+                var leiter = new HashSet<string>(klassen.Select(x => x.Alt), StringComparer.OrdinalIgnoreCase);
+                string? neu = fest.Where(kv => string.Equals(kv.Value, "L2", StringComparison.OrdinalIgnoreCase))
+                                  .Select(kv => kv.Key).OrderBy(x => x, StringComparer.Ordinal).FirstOrDefault();
+                if (neu == null)
+                {
+                    var frei = fest.Keys.Where(x => !leiter.Contains(x)).OrderBy(x => x, StringComparer.Ordinal).ToList();
+                    neu = frei.Count == 0 ? null : frei[_rnd.Next(frei.Count)];
+                }
+                if (neu == null)
+                {
+                    E.NichtMoeglich.Add("Klassenleitung wechselt: keine passende Lehrkraft (feste Kürzel) gefunden.");
+                    return;
+                }
+                string neuPlan = fest[neu];
+                var wahl = klassen.Where(x => !string.Equals(fest[x.Alt], neuPlan, StringComparison.OrdinalIgnoreCase))
+                                  .OrderBy(x => x.Klasse, StringComparer.Ordinal).ToList();
+                if (wahl.Count == 0)
+                {
+                    E.NichtMoeglich.Add("Klassenleitung wechselt: keine passende Klasse gefunden.");
+                    return;
+                }
+                var ziel = wahl[_rnd.Next(wahl.Count)];
+                kl.Setze(ziel.Zeile, iLehrer, neu);
+                _kl = kl;
+                E.KlassenleitungText = $"{ziel.Klasse}: {fest[ziel.Alt]} → {neuPlan}";
+                E.Aenderungen.Add($"Klassenleitung {E.KlassenleitungText} ({name}) – laut SchILD; die Konten ändern sich nicht");
+                E.Uebersicht.Add("1 Klassenleitung gewechselt");
+            }
+
+            /// <summary>Eine Lehrkraft des Plans bekommt in Lehrkraefte.dat einen anderen Nachnamen (Plan-Kürzel „L1“, sonst zufällig).</summary>
+            private void LehrkraftHeisstAnders()
+            {
+                string name = SchildProfil.Standard().Fuer(SchildDateiArt.Lehrkraefte).Datei;
+                if (!_marker.Dateien.ContainsKey(name))
+                {
+                    E.NichtMoeglich.Add($"Lehrkraft heißt anders: {name} fehlt im Pseudo-Export.");
+                    return;
+                }
+                var lk = Lies(_ex.Ordner, name);
+                int iK = lk.SpPflicht("InternKrz"), iN = lk.SpPflicht("Nachname");
+                var fest = _zu.KuerzelFest;
+                var kandidaten = new List<(int Zeile, string Plan)>();
+                for (int i = 0; i < lk.Zeilen.Count; i++)
+                {
+                    var z = lk.Zeilen[i];
+                    if (Roh.W(z, iN).Length > 0 && fest.TryGetValue(Roh.W(z, iK), out var planK)) kandidaten.Add((i, planK));
+                }
+                if (kandidaten.Count == 0)
+                {
+                    E.NichtMoeglich.Add("Lehrkraft heißt anders: keine Lehrkraft mit festem Plan-Kürzel gefunden.");
+                    return;
+                }
+                var l1 = kandidaten.Where(x => string.Equals(x.Plan, "L1", StringComparison.OrdinalIgnoreCase)).ToList();
+                var ziel = l1.Count > 0 ? l1[0] : kandidaten[_rnd.Next(kandidaten.Count)];
+                string alt = Roh.W(lk.Zeilen[ziel.Zeile], iN);
+                var namen = new[] { "Lindner", "Brandt", "Vogel", "Seidel", "Franke" }
+                    .Where(x => !string.Equals(x, alt, StringComparison.OrdinalIgnoreCase)).ToList();
+                string neu = namen[_rnd.Next(namen.Count)];
+                lk.Setze(ziel.Zeile, iN, neu);
+                _lk = lk;
+                E.LehrkraftText = ziel.Plan;
+                E.Aenderungen.Add($"Lehrkraft {ziel.Plan} heißt anders ({name}): Nachname {alt} → {neu} (Pseudo-Name)");
+                E.Uebersicht.Add("1 Lehrkraft mit anderem Nachnamen");
+            }
+
+            // ---------------------------------------------------------------
             //  Schreiben
             // ---------------------------------------------------------------
 
@@ -1128,7 +1246,7 @@ namespace Stundenplan_V2.Vertretung
             {
                 Directory.CreateDirectory(ziel);
                 var geschrieben = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var r in new[] { _ba, _le, _lp })
+                foreach (var r in new[] { _ba, _le, _lp, _kl, _lk })
                 {
                     if (r == null) continue;
                     SchildFolgestand.Schreibe(ziel, r);

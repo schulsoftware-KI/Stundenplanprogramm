@@ -11,7 +11,8 @@
          Zuordnung SchILD ↔ Plan mit Festlegungen von Hand (schild_zuordnung.json); 5.2a-3: Muster der
          Kursbezeichnung und „gemeinsam mit …“; 5.2b-2b: Reiter „Import“ (SchildDialog_Import.cs) – sendet nur
          dort und nur Prüfsummen statt Geburtsdatum und SchILD-ID; 5.2b-2b-2: „Folgestand erzeugen…“
-         (SchildDialog_Folgestand.cs); 5.2c-1: Paare „dieselbe Person?“ und „Schlüssel verloren – neu zuordnen…“. -->
+         (SchildDialog_Folgestand.cs); 5.2c-1: Paare „dieselbe Person?“ und „Schlüssel verloren – neu zuordnen…“;
+         5.2c-2: Gruppen Namensgleicher und „Vorschlag übernehmen…“. -->
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -233,6 +234,19 @@
                             <DataGrid x:Name="DgImport" AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column"
                                       CanUserAddRows="False" CanUserDeleteRows="False" GridLinesVisibility="Horizontal"
                                       SelectionMode="Single">
+                                <!-- 5.2c-2: Gruppen Namensgleicher der Neu-Zuordnung abwechselnd hinterlegt (Zeilen untereinander) -->
+                                <DataGrid.RowStyle>
+                                    <Style TargetType="DataGridRow">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding GruppeFarbe}" Value="a">
+                                                <Setter Property="Background" Value="#FFF6DD"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding GruppeFarbe}" Value="b">
+                                                <Setter Property="Background" Value="#E6F0FA"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DataGrid.RowStyle>
                                 <DataGrid.Columns>
                                     <DataGridTemplateColumn Header="Bestätigen" Width="72" SortMemberPath="Bestaetigt">
                                         <DataGridTemplateColumn.CellTemplate>
@@ -284,6 +298,10 @@
                                 Margin="0,0,6,0" IsEnabled="False" Click="BtnImAlle_Click"/>
                         <Button DockPanel.Dock="Left" x:Name="BtnImKeine" Content="Keine in der Ansicht" Padding="10,3"
                                 Margin="0,0,12,0" IsEnabled="False" Click="BtnImKeine_Click"/>
+                        <!-- 5.2c-2: Neu-Zuordnung – je Gruppe Namensgleicher den Vorschlag der API anhaken -->
+                        <Button DockPanel.Dock="Left" x:Name="BtnImVorschlag" Content="Vorschlag übernehmen…" Padding="10,3"
+                                Margin="0,0,12,0" Visibility="Collapsed" Click="BtnImVorschlag_Click"
+                                ToolTip="Je Gruppe Namensgleicher die Paare mit passendem Eintritt bzw. den meisten gemeinsamen Kursen anhaken (nur eindeutige Vorschläge) – danach „Vorschau berechnen“."/>
                         <TextBlock x:Name="TxtImAuswahl" VerticalAlignment="Center" Foreground="DimGray" TextWrapping="Wrap"/>
                     </DockPanel>
                 </Grid>

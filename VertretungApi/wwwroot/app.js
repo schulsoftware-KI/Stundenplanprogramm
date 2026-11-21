@@ -1150,6 +1150,7 @@ function anmeldungUebernehmen(d, dauerhaft) {
     benutzername: d.benutzername,
     rolle: d.rolle,
     anzeige: d.anzeige || d.benutzername,
+    name: d.name || null,          // Phase 5.2c-2 (194): eigener Name laut SchILD (nur Lehrkräfte)
     lehrerKuerzel: d.lehrerKuerzel || null,
     zustaendig: d.zustaendig || null,
     mussPasswortAendern: !!d.mussPasswortAendern,
@@ -1219,7 +1220,8 @@ function ueberallZuruecksetzen() {
 function kontoOeffnen() {
   if (!state.anmeldung) { zeigeAnmeldung(); return; }
   const a = state.anmeldung;
-  el("kontoName").textContent = a.anzeige || a.benutzername;
+  // Phase 5.2c-2 (194): Lehrkräfte sehen hier ihren Namen laut SchILD („L23 · Anna Schulz“).
+  el("kontoName").textContent = (a.anzeige || a.benutzername) + (a.name ? ` · ${a.name}` : "");
   const info = [ROLLEN_TEXT[a.rolle] || a.rolle];
   if (!gleich(a.anzeige, a.benutzername)) info.push(`Benutzer ${a.benutzername}`);
   info.push(a.dauerhaft && a.gueltigBis

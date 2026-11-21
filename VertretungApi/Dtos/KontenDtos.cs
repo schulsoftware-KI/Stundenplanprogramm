@@ -21,7 +21,13 @@ public record KontoDto(
     DateTime? AngelegtAm,         // UTC
     DateTime? LetzteAnmeldung,    // UTC
     DateTime? PasswortGeaendertAm,// UTC
-    bool Ich);                    // das eigene Konto
+    bool Ich,                     // das eigene Konto
+    // ---- Phase 5.2c-2 (Entscheidungen 194, 197) ----
+    string? Lehrkraft = null,     // Name laut Lehrkraefte.dat („Anna Schulz“) – nur für den Admin
+    bool NameGeaendert = false,   // Schülerkonto: Benutzername „vorname.nachname“ passt nicht mehr zum Namen laut SchILD
+    string? BenutzernameVorschlag = null, // nur in der Einzelansicht (Admin): freier Name nach dem neuen Namen
+    bool WiederAktiv = false,     // Schülerkonto gesperrt, laut SchILD aber (wieder) aktiv – z. B. Wiedereintritt
+    string? GesperrtDurch = null);// Einzelansicht (Admin): wer zuletzt gesperrt hat, mit Grund und Datum
 
 public record KontenListeDto(IReadOnlyList<KontoDto> Konten, int Gesamt, bool Mehr);
 
@@ -58,7 +64,8 @@ public record SammelDto(
     string Art,
     IReadOnlyList<string>? Gruppen,   // Schüler: „05A", „Q1", …
     IReadOnlyList<string>? Nur,       // optional: nur diese Kürzel bzw. Schüler-Ids (aus der Vorschau abgewählt = fehlt)
-    bool Anlegen);                    // false = nur Vorschau
+    bool Anlegen,                     // false = nur Vorschau
+    bool KlassenleitungEintragen = false); // 5.2c-2 (192): Lehrkräfte – Klassenleitung laut SchILD gleich als Rolle eintragen
 
 public record SammelZeileDto(
     string Schluessel,            // Kürzel bzw. Schüler-Id (für „Nur")
@@ -67,7 +74,8 @@ public record SammelZeileDto(
     string Benutzername,          // vorgesehener bzw. vorhandener Benutzername
     string Status,                // "neu" | "vorhanden" | "angelegt" | "konflikt"
     string? Hinweis,
-    string? StartPasswort);       // nur nach dem Anlegen
+    string? StartPasswort,        // nur nach dem Anlegen
+    string? Name = null);         // 5.2c-2 (194): Lehrkräfte – Name laut Lehrkraefte.dat
 
 public record SammelErgebnisDto(
     string Art,
@@ -79,4 +87,29 @@ public record SammelGruppeDto(string Gruppe, string Art, int Schueler, int MitKo
 
 public record SammelUebersichtDto(
     int Lehrkraefte, int LehrkraefteMitKonto, string? Grundplan,
-    IReadOnlyList<SammelGruppeDto> Gruppen);
+    IReadOnlyList<SammelGruppeDto> Gruppen,
+    int Klassenleitungen = 0);        // 5.2c-2: Klassen mit Klassenleitung laut SchILD (Häkchen in der Sammelanlage)
+
+// ---- Phase 5.2c-2 (Entscheidung 192): Vorschläge aus SchILD (Klassenleitung laut Klassen.dat) ----
+
+/// <summary>Ein Vorschlag. Schluessel „u|Konto-Id|Klasse“ (übernehmen) bzw. „e|Konto-Id|Klasse“ (entfernen); leer = nur Hinweis.</summary>
+public record SchildVorschlagDto(
+    string Schluessel,
+    string Art,                       // uebernehmen | entfernen | hinweis | keinKonto
+    int? KontoId,
+    string? Konto,                    // Benutzername
+    string Kuerzel,
+    string Klasse,
+    string Text,
+    string? Aenderung,                // „Rolle Lehrkraft → Klassenleitung, zuständig 05A“
+    bool Gesperrt);
+
+public record SchildVorschlaegeDto(
+    string? Schuljahr,
+    int Klassen,                      // Klassen im Schuljahr
+    int KlassenMitLeitung,            // davon mit Klassenleitung laut SchILD
+    IReadOnlyList<SchildVorschlagDto> Vorschlaege);
+
+public record SchildVorschlaegeAnwendenDto(IReadOnlyList<string>? Schluessel);
+
+public record SchildVorschlaegeErgebnisDto(int Angewendet, int NichtMehrAktuell, IReadOnlyList<string> Konten);

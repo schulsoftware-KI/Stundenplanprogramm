@@ -18,7 +18,10 @@ namespace Stundenplan_V2.Vertretung
     //  SchILD-Status, bei Status 0 das Aufnahmedatum und die Plan-Schlüssel der
     //  zugeordneten Kurse bzw. Sek-I-Gruppen (bei „gemeinsam“ der gemeinsame
     //  Plan-Kurs, 136). NIE: Geburtsdatum, SchILD-ID im Klartext, Noten,
-    //  Kursart des Schülers, Daten der Lehrkräfte, Status 1 (Warteliste).
+    //  Kursart des Schülers, Status 1 (Warteliste). Von den Lehrkräften seit
+    //  5.2c-2 nur die Klassenleitung je Sek-I-Klasse (Plan-Kürzel, 191) und
+    //  Kürzel, Nachname, Vorname der Lehrkräfte des Plans (193) – übersetzt
+    //  über die feste Kürzeltabelle der Zuordnung (von Hand bzw. gleich).
     //
     //  Übertragen werden nur Zuordnungen, die feststehen (automatisch, ohne
     //  Lehrkraft, von Hand) – offene, Vorschläge, Konflikte und Zeilen mit
@@ -54,11 +57,18 @@ namespace Stundenplan_V2.Vertretung
         /// <summary>Gewählte Paare (zusammenführen bzw. zuordnen); null = Vorauswahl der API.</summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<SchildPaar>? Paare { get; set; }
 
+        // ---- 5.2c-2 (Entscheidungen 191, 193) ----
+        /// <summary>Klassenleitung je Sek-I-Klasse des Plans laut Klassen.dat (Plan-Kürzel); null = keine Angabe.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<SchildNutzlastKlassenleitung>? Klassenleitungen { get; set; }
+        /// <summary>Kürzel, Nachname und Vorname der Lehrkräfte des Plans laut Lehrkraefte.dat; null = Datei fehlt (Bestand bleibt).</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<SchildNutzlastLehrkraft>? Lehrkraefte { get; set; }
+
         /// <summary>Dieselbe Nutzlast mit anderen Paaren (neue Vorschau nach geänderten Häkchen).</summary>
         public SchildImportNutzlast MitPaaren(List<SchildPaar>? paare) => new()
         {
             Probelauf = true, Schuljahr = Schuljahr, Abschnitt = Abschnitt, GiltAb = GiltAb, Pseudo = Pseudo, Plan = Plan,
-            PlanSchluessel = PlanSchluessel, Schueler = Schueler, Kennung = Kennung, Neuzuordnung = Neuzuordnung, Paare = paare
+            PlanSchluessel = PlanSchluessel, Schueler = Schueler, Kennung = Kennung, Neuzuordnung = Neuzuordnung, Paare = paare,
+            Klassenleitungen = Klassenleitungen, Lehrkraefte = Lehrkraefte
         };
 
         /// <summary>
@@ -69,8 +79,24 @@ namespace Stundenplan_V2.Vertretung
         {
             Probelauf = false, Vorschau = vorschau, Abgaenge = abgaenge, Akteur = akteur,
             Schuljahr = Schuljahr, Abschnitt = Abschnitt, GiltAb = GiltAb, Pseudo = Pseudo, Plan = Plan,
-            PlanSchluessel = PlanSchluessel, Schueler = Schueler, Kennung = Kennung, Neuzuordnung = Neuzuordnung, Paare = paare
+            PlanSchluessel = PlanSchluessel, Schueler = Schueler, Kennung = Kennung, Neuzuordnung = Neuzuordnung, Paare = paare,
+            Klassenleitungen = Klassenleitungen, Lehrkraefte = Lehrkraefte
         };
+    }
+
+    /// <summary>5.2c-2 (191): Klassenleitung einer Sek-I-Klasse (Plan-Schlüssel, Plan-Kürzel).</summary>
+    public sealed class SchildNutzlastKlassenleitung
+    {
+        public string Klasse { get; set; } = "";
+        public string Kuerzel { get; set; } = "";
+    }
+
+    /// <summary>5.2c-2 (193): Name einer Lehrkraft des Plans – nur Kürzel (Plan), Nachname, Vorname.</summary>
+    public sealed class SchildNutzlastLehrkraft
+    {
+        public string Kuerzel { get; set; } = "";
+        public string Nachname { get; set; } = "";
+        public string Vorname { get; set; } = "";
     }
 
     /// <summary>5.2c-1: ein Paar Datensatz der Datenbank (Id) ↔ Schüler des Exports (Prüfsumme).</summary>
@@ -111,6 +137,11 @@ namespace Stundenplan_V2.Vertretung
         public int MitSchildId { get; set; }
         public int Kursplaetze { get; set; }
         public int ZugeordneteKurse { get; set; }
+        // 5.2c-2: Klassenleitungen (übertragen bzw. ohne festes Plan-Kürzel) und Namen der Lehrkräfte (null = keine Datei)
+        public int Klassenleitungen { get; set; }
+        public List<string> KlassenleitungOhneKuerzel { get; } = new();
+        public int? Lehrkraefte { get; set; }
+        public int LehrkraefteOhneKuerzel { get; set; }
     }
 
     public static class SchildNutzlast
@@ -232,6 +263,47 @@ namespace Stundenplan_V2.Vertretung
                 if (plan.Klassen.Contains(kn)) planSchluessel.Add(kn);
             }
 
+            // ---- 5.2c-2: Klassenleitung laut Klassen.dat (191) – je Sek-I-Klasse des Plans, Kürzel über die feste Tabelle ----
+            var fest = z.KuerzelFest;
+            var leitungen = new List<SchildNutzlastKlassenleitung>();
+            foreach (var k in ex.Klassen.OrderBy(x => x.Zeile))
+            {
+                if ((k.Jahr != null && k.Jahr != erg.Jahr) || (k.Abschnitt != null && k.Abschnitt != erg.Abschnitt)) continue;
+                string kn = SchildText.KlasseNorm(k.InternBez);
+                if (kn.Length == 0 || Oberstufe.Contains(kn) || Oberstufe.Contains((k.Jahrgang ?? "").Trim())) continue;
+                if (!plan.Klassen.Contains(kn)) continue;
+                string kl = (k.Klassenlehrer ?? "").Trim();
+                if (kl.Length == 0 || leitungen.Any(x => x.Klasse == kn)) continue;   // doppelte Zeile: die erste (Prüflauf meldet)
+                if (!fest.TryGetValue(kl, out var planKuerzel))
+                {
+                    r.KlassenleitungOhneKuerzel.Add($"{kn} ({kl})");   // Kürzel ohne festes Gegenstück im Plan: nicht senden
+                    continue;
+                }
+                leitungen.Add(new SchildNutzlastKlassenleitung { Klasse = kn, Kuerzel = planKuerzel });
+            }
+            r.Klassenleitungen = leitungen.Count;
+
+            // ---- 5.2c-2: Namen der Lehrkräfte (193) – nur Lehrkräfte des Plans, nur Kürzel, Nachname, Vorname ----
+            List<SchildNutzlastLehrkraft>? lehrkraefte = null;
+            if (ex.Hat(SchildDateiArt.Lehrkraefte))
+            {
+                lehrkraefte = new List<SchildNutzlastLehrkraft>();
+                var gesehen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var l in ex.Lehrkraefte.OrderBy(x => x.Zeile))
+                {
+                    string krz = (l.Kuerzel ?? "").Trim(), nach = (l.Nachname ?? "").Trim(), vor = (l.Vorname ?? "").Trim();
+                    if (krz.Length == 0 || nach.Length == 0) continue;
+                    if (!fest.TryGetValue(krz, out var planKuerzel))
+                    {
+                        if (plan.Kuerzel.Contains(krz.ToUpperInvariant())) r.LehrkraefteOhneKuerzel++;
+                        continue;   // unterrichtet nicht laut Plan bzw. kein festes Gegenstück: Name bleibt auf diesem Rechner
+                    }
+                    if (!gesehen.Add(planKuerzel)) continue;          // zwei SchILD-Kürzel für ein Plan-Kürzel: das erste
+                    lehrkraefte.Add(new SchildNutzlastLehrkraft { Kuerzel = planKuerzel, Nachname = nach, Vorname = vor });
+                }
+                r.Lehrkraefte = lehrkraefte.Count;
+            }
+
             // ---- SchILD-ID (optional, SchuelerLernplattformen.dat) ----
             var ids = new Dictionary<string, long>(StringComparer.Ordinal);
             if (ex.Hat(SchildDateiArt.Lernplattformen))
@@ -297,7 +369,9 @@ namespace Stundenplan_V2.Vertretung
                 Plan = string.IsNullOrWhiteSpace(plan.Bezeichnung) ? null : plan.Bezeichnung.Trim(),
                 PlanSchluessel = planSchluessel.ToList(),
                 Schueler = dtos,
-                Kennung = schluessel.Kennung
+                Kennung = schluessel.Kennung,
+                Klassenleitungen = leitungen,
+                Lehrkraefte = lehrkraefte
             };
             return r;
         }

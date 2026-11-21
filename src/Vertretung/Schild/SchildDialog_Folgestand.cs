@@ -156,6 +156,18 @@ namespace Stundenplan_V2.Vertretung
                                  "Geburtsdatum)", false);
             chkGleich.Margin = new Thickness(0, 0, 0, 10);
 
+            // 5.2c-2 (Entscheidungen 191, 193): Klassenleitung und Namen der Lehrkräfte – Standard aus, ändern keine Schüler
+            panel.Children.Add(new TextBlock
+            {
+                Text = "Für Konten und Anzeigen (5.2c-2, ändern keine Schüler):", FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(0, 0, 0, 4)
+            });
+            var chkLeitung = Wahl("1 Klassenleitung wechselt (Klassen.dat) – neue Klassenleitung möglichst die Lehrkraft „L2“ " +
+                                  "(Testkonten L2 und koQ1)", false);
+            var chkLehrkraft = Wahl("1 Lehrkraft heißt anders (anderer Nachname in Lehrkraefte.dat) – möglichst „L1“ (Testkonten L1 " +
+                                    "und kl05A)", false);
+            chkLehrkraft.Margin = new Thickness(0, 0, 0, 10);
+
             var startZeile = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 2) };
             startZeile.Children.Add(new TextBlock { Text = "Startwert für den Zufall:", VerticalAlignment = VerticalAlignment.Center,
                                                     Margin = new Thickness(0, 0, 6, 0) });
@@ -205,11 +217,13 @@ namespace Stundenplan_V2.Vertretung
                     OhneSchildId = chkOhneId.IsChecked == true,
                     Vorname = chkVorname.IsChecked == true,
                     NameUndKlasse = chkNameKlasse.IsChecked == true,
-                    Namensgleiche = chkGleich.IsChecked == true
+                    Namensgleiche = chkGleich.IsChecked == true,
+                    KlassenleitungWechselt = chkLeitung.IsChecked == true,
+                    LehrkraftHeisstAnders = chkLehrkraft.IsChecked == true
                 };
                 if (!(o.Abgaenge || o.Klassenwechsel || o.Kurswechsel || o.Gruppenwechsel || o.Namensaenderung || o.Geburtsdatum
                       || o.Neuaufnahmen || o.FehltOhneAbgang || o.KlasseFehlt || o.Vorname || o.NameUndKlasse || o.Namensgleiche
-                      || o.OhneSchildId))
+                      || o.OhneSchildId || o.KlassenleitungWechselt || o.LehrkraftHeisstAnders))
                 {
                     MessageBox.Show(win, "Bitte mindestens eine Änderung wählen.", "Folgestand",
                         MessageBoxButton.OK, MessageBoxImage.Information);

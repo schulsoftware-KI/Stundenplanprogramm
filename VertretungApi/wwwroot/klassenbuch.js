@@ -129,6 +129,8 @@ function kbSymbol(erfasst) {
 
 /** „Mi 05.11." */
 const kbDatumKurz = (iso) => { const d = ausIso(iso); return `${KB_WT[d.getDay()]} ${pad(d.getDate())}.${pad(d.getMonth() + 1)}.`; };
+/** Phase 5.2c-2: „2026-11-16“ → „16.11.2026“. */
+const kbDatumLang = (iso) => { const [j, m, t] = String(iso).split("-"); return `${t}.${m}.${j}`; };
 
 /**
  * Wie der Server (UnterrichtInhaltService.Normalisiert): Steuerzeichen weg, Tab → Leerzeichen,
@@ -1052,13 +1054,21 @@ function renderGruppe() {
   el("titel").textContent = "Gruppenliste";
   el("kgTitel").textContent = `${g.fach} · ${g.klassen.join(", ")}`;
   el("kgInfo").textContent = `${g.lehrer.join(", ")} · Gruppe ${g.schluessel}`;
-  el("kgStand").replaceChildren(...(g.zusammengestellt
-    ? [h("span", { class: "kb-ok" }, "✓ zusammengestellt"),
-      g.bearbeitetVon ? ` von ${g.bearbeitetVon} ${g.bearbeitetAm ? kurzZeit(g.bearbeitetAm) : ""}` : ""]
-    : [h("span", { class: "kb-offen" }, "Noch nicht zusammengestellt")]));
-  el("kgErklaerung").textContent = g.darfBearbeiten
-    ? "Hake an, wer zu dieser Gruppe gehört. Die Liste gilt für das ganze Schuljahr und lässt sich jederzeit ändern."
-    : "Nur ansehen – zusammenstellen dürfen die Lehrkräfte der Gruppe und die Verwaltung.";
+  // Phase 5.2c-2 (195): Listen aus SchILD heißen so – statt „zusammengestellt“ bzw. „zusammenstellen dürfen …“.
+  const seit = g.schildAb ? kbDatumLang(g.schildAb) : "";
+  el("kgStand").replaceChildren(...(g.ausSchild
+    ? [h("span", { class: "kb-ok" }, "aus SchILD"), seit ? ` seit ${seit}` : ""]
+    : g.zusammengestellt
+      ? [h("span", { class: "kb-ok" }, "✓ zusammengestellt"),
+        g.bearbeitetVon ? ` von ${g.bearbeitetVon} ${g.bearbeitetAm ? kurzZeit(g.bearbeitetAm) : ""}` : ""]
+      : [h("span", { class: "kb-offen" }, "Noch nicht zusammengestellt")]));
+  el("kgErklaerung").textContent = g.ausSchild
+    ? `Diese Liste kommt ${seit ? `seit ${seit} ` : ""}aus SchILD und wird mit jedem Import aktualisiert. Änderungen ` +
+      "bitte über das Sekretariat (SchILD)."
+    : g.darfBearbeiten
+      ? "Hake an, wer zu dieser Gruppe gehört. Die Liste gilt für das ganze Schuljahr und lässt sich jederzeit ändern." +
+        (g.schildAb ? ` Ab ${seit} kommt sie aus SchILD.` : "")
+      : "Nur ansehen – zusammenstellen dürfen die Lehrkräfte der Gruppe und die Verwaltung.";
   el("kgAlle").hidden = el("kgKeine").hidden = !g.darfBearbeiten;
   renderGruppeKlassen();
   renderGruppeLeiste();
@@ -1205,10 +1215,12 @@ async function gruppenLaden() {
 function renderGruppen() {
   const liste = kb.gruppen || [];
   const offen = liste.filter((g) => !g.zusammengestellt).length;
+  const schild = liste.filter((g) => g.ausSchild).length;   // Phase 5.2c-2 (195)
   el("kgsInfo").textContent = liste.length === 0
     ? "Keine Gruppen mit eigener Schülergruppe im aktuellen Stundenplan."
     : `${liste.length} ${liste.length === 1 ? "Gruppe" : "Gruppen"}` +
-      (offen ? `, davon ${offen} noch nicht zusammengestellt` : ", alle zusammengestellt");
+      (offen ? `, davon ${offen} noch nicht zusammengestellt` : ", alle zusammengestellt") +
+      (schild ? ` · davon ${schild} aus SchILD` : "");
   el("kgsListe").replaceChildren(...liste.map((g) => h("li", null,
     h("button", {
       class: "k-zeile" + (g.zusammengestellt ? "" : " kg-offen"), type: "button",
@@ -1219,6 +1231,7 @@ function renderGruppen() {
       h("span", { class: "k-rechts" }, g.lehrer.join(", "))),
     h("span", { class: "k-unten" }, g.schluessel),
     h("span", { class: "k-marken" },
+      g.ausSchild ? h("span", { class: "marke ich" }, "aus SchILD") : null,
       g.zusammengestellt
         ? h("span", { class: "marke" }, `${g.anzahl} Schüler`)
         : h("span", { class: "marke start" }, "noch nicht zusammengestellt"))))));

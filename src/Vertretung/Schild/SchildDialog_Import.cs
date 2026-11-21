@@ -53,10 +53,15 @@ namespace Stundenplan_V2.Vertretung
         public string Aenderung => D.Aenderung ?? "";
         public string HinweisText => string.Join(" · ", new[]
         {
+            // 5.2c-2: Gruppen Namensgleicher (Zeilen untereinander) und der Vorschlag der API je Gruppe
+            IstPaar && D.Gruppe is int g ? $"Gruppe {g}" + (D.Vorschlag ? " – Vorschlag" : "") : null,
             D.KontoWirdGesperrt ? "Konto wird bei Bestätigung gesperrt" : null,
             IstPaar && D.Vorausgewaehlt ? "vorausgewählt" : null,
             D.Hinweis
         }.Where(x => !string.IsNullOrEmpty(x)));
+
+        /// <summary>5.2c-2: Hintergrund der Zeile – Gruppen Namensgleicher abwechselnd „a“/„b“, sonst leer (XAML: RowStyle).</summary>
+        public string GruppeFarbe => IstPaar && D.Gruppe is int g ? (g % 2 == 1 ? "a" : "b") : "";
 
         /// <summary>Wird nach jeder Änderung der Bestätigung aufgerufen (Anzeige der Auswahl).</summary>
         public Action? Geaendert { get; set; }
@@ -119,7 +124,9 @@ namespace Stundenplan_V2.Vertretung
             "2. „Vorschau berechnen“ fragt die API nach ihrem Stand und schickt die Schüler als Probelauf – gespeichert wird noch " +
             "nichts. Gesendet werden Name, Vorname, Jahrgang, Klasse, SchILD-Status, bei Neuaufnahmen das Aufnahmedatum und die " +
             "Plan-Schlüssel der zugeordneten Kurse und Gruppen. Statt Geburtsdatum und SchILD-ID gehen nur Prüfsummen an den " +
-            "Server; Noten, Kursarten und Daten der Lehrkräfte nie.\n\n" +
+            "Server; Noten und Kursarten nie. Von den Lehrkräften gehen nur die Klassenleitung je Klasse (Kürzel, Klassen.dat) " +
+            "und Kürzel, Nachname und Vorname der Lehrkräfte des Plans (Lehrkraefte.dat) an den Server – übersetzt über die " +
+            "Kürzeltabelle der Zuordnung; die Namen sieht in der App nur die Verwaltung und die Lehrkraft selbst.\n\n" +
             "3. „Änderungen gelten ab“: Ab diesem Tag gelten Klassen-, Kurs- und Gruppenwechsel und Abgänge; Stunden davor " +
             "behalten ihre Listen. Den Vorschlag macht die API (erster Import eines Abschnitts: dessen Beginn, sonst heute – nie " +
             "vor dem letzten Import).\n\n" +
@@ -147,7 +154,9 @@ namespace Stundenplan_V2.Vertretung
             "(SchuelerLernplattformen.dat) erkennt der Import Namensänderungen ohne Paare.\n\n" +
             "Schlüssel verloren: Nur wenn es keine Sicherung gibt, „Schlüssel verloren – neu zuordnen…“. Dann ordnet die API die " +
             "bisherigen Schüler über Name + Klasse zu (eindeutige vorausgewählt, Namensgleiche und andere Klassen nur von Hand) " +
-            "und gibt ihnen die Prüfsummen des neuen Schlüssels. Danach sofort „Schlüssel sichern…“.\n\n" +
+            "und gibt ihnen die Prüfsummen des neuen Schlüssels. Namensgleiche stehen als Gruppe untereinander; „Vorschlag " +
+            "übernehmen…“ hakt je Gruppe die Paare mit passendem Eintritt bzw. den meisten gemeinsamen Kursen an (nur, wo der " +
+            "Vorschlag eindeutig ist) – bitte prüfen, dann „Vorschau berechnen“. Danach sofort „Schlüssel sichern…“.\n\n" +
             "Testen mit Pseudodaten: Nach dem Import eines Pseudo-Exports macht „Folgestand erzeugen…“ (unten) daraus einen " +
             "neuen Ordner mit typischen Änderungen bis zum nächsten Export. Dann wie bei einem neuen Export: Prüflauf, Vorschau, " +
             "Abgänge bestätigen, Importieren. Das Fenster nennt die Zahlen, die die Vorschau zeigen sollte.";
@@ -284,6 +293,11 @@ namespace Stundenplan_V2.Vertretung
             bool bestaetigbar = DgImport.ItemsSource is IEnumerable<SchildImportZeile> sichtbar && sichtbar.Any(x => x.Bestaetigbar);
             BtnImAlle.IsEnabled = an && _imAusgefuehrt == null && bestaetigbar;
             BtnImKeine.IsEnabled = an && _imAusgefuehrt == null && bestaetigbar;
+            // 5.2c-2: „Vorschlag übernehmen…“, sobald es Gruppen Namensgleicher mit einem Vorschlag der API gibt
+            bool vorschlag = _imVorschau != null && _imAusgefuehrt == null
+                             && _imZeilen.Any(x => x.IstPaar && x.D.Gruppe != null && x.D.Vorschlag);
+            BtnImVorschlag.Visibility = vorschlag ? Visibility.Visible : Visibility.Collapsed;
+            BtnImVorschlag.IsEnabled = an && vorschlag;
             // 5.2c-1: „Schlüssel verloren – neu zuordnen…“ nur, wenn importierte Schüler da sind und der Schlüssel fehlt, nicht
             // lesbar ist oder nicht zum letzten Import passt – bzw. während einer Neu-Zuordnung („… abbrechen“).
             if (_export != null && !_imNeuzuordnung) ImSchluesselLaden(_export.IstPseudo);
@@ -815,6 +829,16 @@ namespace Stundenplan_V2.Vertretung
                 b.Append($"  übertragen: {bau.Schueler} Schüler (davon {bau.Abgaenge} mit Abgang laut SchILD, {bau.MitSchildId} mit " +
                          $"SchILD-ID) · {bau.ZugeordneteKurse} zugeordnete Kurse/Gruppen · {bau.Kursplaetze} Kursplätze\n");
                 if (bau.Warteliste > 0) b.Append($"  nicht übertragen: {bau.Warteliste} Schüler auf der Warteliste (Status 1)\n");
+                // 5.2c-2: Klassenleitungen und Namen der Lehrkräfte (nur Kürzel bzw. Zahlen)
+                b.Append($"  Klassenleitung (Klassen.dat): {bau.Klassenleitungen} Klassen übertragen" +
+                         (bau.KlassenleitungOhneKuerzel.Count > 0
+                             ? $" · ohne festes Plan-Kürzel, nicht übertragen: {string.Join(", ", bau.KlassenleitungOhneKuerzel.Take(20))}" +
+                               (bau.KlassenleitungOhneKuerzel.Count > 20 ? " …" : "")
+                             : "") + "\n");
+                b.Append(bau.Lehrkraefte is int lk
+                    ? $"  Namen der Lehrkräfte (Lehrkraefte.dat): {lk} Lehrkräfte des Plans übertragen" +
+                      (bau.LehrkraefteOhneKuerzel > 0 ? $" · {bau.LehrkraefteOhneKuerzel} ohne festes Plan-Kürzel nicht" : "") + "\n"
+                    : "  Namen der Lehrkräfte: Lehrkraefte.dat fehlt – nichts übertragen, die gespeicherten Namen bleiben\n");
                 if (bau.NichtUebertragenZeilen > 0)
                 {
                     b.Append($"  Zuordnung offen – nicht übertragen ({bau.NichtUebertragenZeilen} SchILD-Kurse/Gruppen, " +
@@ -884,6 +908,13 @@ namespace Stundenplan_V2.Vertretung
                 (neuzuordnung ? $"NEU-ZUORDNUNG: {zz.NeuZugeordnet} Schüler über Name + Klasse zugeordnet (mögliche Paare: " +
                                 $"{zz.ZuordnungPaare}) – sie bekommen die Prüfsummen des neuen Schlüssels\n" : "") +
                 $"neue Lerngruppen: {zz.NeueLerngruppen} · Kurse/Gruppen ab jetzt aus SchILD: {zz.GruppenAusSchild}\n" +
+                // 5.2c-2
+                (nutzlast.Klassenleitungen != null && zz.KlassenleitungNeu + zz.KlassenleitungGeaendert > 0
+                    ? $"Klassenleitung laut SchILD: erstmals {zz.KlassenleitungNeu}, geändert {zz.KlassenleitungGeaendert} (die Konten " +
+                      "ändern sich nicht – Vorschläge in der App)\n" : "") +
+                (nutzlast.Lehrkraefte is { Count: > 0 }
+                    ? $"Namen der Lehrkräfte: {zz.Lehrkraefte} – neu {zz.LehrkraefteNeu}, geändert {zz.LehrkraefteGeaendert}, " +
+                      $"entfernt {zz.LehrkraefteEntfernt}\n" : "") +
                 (schluessel.Neu
                     ? $"\nDer Schlüssel ({art}, Kennung {schluessel.Kennung}) wird jetzt für diesen Windows-Benutzer gespeichert" +
                       (pseudo ? "." : " – danach bitte „Schlüssel sichern…“.") + "\n"
@@ -1005,6 +1036,49 @@ namespace Stundenplan_V2.Vertretung
                                       "(Datei mit Kennwort für USB-Stick bzw. Tresor)?",
                     "Schlüssel sichern", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
                 await ImSichernAsync(pseudo);
+        }
+
+        // =====================================================
+        //  5.2c-2: Neu-Zuordnung – Vorschlag je Gruppe Namensgleicher übernehmen
+        // =====================================================
+
+        /// <summary>
+        /// Hakt je Gruppe Namensgleicher genau die Paare an, die die API vorschlägt (passender Eintritt, dann die meisten
+        /// gemeinsamen Kurse) – nur Gruppen mit eindeutigem Vorschlag, nach Rückfrage. Danach „Vorschau berechnen“.
+        /// </summary>
+        private void BtnImVorschlag_Click(object sender, RoutedEventArgs e)
+        {
+            if (_laeuft || _imVorschau == null || _imAusgefuehrt != null) return;
+            var gruppen = _imZeilen.Where(x => x.IstPaar && x.D.Gruppe != null).GroupBy(x => x.D.Gruppe!.Value).ToList();
+            var mitVorschlag = gruppen.Where(g => g.Any(x => x.D.Vorschlag)).ToList();
+            if (mitVorschlag.Count == 0)
+            {
+                MessageBox.Show(this, "Für keine Gruppe gibt es einen eindeutigen Vorschlag – bitte je Schüler von Hand wählen " +
+                                      "(in SchILD nachsehen).", "Vorschlag übernehmen", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            int aendern = mitVorschlag.Sum(g => g.Count(x => x.Bestaetigt != x.D.Vorschlag));
+            if (aendern == 0)
+            {
+                MessageBox.Show(this, "Die Häkchen entsprechen schon dem Vorschlag.", "Vorschlag übernehmen",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            int ohne = gruppen.Count - mitVorschlag.Count;
+            int paare = mitVorschlag.Sum(g => g.Count(x => x.D.Vorschlag));
+            string frage =
+                $"Vorschlag übernehmen?\n\nFür {mitVorschlag.Count} von {gruppen.Count} Gruppen Namensgleicher gibt es einen " +
+                $"eindeutigen Vorschlag ({paare} Paare): zuerst passender Eintritt (Neuaufnahme am selben Tag bzw. beide seit " +
+                "Schuljahresbeginn), dann die meisten gemeinsamen Kurse und Gruppen. In diesen Gruppen werden genau die " +
+                $"vorgeschlagenen Paare angehakt, die übrigen abgehakt ({aendern} Häkchen ändern sich).\n\n" +
+                (ohne > 0 ? $"{ohne} Gruppen sind gleich gut – dort bitte selbst wählen (in SchILD nachsehen).\n\n" : "") +
+                "Danach „Vorschau berechnen“ und die Zeilen prüfen; gespeichert wird erst mit „Importieren…“.";
+            if (MessageBox.Show(this, frage, "Vorschlag übernehmen", MessageBoxButton.YesNo, MessageBoxImage.Question,
+                    MessageBoxResult.No) != MessageBoxResult.Yes)
+                return;
+            foreach (var gruppe in mitVorschlag)
+                foreach (var zeile in gruppe) zeile.Bestaetigt = zeile.D.Vorschlag;
+            ImZeigeAuswahl();
         }
 
         // =====================================================

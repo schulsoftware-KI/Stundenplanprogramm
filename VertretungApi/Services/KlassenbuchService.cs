@@ -803,20 +803,23 @@ public static class KlassenbuchService
                 .Where(l => l.Typ == LerngruppeTyp.Gruppe && l.Schuljahr == ver.Schuljahr)
                 .Select(l => new
                 {
-                    l.Bezeichnung, l.BearbeitetVon, l.BearbeitetAm,
+                    l.Id, l.Bezeichnung, l.BearbeitetVon, l.BearbeitetAm, l.Quelle, l.SchildAb,
                     Anzahl = l.Mitglieder.Count(z => (z.GueltigVon == null || z.GueltigVon <= heute)
                                                     && (z.GueltigBis == null || z.GueltigBis >= heute))
                 })
                 .ToListAsync())
             .GroupBy(l => l.Bezeichnung, Cmp)
-            .ToDictionary(g => g.Key, g => g.First(), Cmp);
+            .ToDictionary(g => g.Key, g => g.OrderBy(x => x.Id).First(), Cmp);   // wie der Gruppeneditor: kleinste Id
 
         return gruppen
             .Select(g =>
             {
                 fertig.TryGetValue(g.Schluessel, out var f);
+                // 5.2c-2 (195): „aus SchILD“ statt „zusammengestellt“
+                bool schild = f != null && Gueltigkeit.IstSchild(f.Quelle) && f.SchildAb != null;
                 return new KbGruppeKurzDto(g.Schluessel, g.Fach, g.Klassen, g.Lehrer,
-                    f != null, f?.Anzahl ?? 0, f?.BearbeitetVon, f?.BearbeitetAm);
+                    f != null, f?.Anzahl ?? 0, f?.BearbeitetVon, f?.BearbeitetAm,
+                    AusSchild: schild && f!.SchildAb <= heute, SchildAb: schild ? f!.SchildAb : null);
             })
             .OrderBy(g => g.Zusammengestellt)          // offene zuerst
             .ThenBy(g => g.Klassen.FirstOrDefault() ?? "", Cmp)
@@ -838,14 +841,18 @@ public static class KlassenbuchService
                 .Select(z => z.SchuelerId).ToListAsync()).ToHashSet();
 
         var pool = await PoolAsync(db, g, mitglieder);
+        bool ausSchild = lg != null && Gueltigkeit.ListeAusSchild(lg, heute);
         return new KbGruppeDto(
             g.Schluessel, g.Fach, g.Schuljahr, g.Klassen, g.Lehrer,
             lg != null, lg?.BearbeitetVon, lg?.BearbeitetAm,
-            IstGruppenLehrer(u, g) && !(lg != null && Gueltigkeit.ListeAusSchild(lg, heute)),
+            IstGruppenLehrer(u, g) && !ausSchild,
             pool.Select(p => new KbPoolDto(p.Id, p.Vorname, p.Nachname, p.Klasse ?? "", mitglieder.Contains(p.Id)))
                 .OrderBy(p => p.Klasse, Cmp).ThenBy(p => p.Nachname, NamenCmp).ThenBy(p => p.Vorname, NamenCmp)
                 .ThenBy(p => p.Id)
-                .ToList());
+                .ToList(),
+            // 5.2c-2 (195): Hinweis „kommt seit … aus SchILD“ im Gruppeneditor
+            AusSchild: ausSchild,
+            SchildAb: lg != null && Gueltigkeit.IstSchild(lg.Quelle) ? lg.SchildAb : null);
     }
 
     /// <summary>

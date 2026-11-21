@@ -11,6 +11,10 @@
 //             sperren, überall abmelden, löschen; Sammelanlage für Lehrkräfte
 //             (aus dem Grundplan) und Schüler (je Klasse/Stufe); Protokoll;
 //             Phase 4.3: Reiter „Downloads" (Download-Protokoll, Filter Art/Person).
+//             Phase 5.2c-2: Reiter „SchILD" – „Vorschläge" (Klassenleitung laut SchILD → Rolle/
+//             Zuständigkeit, nur per Knopf) und „SchILD-Importe" (Importprotokoll, nur lesen); Namen
+//             der Lehrkräfte laut SchILD in Liste, Detail und Sammelanlage; Filter „laut SchILD aktiv,
+//             gesperrt" (Wiedereintritt) und „Name laut SchILD geändert" mit Vorschlag zum Umbenennen.
 //      Klassenleitung / Stufenkoordination („Schülerpasswörter"): Schülerkonten
 //             der eigenen Klasse/Stufe sehen, Passwort zurücksetzen, sperren/entsperren.
 //  - Startpasswörter erscheinen nur einmal: als Zugangszettel zum Drucken bzw.
@@ -46,6 +50,8 @@ const verw = {
     gesichert: false,     // gedruckt oder gespeichert
   },
   einzelZettel: null,     // Startpasswort-Dialog: Daten für Zettel/Kopie
+  schildTeil: "vorschlaege", // Phase 5.2c-2: Reiter „SchILD" – "vorschlaege" | "importe"
+  schildVorschlaege: null,   // zuletzt geladene Vorschläge (für „Alle übernehmen")
 };
 
 // ---------------------------------------------------------------------
@@ -384,10 +390,15 @@ function verwaltungLeeren() {
   verw.protokollKonto = null;
   verw.einzelZettel = null;
   verw.sammel = { uebersicht: null, vorschau: null, anfrage: null, ergebnis: null, gesichert: false };
-  for (const id of ["kListe", "pListe", "dListe", "sZeilen", "sErgebnisZeilen", "sGruppen", "druck", "kfTreffer"])
+  for (const id of ["kListe", "pListe", "dListe", "sZeilen", "sErgebnisZeilen", "sGruppen", "druck", "kfTreffer",
+    "schListe", "siListe"])
     el(id).replaceChildren();
-  for (const id of ["kInfo", "pInfo", "dInfo", "spName", "spPasswort", "spFuer", "sErgebnis", "sZusammenfassung"])
+  for (const id of ["kInfo", "pInfo", "dInfo", "spName", "spPasswort", "spFuer", "sErgebnis", "sZusammenfassung",
+    "schInfo", "siInfo"])
     el(id).textContent = "";
+  el("schAlle").hidden = true;
+  verw.schildVorschlaege = null;
+  fehlerIn("schFehler", "");
   clearTimeout(verw.downloadTimer);
   el("dArt").value = "";
   el("dPerson").value = "";
@@ -412,6 +423,7 @@ function reiterWaehlen(reiter) {
   el("vSammel").hidden = reiter !== "sammel";
   el("vProtokoll").hidden = reiter !== "protokoll";
   el("vDownloads").hidden = reiter !== "downloads";
+  el("vSchild").hidden = reiter !== "schild";
   verwaltungAktualisieren();
 }
 
@@ -419,6 +431,7 @@ function verwaltungAktualisieren() {
   if (verw.reiter === "konten") kontenLaden();
   else if (verw.reiter === "sammel") sammelStart();
   else if (verw.reiter === "downloads") downloadsLaden();
+  else if (verw.reiter === "schild") schildLaden();
   else protokollLaden();
 }
 
@@ -465,7 +478,8 @@ function renderKonten(d) {
 }
 
 function kontoTitel(k) {
-  if (k.rolle !== "Schueler") return k.benutzername;
+  // Phase 5.2c-2 (194): Name der Lehrkraft laut SchILD – die API liefert ihn nur dem Admin.
+  if (k.rolle !== "Schueler") return k.lehrkraft ? `${k.benutzername} · ${k.lehrkraft}` : k.benutzername;
   return k.schueler ? nachnameZuerst(k.schueler) : `${k.benutzername} (Schüler fehlt)`;
 }
 
@@ -475,6 +489,9 @@ function kontoMarken(k) {
   if (k.gesperrt) m.push({ text: "gesperrt", art: "gesperrt" });
   if (k.mussPasswortAendern) m.push({ text: "Startpasswort", art: "start" });
   if (k.verwaist) m.push({ text: "Schüler fehlt", art: "gesperrt" });
+  // Phase 5.2c-2 (197)
+  if (k.wiederAktiv) m.push({ text: "laut SchILD aktiv", art: "start" });
+  if (k.nameGeaendert) m.push({ text: "Name laut SchILD geändert", art: "start" });
   return m;
 }
 
@@ -510,6 +527,7 @@ function kontoDetail(k) {
 
   const zeilen = [["Benutzername", k.benutzername], ["Rolle", k.rollenText]];
   if (k.lehrerKuerzel) zeilen.push(["Kürzel", k.lehrerKuerzel]);
+  if (k.lehrkraft) zeilen.push(["Name laut SchILD", k.lehrkraft]);
   if (k.zustaendig) zeilen.push(["Zuständig", k.zustaendig]);
   if (k.rolle === "Schueler") zeilen.push(["Klasse/Stufe", k.verwaist ? "– (Schülerdatensatz fehlt)" : (k.klasse || "–")]);
   zeilen.push(["Angelegt", k.angelegtAm ? datumZeit(k.angelegtAm) : "unbekannt"]);
@@ -518,10 +536,24 @@ function kontoDetail(k) {
     ? "Startpasswort – noch kein eigenes festgelegt"
     : k.passwortGeaendertAm ? `geändert ${datumZeit(k.passwortGeaendertAm)}` : "eigenes Passwort"]);
   if (k.gesperrt) zeilen.push(["Status", "gesperrt – Anmeldung nicht möglich"]);
+  if (k.gesperrtDurch) zeilen.push(["Gesperrt durch", k.gesperrtDurch]);
   el("kdDaten").replaceChildren(...zeilen.flatMap(([a, b]) => [h("dt", null, a), h("dd", null, b)]));
 
   const aktionen = [];
   const knopf = (text, klasse, onclick) => h("button", { type: "button", class: "menuepunkt" + (klasse ? " " + klasse : ""), onclick }, text);
+  // Phase 5.2c-2 (197): Hinweise aus SchILD – nichts geschieht von selbst.
+  if (k.wiederAktiv)
+    aktionen.push(h("p", { class: "kd-hinweis" }, "Laut SchILD ist die Schülerin bzw. der Schüler (wieder) aktiv – zum " +
+      "Beispiel nach einem Wiedereintritt –, das Konto ist aber gesperrt. Passt das, mit „Entsperren“ freigeben."));
+  if (k.nameGeaendert) {
+    const vorschlag = k.benutzernameVorschlag;
+    aktionen.push(h("p", { class: "kd-hinweis" }, `Name laut SchILD geändert – der Benutzername „${k.benutzername}“ passt ` +
+      "nicht mehr dazu." + (vorschlag ? ` Vorschlag: „${vorschlag}“. Das Passwort bleibt; den neuen Benutzernamen bitte ` +
+      "der Schülerin bzw. dem Schüler mitteilen (bisherige Anmeldungen enden)." : "")));
+    if (admin && vorschlag)
+      aktionen.push(knopf(`Umbenennen in „${vorschlag}“`, null, (e) =>
+        bestaetigen(e.currentTarget, "Wirklich umbenennen? Nochmal tippen", () => kontoUmbenennen(e.currentTarget, k, vorschlag))));
+  }
   if (k.ich) {
     aktionen.push(h("p", { class: "kd-hinweis" }, "Dein eigenes Passwort änderst du über „Passwort ändern“ im Kontomenü."));
   } else {
@@ -580,6 +612,41 @@ function kontoDetail(k) {
   el("kdAktionen").replaceChildren(...aktionen);
   fehlerIn("kdFehler", "");
   dialogAuf(el("kDialog"));
+  // Phase 5.2c-2: Vorschlag zum Umbenennen und „gesperrt durch“ liefert nur die Einzelansicht – nachladen.
+  if (admin && !k.voll && (k.nameGeaendert || k.gesperrt)) kontoNachladen(k.id);
+}
+
+async function kontoNachladen(id) {
+  try {
+    const d = await senden("GET", `api/konten/${id}`);
+    if (!verw.konto || verw.konto.id !== id || !el("kDialog").open) return;
+    d.voll = true;
+    kontoDetail(d);
+  } catch { /* die Liste reicht – Hinweise ohne Vorschlag */ }
+}
+
+/** Phase 5.2c-2 (197, Frage D): Benutzername nach dem Namen laut SchILD – über „Bearbeiten“ mit denselben Angaben. */
+async function kontoUmbenennen(knopf, k, name) {
+  knopf.disabled = true;
+  fehlerIn("kdFehler", "");
+  try {
+    const d = await senden("PUT", `api/konten/${k.id}`, {
+      rolle: k.rolle, benutzername: name, lehrerKuerzel: null, schuelerId: k.schuelerId, zustaendig: null,
+    });
+    toast(`Umbenannt: ${k.benutzername} → ${d.benutzername}. Das Passwort bleibt.`);
+    d.voll = true;
+    kontoDetail(d);
+    kontenLaden();
+  } catch (f) {
+    const t = aktionsFehler(f);
+    if (t) fehlerIn("kdFehler", t);
+    knopf.disabled = false;
+    if (knopf.dataset.text) {
+      knopf.textContent = knopf.dataset.text;
+      knopf.classList.remove("warnung");
+      knopf.dataset.bestaetigt = "";
+    }
+  }
 }
 
 async function kontoAktion(knopf, methode, url, erfolg) {
@@ -817,6 +884,10 @@ function renderSammelUebersicht() {
   el("sLehrerText").textContent = u.grundplan
     ? `Lehrkräfte aus dem Grundplan (${u.lehrkraefte}, davon ${u.lehrkraefteMitKonto} mit Konto)`
     : "Lehrkräfte (noch kein Grundplan veröffentlicht)";
+  // Phase 5.2c-2 (192): Klassenleitung laut SchILD gleich als Rolle eintragen (Standard an)
+  el("sLeitungText").textContent = `Klassenleitung laut SchILD gleich eintragen (${u.klassenleitungen || 0} Klassen) – ` +
+    "neue Konten bekommen dann die Rolle Klassenleitung und ihre Klasse";
+  sammelLeitungAnpassen();
   const gewaehlt = new Set([...document.querySelectorAll("#sGruppen input:checked")].map((i) => i.value));
   const box = el("sGruppen");
   if (u.gruppen.length === 0) {
@@ -843,6 +914,11 @@ function renderSammelUebersicht() {
   el("sGruppenBox").hidden = sammelArt() !== "Schueler";
 }
 
+function sammelLeitungAnpassen() {
+  const u = verw.sammel.uebersicht;
+  el("sLeitungBox").hidden = sammelArt() !== "Lehrer" || !u || !(u.klassenleitungen > 0);
+}
+
 function gruppenAlle(an) {
   for (const i of document.querySelectorAll("#sGruppen input[type=checkbox]"))
     i.checked = an && !i.closest(".gruppe-wahl").classList.contains("fertig");
@@ -858,10 +934,11 @@ async function sammelVorschau() {
   const knopf = el("sVorschau");
   knopf.disabled = true;
   fehlerIn("sFehler", "");
+  const klassenleitungEintragen = art === "Lehrer" && !el("sLeitungBox").hidden && el("sLeitung").checked;
   try {
-    const d = await senden("POST", "api/konten/sammel", { art, gruppen, nur: null, anlegen: false });
+    const d = await senden("POST", "api/konten/sammel", { art, gruppen, nur: null, anlegen: false, klassenleitungEintragen });
     verw.sammel.vorschau = d;
-    verw.sammel.anfrage = { art, gruppen };
+    verw.sammel.anfrage = { art, gruppen, klassenleitungEintragen };
     renderSammelVorschau();
     sammelSchritt(2);
     el("sTitel").focus();
@@ -886,7 +963,8 @@ function renderSammelVorschau() {
     h("td", { class: "spalte-wahl" }, z.status === "neu"
       ? h("input", { type: "checkbox", checked: true, value: z.schluessel, "aria-label": `${z.anzeige} anlegen`, onchange: sammelZaehlen })
       : null),
-    h("td", null, z.anzeige, z.gruppe && !lehrer ? h("span", { class: "t-klasse" }, " " + z.gruppe) : null),
+    h("td", null, z.anzeige, z.gruppe && !lehrer ? h("span", { class: "t-klasse" }, " " + z.gruppe) : null,
+      z.name ? h("span", { class: "t-klasse" }, " · " + z.name) : null),
     h("td", { class: "mono" }, z.benutzername),
     h("td", null, STATUS_SAMMEL[z.status] || z.status, z.hinweis ? h("span", { class: "z-hinweis" }, z.hinweis) : null))));
   sammelZaehlen();
@@ -908,7 +986,8 @@ async function sammelAnlegen() {
   knopf.textContent = nur.length > 50 ? `Lege ${nur.length} Konten an … (dauert etwas)` : "Lege an …";
   fehlerIn("sFehler2", "");
   try {
-    const d = await senden("POST", "api/konten/sammel", { art: a.art, gruppen: a.gruppen, nur, anlegen: true });
+    const d = await senden("POST", "api/konten/sammel",
+      { art: a.art, gruppen: a.gruppen, nur, anlegen: true, klassenleitungEintragen: !!a.klassenleitungEintragen });
     verw.sammel.ergebnis = d;
     verw.sammel.gesichert = false;
     verw.sammel.vorschau = null;
@@ -925,8 +1004,8 @@ function sammelZettel() {
   const d = verw.sammel.ergebnis;
   if (!d) return [];
   return d.zeilen.filter((z) => z.status === "angelegt").map((z) => ({
-    name: d.art === "Lehrer" ? z.anzeige : z.anzeige.split(", ").reverse().join(" "),
-    gruppe: d.art === "Lehrer" ? "Lehrkraft" : z.gruppe || "",
+    name: d.art === "Lehrer" ? (z.name ? `${z.anzeige} · ${z.name}` : z.anzeige) : z.anzeige.split(", ").reverse().join(" "),
+    gruppe: d.art === "Lehrer" ? (z.hinweis ? z.hinweis.replace(" (laut SchILD)", "") : "Lehrkraft") : z.gruppe || "",
     benutzername: z.benutzername,
     passwort: z.startPasswort,
   }));
@@ -940,7 +1019,8 @@ function renderSammelErgebnis() {
   el("sErgebnis").textContent = teile.join(" · ") + ".";
   el("sErgebnisZeilen").replaceChildren(...d.zeilen.filter((z) => z.status === "angelegt").map((z) =>
     h("tr", null,
-      h("td", null, z.anzeige, z.gruppe ? h("span", { class: "t-klasse" }, " " + z.gruppe) : null),
+      h("td", null, z.anzeige, z.gruppe ? h("span", { class: "t-klasse" }, " " + z.gruppe) : null,
+        z.name ? h("span", { class: "t-klasse" }, " · " + z.name) : null),
       h("td", { class: "mono" }, z.benutzername),
       h("td", { class: "mono passwort-text" }, z.startPasswort))));
 }
@@ -1026,6 +1106,159 @@ async function downloadsLaden() {
 }
 
 // ---------------------------------------------------------------------
+//  Phase 5.2c-2 (Entscheidungen 192, 196): Reiter „SchILD" – Vorschläge aus SchILD und SchILD-Importe (nur Admin)
+// ---------------------------------------------------------------------
+
+function schildLaden() {
+  const teil = verw.schildTeil;
+  for (const b of document.querySelectorAll("#schTeile [data-teil]"))
+    b.setAttribute("aria-selected", String(b.dataset.teil === teil));
+  el("schVorschlaege").hidden = teil !== "vorschlaege";
+  el("schImporte").hidden = teil !== "importe";
+  if (teil === "importe") schildImporteLaden();
+  else schildVorschlaegeLaden();
+}
+
+const SCH_ART = { uebernehmen: "Übernehmen", entfernen: "Zuständigkeit entfernen", hinweis: "Hinweis", keinKonto: "Kein Konto" };
+
+async function schildVorschlaegeLaden() {
+  const nr = ++verw.ladeNr;
+  el("schInfo").textContent = "Lade …";
+  fehlerIn("schFehler", "");
+  try {
+    const d = await senden("GET", "api/konten/schild-vorschlaege");
+    if (nr !== verw.ladeNr) return;
+    renderSchildVorschlaege(d);
+  } catch (f) {
+    if (nr !== verw.ladeNr) return;
+    const t = aktionsFehler(f);
+    if (t !== null) {
+      el("schInfo").textContent = t;
+      el("schListe").replaceChildren();
+      el("schAlle").hidden = true;
+    }
+  }
+}
+
+function renderSchildVorschlaege(d) {
+  const liste = d.vorschlaege || [];
+  const anzahl = (art) => liste.filter((v) => v.art === art).length;
+  let info;
+  if (!d.schuljahr) info = "Noch kein Grundplan veröffentlicht.";
+  else if (!d.klassenMitLeitung)
+    info = `Schuljahr ${d.schuljahr}: noch keine Klassenleitung aus SchILD – sie kommt mit dem nächsten SchILD-Import vom ` +
+      "Verwaltungsrechner (Klassen.dat).";
+  else {
+    const teile = [];
+    if (anzahl("uebernehmen")) teile.push(`${anzahl("uebernehmen")} zum Übernehmen`);
+    if (anzahl("entfernen")) teile.push(`${anzahl("entfernen")} zum Entfernen`);
+    if (anzahl("hinweis")) teile.push(anzahl("hinweis") === 1 ? "1 Hinweis" : `${anzahl("hinweis")} Hinweise`);
+    if (anzahl("keinKonto")) teile.push(`${anzahl("keinKonto")} ohne Konto`);
+    info = `Schuljahr ${d.schuljahr}: Klassenleitung laut SchILD für ${d.klassenMitLeitung} von ${d.klassen} Klassen · ` +
+      (teile.length ? teile.join(" · ") : "alle Konten passen");
+  }
+  el("schInfo").textContent = info;
+  const alle = el("schAlle");
+  const n = anzahl("uebernehmen");
+  alle.hidden = n < 2;
+  alle.disabled = false;
+  alle.textContent = `Alle übernehmen (${n})`;
+  verw.schildVorschlaege = liste;
+  el("schListe").replaceChildren(...liste.map(vorschlagZeile));
+}
+
+function vorschlagZeile(v) {
+  const knoepfe = [];
+  if (v.art === "uebernehmen")
+    knoepfe.push(h("button", { type: "button", class: "hauptknopf klein sch-knopf", onclick: (e) =>
+      bestaetigen(e.currentTarget, "Übernehmen? Nochmal tippen", () => vorschlaegeAnwenden(e.currentTarget, [v.schluessel])) },
+    "Übernehmen"));
+  else if (v.art === "entfernen")
+    knoepfe.push(h("button", { type: "button", class: "textknopf sch-knopf", onclick: (e) =>
+      bestaetigen(e.currentTarget, "Wirklich entfernen? Nochmal tippen", () => vorschlaegeAnwenden(e.currentTarget, [v.schluessel])) },
+    `Zuständigkeit ${v.klasse} entfernen`));
+  return h("li", { class: "p-eintrag sch-" + v.art },
+    h("span", { class: "p-text" },
+      h("strong", null, `${SCH_ART[v.art] || v.art} · ${v.klasse}`),
+      v.konto ? ` · Konto ${v.konto}` : ` · ${v.kuerzel}`,
+      v.gesperrt ? h("span", { class: "marke gesperrt" }, "gesperrt") : null),
+    h("span", { class: "p-details" }, v.text),
+    v.aenderung ? h("span", { class: "p-details" }, "Änderung: " + v.aenderung) : null,
+    knoepfe.length ? h("span", { class: "knopfreihe klein" }, ...knoepfe) : null);
+}
+
+/** „Alle übernehmen": nur die Vorschläge „Übernehmen" (Entfernen bleibt einzeln – z. B. Stellvertretung von Hand). */
+function schildAlleUebernehmen() {
+  const liste = (verw.schildVorschlaege || []).filter((v) => v.art === "uebernehmen");
+  if (liste.length === 0) return;
+  const zeilen = liste.slice(0, 30).map((v) => `• ${v.konto}: ${v.aenderung || "Klassenleitung " + v.klasse}`);
+  if (liste.length > 30) zeilen.push(`… und ${liste.length - 30} weitere`);
+  if (!window.confirm(`Diese ${liste.length} Vorschläge übernehmen? Die Lehrkräfte werden auf ihren Geräten abgemeldet.\n\n` +
+    zeilen.join("\n"))) return;
+  vorschlaegeAnwenden(el("schAlle"), liste.map((v) => v.schluessel));
+}
+
+async function vorschlaegeAnwenden(knopf, schluessel) {
+  knopf.disabled = true;
+  fehlerIn("schFehler", "");
+  try {
+    const d = await senden("POST", "api/konten/schild-vorschlaege", { schluessel });
+    const teile = [d.angewendet === 1 ? "1 Änderung übernommen" : `${d.angewendet} Änderungen übernommen`];
+    if (d.konten && d.konten.length) teile.push(`Konten: ${d.konten.join(", ")}`);
+    if (d.nichtMehrAktuell) teile.push(`${d.nichtMehrAktuell} nicht mehr aktuell`);
+    toast(teile.join(" · "));
+    schildVorschlaegeLaden();
+  } catch (f) {
+    const t = aktionsFehler(f);
+    if (t) fehlerIn("schFehler", t);
+    knopf.disabled = false;
+    if (knopf.dataset.text) {
+      knopf.textContent = knopf.dataset.text;
+      knopf.classList.remove("warnung");
+      knopf.dataset.bestaetigt = "";
+    }
+  }
+}
+
+async function schildImporteLaden() {
+  const nr = ++verw.ladeNr;
+  el("siInfo").textContent = "Lade …";
+  try {
+    const d = await senden("GET", "api/schild/protokolle?limit=200");
+    if (nr !== verw.ladeNr) return;
+    const liste = d.protokolle || [];
+    el("siInfo").textContent = liste.length === 0 ? "Noch kein SchILD-Import."
+      : `${d.gesamt} ${d.gesamt === 1 ? "Import" : "Importe"}` + (d.gesamt > liste.length ? ` – die neuesten ${liste.length}` : "");
+    el("siListe").replaceChildren(...liste.map(importZeile));
+  } catch (f) {
+    if (nr !== verw.ladeNr) return;
+    const t = aktionsFehler(f);
+    if (t !== null) { el("siInfo").textContent = t; el("siListe").replaceChildren(); }
+  }
+}
+
+function importZeile(p) {
+  const zahlen = [`neu ${p.neu}`, `geändert ${p.geaendert}`, `Klassenwechsel ${p.klassenwechsel}`,
+    `Kurs-/Gruppenwechsel ${p.kurswechsel}`, `Abgänge ${p.abgaenge}`, `unverändert ${p.unveraendert}`];
+  if (p.uebersprungen) zahlen.push(`übersprungen ${p.uebersprungen}`);
+  if (p.zusammengefuehrt) zahlen.push(`zusammengeführt ${p.zusammengefuehrt}`);
+  if (p.neuZuordnung) zahlen.push(`neu zugeordnet ${p.neuZugeordnet}`);
+  const kopf = [`Nr. ${p.id}`, `${p.schuljahr}, Abschnitt ${p.abschnitt}`, `gilt ab ${kurzDatum(p.giltAb)}`,
+    p.pseudo ? "Pseudodaten" : "echte Daten"];
+  const schluessel = p.kennung
+    ? `Schlüssel ${p.kennung}` + (p.neuZuordnung && p.kennungVorher ? ` (bisher ${p.kennungVorher})` : "")
+    : "Schlüssel: – (Import vor 5.2c)";
+  return h("li", { class: "p-eintrag" },
+    h("span", { class: "p-zeit" }, datumZeit(p.zeit)),
+    h("span", { class: "p-text" },
+      h("strong", null, kopf.join(" · ")),
+      h("span", { class: "p-wer" }, ` (${p.akteur})`),
+      p.neuZuordnung ? h("span", { class: "marke start" }, "Neu-Zuordnung") : null),
+    h("span", { class: "p-details" }, zahlen.join(" · ")),
+    h("span", { class: "p-details" }, schluessel));
+}
+
+// ---------------------------------------------------------------------
 //  Zugangszettel drucken, CSV speichern
 // ---------------------------------------------------------------------
 
@@ -1099,7 +1332,7 @@ function kontenInit() {
     b.addEventListener("click", () => { if (verw.reiter !== b.dataset.reiter) reiterWaehlen(b.dataset.reiter); });
   el("verwReiter").addEventListener("keydown", (e) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-    const liste = ["konten", "sammel", "protokoll", "downloads"];
+    const liste = ["konten", "sammel", "protokoll", "downloads", "schild"];
     const i = (liste.indexOf(verw.reiter) + (e.key === "ArrowRight" ? 1 : liste.length - 1)) % liste.length;
     reiterWaehlen(liste[i]);
     document.querySelector(`#verwReiter [data-reiter="${liste[i]}"]`).focus();
@@ -1168,7 +1401,11 @@ function kontenInit() {
 
   // Sammelanlage
   for (const r of document.querySelectorAll('input[name="sArt"]'))
-    r.addEventListener("change", () => { el("sGruppenBox").hidden = sammelArt() !== "Schueler"; fehlerIn("sFehler", ""); });
+    r.addEventListener("change", () => {
+      el("sGruppenBox").hidden = sammelArt() !== "Schueler";
+      sammelLeitungAnpassen();
+      fehlerIn("sFehler", "");
+    });
   el("sVorschau").addEventListener("click", sammelVorschau);
   el("sZurueck").addEventListener("click", () => {
     verw.sammel.vorschau = null;
@@ -1191,6 +1428,11 @@ function kontenInit() {
     csvSpeichern(liste, `Zugangsdaten_${art}_${heuteIso()}.csv`);
   });
   el("sFertig").addEventListener("click", sammelFertig);
+
+  // Phase 5.2c-2: Reiter „SchILD"
+  for (const b of document.querySelectorAll("#schTeile [data-teil]"))
+    b.addEventListener("click", () => { if (verw.schildTeil !== b.dataset.teil) { verw.schildTeil = b.dataset.teil; schildLaden(); } });
+  el("schAlle").addEventListener("click", schildAlleUebernehmen);
 
   window.addEventListener("afterprint", druckAufraeumen);
   // Seite verlassen mit ungesicherten Startpasswörtern: Browser fragt nach.

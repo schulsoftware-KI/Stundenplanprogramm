@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using VertretungApi.Data;
@@ -17,6 +18,8 @@ namespace VertretungApi.Controllers;
 //    POST api/schild/import          – Probelauf (Vorschau mit Prüfsumme) bzw. Import (78).
 //    POST api/schild/seed-entfernen  – nur Entwicklung: Seed-Schüler samt Klassenbuchdaten entfernen
 //                                      (Punkt A), danach Vorschau neu berechnen.
+//    GET  api/schild/protokolle      – seit 5.2c-2 (Entscheidung 196): Importprotokoll für die App, nur Admin mit
+//                                      Anmeldung (JWT) – nicht über den X-Api-Key; ohne Namen.
 //
 //  Abgleich und Schreiben: Services/SchildImportService.cs. Das Log nennt nur Zahlen.
 // =====================================================================
@@ -171,11 +174,13 @@ public class SchildController : ControllerBase
         _log.LogInformation("SchILD-Import ausgeführt (Protokoll {Id}): {Schuljahr}, Abschnitt {Abschnitt}, gilt ab {GiltAb}, {Art} – " +
                             "neu {Neu}, geändert {Geaendert}, Klassenwechsel {Klassen}, Kurswechsel {Kurse}, Abgänge {Abgaenge}, " +
                             "unverändert {Unveraendert}, übersprungen {Uebersprungen}, zusammengeführt {Zusammengefuehrt}, " +
-                            "Neu-Zuordnung {Neuzuordnung} ({NeuZugeordnet}), Schlüssel {Kennung}",
+                            "Neu-Zuordnung {Neuzuordnung} ({NeuZugeordnet}), Schlüssel {Kennung}; Klassenleitung erstmals " +
+                            "{KlNeu}, geändert {KlGeaendert}; Lehrkräfte-Namen neu {LkNeu}, geändert {LkGeaendert}, entfernt {LkWeg}",
             protokoll.Id, protokoll.Schuljahr, protokoll.Abschnitt, protokoll.GiltAb, protokoll.IstPseudo ? "Pseudodaten" : "echte Daten",
             protokoll.Neu, protokoll.Geaendert, protokoll.Klassenwechsel, protokoll.Kurswechsel, protokoll.Abgaenge,
             protokoll.Unveraendert, protokoll.Uebersprungen, protokoll.Zusammengefuehrt, protokoll.NeuZuordnung,
-            protokoll.NeuZugeordnet, protokoll.SchluesselKennung ?? "–");
+            protokoll.NeuZugeordnet, protokoll.SchluesselKennung ?? "–", lauf.KlassenleitungNeu, lauf.KlassenleitungGeaendert,
+            lauf.LehrkraefteNeu, lauf.LehrkraefteGeaendert, lauf.LehrkraefteEntfernt);
         return Ok(lauf.ImportAntwort(protokoll));
     }
 
@@ -203,9 +208,34 @@ public class SchildController : ControllerBase
             seedSchueler = seed,
             importierteSchueler = importiert,
             schuelerKonten = konten,
-            hinweis = "Entfernt samt Klassenbuchdaten, Pseudo-Lerngruppen und Gruppenlisten. Jetzt die Vorschau neu berechnen; " +
+            hinweis = "Entfernt samt Klassenbuchdaten, Pseudo-Lerngruppen (mit Klassenleitung), Gruppenlisten und Namen der " +
+                      "Pseudo-Lehrkräfte. Jetzt die Vorschau neu berechnen; " +
                       "nach dem Import die Testkonten mit POST /api/auth/seed-konten neu verknüpfen."
         });
+    }
+
+    /// <summary>
+    /// 5.2c-2 (Entscheidung 196): Importprotokoll für die App (Kontomenü → Konten verwalten → „SchILD“). Nur Admin, nur lesen,
+    /// ohne Namen – Zahlen, Kennung des Schlüssels, Neu-Zuordnung. Mit Anmeldung (JWT), nicht über den X-Api-Key.
+    /// </summary>
+    [Authorize(Roles = Rollen.Admin)]
+    [HttpGet("protokolle")]
+    public async Task<IActionResult> Protokolle([FromQuery] int limit = 100)
+    {
+        var liste = await _db.SchildImportProtokolle.AsNoTracking()
+            .OrderByDescending(p => p.Zeit).ThenByDescending(p => p.Id)
+            .Take(Math.Clamp(limit, 1, 500))
+            .Select(p => new
+            {
+                id = p.Id, zeit = p.Zeit, akteur = p.Akteur, schuljahr = p.Schuljahr, abschnitt = p.Abschnitt,
+                giltAb = p.GiltAb, pseudo = p.IstPseudo, kennung = p.SchluesselKennung, kennungVorher = p.KennungVorher,
+                neuZuordnung = p.NeuZuordnung, neu = p.Neu, geaendert = p.Geaendert, klassenwechsel = p.Klassenwechsel,
+                kurswechsel = p.Kurswechsel, abgaenge = p.Abgaenge, unveraendert = p.Unveraendert,
+                uebersprungen = p.Uebersprungen, zusammengefuehrt = p.Zusammengefuehrt, neuZugeordnet = p.NeuZugeordnet
+            })
+            .ToListAsync();
+        int gesamt = await _db.SchildImportProtokolle.CountAsync();
+        return Ok(new { protokolle = liste, gesamt, betrieb = Produktiv ? "Echtbetrieb" : "Entwicklung" });
     }
 
     /// <summary>„Desktop (Windows-Benutzer)“ fürs Importprotokoll – ohne Steuerzeichen, gekürzt.</summary>

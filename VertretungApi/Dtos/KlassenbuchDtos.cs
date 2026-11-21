@@ -170,7 +170,9 @@ public record KbGruppeKurzDto(
     bool Zusammengestellt,
     int Anzahl,
     string? BearbeitetVon,
-    DateTime? BearbeitetAm);
+    DateTime? BearbeitetAm,
+    bool AusSchild = false,       // 5.2c-2 (195): die Liste kommt heute aus SchILD (nur lesbar)
+    DateOnly? SchildAb = null);   // ab diesem Tag aus SchILD (auch, wenn er noch bevorsteht)
 
 /// <summary>Gruppe zum Zusammenstellen: Pool = alle Schüler der genannten Klassen.</summary>
 public record KbGruppeDto(
@@ -183,7 +185,9 @@ public record KbGruppeDto(
     string? BearbeitetVon,
     DateTime? BearbeitetAm,
     bool DarfBearbeiten,
-    IReadOnlyList<KbPoolDto> Pool);
+    IReadOnlyList<KbPoolDto> Pool,
+    bool AusSchild = false,       // 5.2c-2 (195): die Liste kommt heute aus SchILD (nur lesbar, „Änderungen über SchILD“)
+    DateOnly? SchildAb = null);
 
 public record KbPoolDto(int Id, string Vorname, string Nachname, string Klasse, bool Mitglied);
 

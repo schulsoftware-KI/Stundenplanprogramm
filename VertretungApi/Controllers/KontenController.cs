@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -28,6 +29,12 @@ namespace VertretungApi.Controllers;
 //    GET    api/konten/protokoll?konto=&limit=
 //    GET    api/konten/sammel/uebersicht    – Lehrkräfte, Klassen/Stufen mit Konto-Zahlen
 //    POST   api/konten/sammel               – Sammelanlage (Vorschau bzw. Anlegen)
+//    GET    api/konten/schild-vorschlaege   – 5.2c-2 (192): Vorschläge aus SchILD (Klassenleitung laut Klassen.dat)
+//    POST   api/konten/schild-vorschlaege   – gewählte Vorschläge übernehmen (nur per Knopf, Kontenprotokoll)
+//
+//  Phase 5.2c-2: Namen der Lehrkräfte (Lehrkraefte.dat) erscheinen nur für den Admin (194); Schülerkonten zeigen
+//  „laut SchILD wieder aktiv, aber gesperrt“ und „Benutzername passt nicht mehr zum Namen“ (197) – nichts geschieht
+//  automatisch.
 //
 //  Grundsätze: Startpasswörter werden nur einmal ausgeliefert und nie im Klartext gespeichert;
 //  das Konto muss danach ein eigenes Passwort festlegen. Jede Änderung erneuert den
@@ -68,8 +75,9 @@ public class KontenController : ControllerBase
 
     /// <summary>
     /// Kontenliste. rolle: Admin|Lehrer|Klassenlehrer|Stufenkoordination|Schueler|Personal;
-    /// filter: gesperrt | pflicht (muss Passwort ändern) | nie (nie angemeldet) | verwaist.
-    /// q: Wörter, die alle in Benutzername, Kürzel, Name, Klasse oder Zuständigkeit vorkommen.
+    /// filter: gesperrt | pflicht (muss Passwort ändern) | nie (nie angemeldet) | verwaist | seit 5.2c-2 wiederaktiv (laut
+    /// SchILD aktiv, aber gesperrt) | namegeaendert (Benutzername passt nicht mehr zum Namen laut SchILD).
+    /// q: Wörter, die alle in Benutzername, Kürzel, Name, Klasse oder Zuständigkeit vorkommen (Admin auch Name der Lehrkraft).
     /// </summary>
     [HttpGet]
     public async Task<IActionResult> Liste([FromQuery] string? q, [FromQuery] string? rolle,
@@ -98,11 +106,18 @@ public class KontenController : ControllerBase
             case "gesperrt": query = query.Where(b => b.Gesperrt); break;
             case "pflicht": query = query.Where(b => b.MussPasswortAendern); break;
             case "nie": query = query.Where(b => b.LetzteAnmeldung == null); break;
+            // 5.2c-2 (197): die genaue Prüfung folgt nach AlsDto
+            case "wiederaktiv": query = query.Where(b => b.Rolle == BenutzerRolle.Schueler && b.Gesperrt); break;
+            case "namegeaendert": query = query.Where(b => b.Rolle == BenutzerRolle.Schueler); break;
         }
 
         var dtos = await AlsDto(await query.ToListAsync());
         if (string.Equals(filter, "verwaist", StringComparison.OrdinalIgnoreCase))
             dtos = dtos.Where(d => d.Verwaist).ToList();
+        else if (string.Equals(filter, "wiederaktiv", StringComparison.OrdinalIgnoreCase))
+            dtos = dtos.Where(d => d.WiederAktiv).ToList();
+        else if (string.Equals(filter, "namegeaendert", StringComparison.OrdinalIgnoreCase))
+            dtos = dtos.Where(d => d.NameGeaendert).ToList();
 
         var woerter = (q ?? "").ToLowerInvariant()
             .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -110,7 +125,7 @@ public class KontenController : ControllerBase
         {
             dtos = dtos.Where(d =>
             {
-                var text = $"{d.Benutzername} {d.LehrerKuerzel} {d.Schueler} {d.Klasse} {d.Zustaendig}".ToLowerInvariant();
+                var text = $"{d.Benutzername} {d.LehrerKuerzel} {d.Schueler} {d.Klasse} {d.Zustaendig} {d.Lehrkraft}".ToLowerInvariant();
                 return woerter.All(text.Contains);
             }).ToList();
         }
@@ -131,7 +146,25 @@ public class KontenController : ControllerBase
         var u = await _db.Benutzer.AsNoTracking().FirstOrDefaultAsync(b => b.Id == id);
         if (u == null) return NichtGefunden();
         if (!await DarfSehen(u)) return KeinRecht();
-        return Ok(await AlsDto(u));
+        var dto = await AlsDto(u);
+        if (!IstAdmin) return Ok(dto);
+
+        // 5.2c-2 (197, Frage D): Vorschlag zum Umbenennen und wer zuletzt gesperrt hat – nur in der Einzelansicht.
+        string? vorschlag = null;
+        if (dto.NameGeaendert && u.SchuelerId is int sid
+            && await _db.Schueler.AsNoTracking().FirstOrDefaultAsync(x => x.Id == sid) is Schueler s)
+            vorschlag = await KontenService.FreierNameAsync(_db, PasswortRegeln.NameVorschlag(s.Vorname, s.Nachname));
+        string? gesperrtDurch = null;
+        if (u.Gesperrt)
+        {
+            var p = await _db.KontoProtokolle.AsNoTracking()
+                .Where(x => x.KontoId == u.Id && x.Aktion == Aktion.Gesperrt)
+                .OrderByDescending(x => x.Zeit).ThenByDescending(x => x.Id).FirstOrDefaultAsync();
+            if (p != null)
+                gesperrtDurch = $"{p.Akteur}{(string.IsNullOrWhiteSpace(p.Details) ? "" : " – " + p.Details)} " +
+                                $"({p.Zeit.ToLocalTime():dd.MM.yyyy})";
+        }
+        return Ok(dto with { BenutzernameVorschlag = vorschlag, GesperrtDurch = gesperrtDurch });
     }
 
     // -----------------------------------------------------------------
@@ -379,12 +412,15 @@ public class KontenController : ControllerBase
             .ToList();
 
         return Ok(new SammelUebersichtDto(
-            auswahl.Lehrer.Count, auswahl.Lehrer.Count(kuerzelMitKonto.Contains), auswahl.Grundplan, gruppen));
+            auswahl.Lehrer.Count, auswahl.Lehrer.Count(kuerzelMitKonto.Contains), auswahl.Grundplan, gruppen,
+            Klassenleitungen: (await KlassenleitungenAsync()).Klassen.Count));
     }
 
     /// <summary>
     /// Sammelanlage. Anlegen = false: nur Vorschau (nichts wird gespeichert). Vorhandene Konten
-    /// werden übersprungen. Startpasswörter stehen nur in der Antwort des Anlegens.
+    /// werden übersprungen. Startpasswörter stehen nur in der Antwort des Anlegens. Seit 5.2c-2: Lehrkräfte mit Name laut
+    /// Lehrkraefte.dat; mit KlassenleitungEintragen bekommen neue Konten der Klassenleitung laut SchILD gleich die Rolle
+    /// Klassenleitung und ihre Klasse(n) (192).
     /// </summary>
     [Authorize(Roles = Rollen.Admin)]
     [HttpPost("sammel")]
@@ -416,33 +452,42 @@ public class KontenController : ControllerBase
                 .Where(b => b.Rolle != BenutzerRolle.Schueler && b.LehrerKuerzel != null)
                 .Select(b => new { b.Benutzername, b.LehrerKuerzel })
                 .ToListAsync();
+            // 5.2c-2 (192, 194): Namen laut Lehrkraefte.dat; Klassenleitung laut SchILD als Rolle (nur neue Konten).
+            var namen = await LehrkraftNamenAsync(auswahl.Lehrer);
+            var leitung = dto.KlassenleitungEintragen
+                ? KlassenJeKuerzel((await KlassenleitungenAsync()).Klassen)
+                : new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var k in auswahl.Lehrer)
             {
                 if (nur != null && !nur.Contains(k)) continue;
+                string? name = namen.TryGetValue(k, out var nm) ? nm : null;
                 var vorhanden = personal.FirstOrDefault(p => string.Equals(p.LehrerKuerzel!.Trim(), k, StringComparison.OrdinalIgnoreCase));
                 if (vorhanden != null)
                 {
-                    zeilen.Add(new SammelZeileDto(k, k, null, vorhanden.Benutzername, "vorhanden", null, null));
+                    zeilen.Add(new SammelZeileDto(k, k, null, vorhanden.Benutzername, "vorhanden", null, null, name));
                     continue;
                 }
                 var nameFehler = PasswortRegeln.BenutzernameFehler(k);
                 if (nameFehler != null)
                 {
                     zeilen.Add(new SammelZeileDto(k, k, null, k, "konflikt",
-                        "Kürzel taugt nicht als Benutzername – Konto bitte einzeln anlegen.", null));
+                        "Kürzel taugt nicht als Benutzername – Konto bitte einzeln anlegen.", null, name));
                     continue;
                 }
                 if (!vergeben.Add(k))
                 {
                     zeilen.Add(new SammelZeileDto(k, k, null, k, "konflikt",
-                        "Benutzername schon an ein anderes Konto vergeben – bitte einzeln anlegen.", null));
+                        "Benutzername schon an ein anderes Konto vergeben – bitte einzeln anlegen.", null, name));
                     continue;
                 }
-                zeilen.Add(new SammelZeileDto(k, k, null, k, "neu", null, null));
+                string? leitet = leitung.TryGetValue(k, out var klassen) ? KontenService.ZustaendigText(string.Join(",", klassen)) : null;
+                zeilen.Add(new SammelZeileDto(k, k, null, k, "neu",
+                    leitet != null ? $"Klassenleitung {leitet} (laut SchILD)" : null, null, name));
                 neueKonten.Add((new Benutzer
                 {
-                    Benutzername = k, Rolle = BenutzerRolle.Lehrer, LehrerKuerzel = k,
+                    Benutzername = k, Rolle = leitet != null ? BenutzerRolle.Klassenlehrer : BenutzerRolle.Lehrer,
+                    LehrerKuerzel = k, Zustaendig = leitet,
                     AngelegtAm = DateTime.UtcNow, MussPasswortAendern = true
                 }, zeilen.Count - 1));
             }
@@ -506,7 +551,9 @@ public class KontenController : ControllerBase
             }
             await _db.SaveChangesAsync();
             foreach (var (konto, _) in neueKonten)
-                KontenService.Protokoll(_db, Ich, Aktion.Angelegt, konto, "Sammelanlage; " + KontenService.Zuordnung(konto));
+                KontenService.Protokoll(_db, Ich, Aktion.Angelegt, konto, "Sammelanlage; " +
+                    (konto.Rolle == BenutzerRolle.Klassenlehrer ? "Klassenleitung laut SchILD; " : "") +
+                    KontenService.Zuordnung(konto));
             await _db.SaveChangesAsync();
             angelegt = neueKonten.Count;
         }
@@ -519,6 +566,204 @@ public class KontenController : ControllerBase
             Angelegt: angelegt,
             Konflikte: zeilen.Count(z => z.Status == "konflikt"),
             Grundplan: grundplan));
+    }
+
+    // -----------------------------------------------------------------
+    //  5.2c-2 (Entscheidung 192): Vorschläge aus SchILD – Klassenleitung laut Klassen.dat
+    //  Nichts geschieht automatisch: übernehmen bzw. entfernen nur per Knopf, jedes Mal ins Kontenprotokoll.
+    //  Konten ohne Kürzel (z. B. Testkonten) bleiben unberührt; Verwaltung und Stufenkoordination bekommen nur Hinweise
+    //  (ein Konto hat eine Rolle).
+    // -----------------------------------------------------------------
+
+    [Authorize(Roles = Rollen.Admin)]
+    [HttpGet("schild-vorschlaege")]
+    public async Task<IActionResult> SchildVorschlaege() => Ok(await VorschlaegeAsync());
+
+    /// <summary>
+    /// Übernimmt die gewählten Vorschläge (Schlüssel aus GET). Gilt nur, was die API jetzt noch genauso vorschlagen würde;
+    /// „übernehmen“ vor „entfernen“, damit keine Rolle zwischendurch herabgestuft wird.
+    /// </summary>
+    [Authorize(Roles = Rollen.Admin)]
+    [HttpPost("schild-vorschlaege")]
+    public async Task<IActionResult> SchildVorschlaegeAnwenden([FromBody] SchildVorschlaegeAnwendenDto dto)
+    {
+        var wahl = (dto.Schluessel ?? Array.Empty<string>()).Select(x => (x ?? "").Trim()).Where(x => x.Length > 0)
+            .Distinct(StringComparer.Ordinal).ToList();
+        if (wahl.Count == 0) return BadRequest(new { fehler = "Kein Vorschlag gewählt." });
+        if (wahl.Count > SammelMax) return BadRequest(new { fehler = $"Höchstens {SammelMax} Vorschläge auf einmal." });
+
+        var aktuell = (await VorschlaegeAsync()).Vorschlaege
+            .Where(v => v.Schluessel.Length > 0).Select(v => v.Schluessel).ToHashSet(StringComparer.Ordinal);
+        var reihe = wahl.Where(aktuell.Contains)
+            .OrderBy(x => x.StartsWith("u|", StringComparison.Ordinal) ? 0 : 1).ThenBy(x => x, StringComparer.Ordinal).ToList();
+        int nichtMehr = wahl.Count - reihe.Count;
+
+        var konten = new Dictionary<int, (Benutzer Konto, string Vorher, List<string> Was)>();
+        foreach (var key in reihe)
+        {
+            var teile = key.Split('|');
+            if (teile.Length != 3 || !int.TryParse(teile[1], NumberStyles.None, CultureInfo.InvariantCulture, out int id))
+            {
+                nichtMehr++;
+                continue;
+            }
+            string klasse = teile[2];
+            if (!konten.TryGetValue(id, out var eintrag))
+            {
+                var gefunden = await _db.Benutzer.FindAsync(id);
+                if (gefunden == null) { nichtMehr++; continue; }
+                eintrag = (gefunden, KontenService.Zuordnung(gefunden), new List<string>());
+                konten[id] = eintrag;
+            }
+            var u = eintrag.Konto;
+            var zust = KontenService.Zustaendigkeiten(u.Zustaendig);
+            bool hat = zust.Contains(klasse, StringComparer.OrdinalIgnoreCase);
+            if (teile[0] == "u")
+            {
+                if (u.Rolle == BenutzerRolle.Lehrer)
+                {
+                    u.Rolle = BenutzerRolle.Klassenlehrer;
+                    u.Zustaendig = KontenService.ZustaendigText(klasse);
+                }
+                else if (u.Rolle == BenutzerRolle.Klassenlehrer && !hat)
+                    u.Zustaendig = KontenService.ZustaendigText(string.Join(",", zust.Append(klasse)));
+                else { nichtMehr++; continue; }
+                eintrag.Was.Add($"Klassenleitung {klasse} laut SchILD übernommen");
+            }
+            else if (teile[0] == "e" && u.Rolle == BenutzerRolle.Klassenlehrer && hat)
+            {
+                var rest = zust.Where(z => !string.Equals(z, klasse, StringComparison.OrdinalIgnoreCase)).ToList();
+                if (rest.Count == 0)
+                {
+                    u.Rolle = BenutzerRolle.Lehrer;
+                    u.Zustaendig = null;
+                }
+                else u.Zustaendig = string.Join(", ", rest);
+                eintrag.Was.Add($"Zuständigkeit {klasse} laut SchILD entfernt");
+            }
+            else nichtMehr++;
+        }
+
+        var geaendert = new List<string>();
+        int angewendet = 0;
+        foreach (var (konto, vorher, was) in konten.Values)
+        {
+            if (was.Count == 0) continue;
+            angewendet += was.Count;
+            // Rolle und Zuständigkeit stehen im Token: alte Anmeldungen beenden (wie beim Bearbeiten).
+            konto.SicherheitsStempel = KontenService.NeuerStempel();
+            KontenService.Protokoll(_db, Ich, Aktion.Geaendert, konto,
+                string.Join("; ", was) + $"; {vorher} → {KontenService.Zuordnung(konto)}");
+            geaendert.Add(konto.Benutzername);
+        }
+        await _db.SaveChangesAsync();
+        return Ok(new SchildVorschlaegeErgebnisDto(angewendet, nichtMehr, geaendert.OrderBy(x => x, Cmp).ToList()));
+    }
+
+    /// <summary>Klassen des aktuellen Schuljahrs (Grundplan von heute) und ihre Klassenleitung laut SchILD (Kürzel).</summary>
+    private async Task<(string? Schuljahr, int KlassenGesamt, Dictionary<string, List<string>> Klassen)> KlassenleitungenAsync()
+    {
+        var leer = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        var ver = await KlassenbuchService.AktuelleVersionAsync(_db);
+        if (ver == null) return (null, 0, leer);
+        string sj = ver.Schuljahr;
+        // Wie das Stundenblatt: je Bezeichnung die Lerngruppe mit der größten Id.
+        var klassen = (await _db.Lerngruppen.AsNoTracking()
+                .Where(l => l.Typ == LerngruppeTyp.Klasse && l.Schuljahr == sj)
+                .Select(l => new { l.Id, l.Bezeichnung, l.Klassenleitung })
+                .ToListAsync())
+            .GroupBy(l => l.Bezeichnung.Trim().ToUpperInvariant())
+            .Select(g => g.OrderByDescending(x => x.Id).First())
+            .ToList();
+        foreach (var k in klassen)
+        {
+            var kuerzel = SchildImportService.KuerzelListe(k.Klassenleitung);
+            if (kuerzel.Count > 0) leer[k.Bezeichnung.Trim().ToUpperInvariant()] = kuerzel;
+        }
+        return (sj, klassen.Count, leer);
+    }
+
+    /// <summary>Klassenleitung je Klasse → Klassen je Kürzel.</summary>
+    private static Dictionary<string, List<string>> KlassenJeKuerzel(Dictionary<string, List<string>> klassen)
+    {
+        var d = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (klasse, kuerzel) in klassen.OrderBy(kv => kv.Key, Cmp))
+            foreach (var k in kuerzel)
+            {
+                if (!d.TryGetValue(k, out var l)) d[k] = l = new List<string>();
+                l.Add(klasse);
+            }
+        return d;
+    }
+
+    private async Task<SchildVorschlaegeDto> VorschlaegeAsync()
+    {
+        var (sj, gesamt, leitung) = await KlassenleitungenAsync();
+        var liste = new List<SchildVorschlagDto>();
+        if (sj == null) return new SchildVorschlaegeDto(null, 0, 0, liste);
+
+        var personal = await _db.Benutzer.AsNoTracking()
+            .Where(b => b.Rolle != BenutzerRolle.Schueler && b.LehrerKuerzel != null)
+            .ToListAsync();
+        string Kz(Benutzer b) => b.LehrerKuerzel!.Trim();
+
+        // 1. Laut SchILD ist K Klassenleitung von X: Konto mit Kürzel K bekommt Rolle bzw. Zuständigkeit (übernehmen).
+        foreach (var (klasse, kuerzel) in leitung.OrderBy(kv => kv.Key, Cmp))
+            foreach (var k in kuerzel)
+            {
+                var treffer = personal.Where(b => string.Equals(Kz(b), k, StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(b => b.Benutzername, Cmp).ToList();
+                if (treffer.Count == 0)
+                {
+                    liste.Add(new SchildVorschlagDto("", "keinKonto", null, null, k, klasse,
+                        $"Klassenleitung {klasse} ist laut SchILD {k} – dafür gibt es noch kein Konto (Reiter „Sammelanlage“, " +
+                        "Lehrkräfte).", null, false));
+                    continue;
+                }
+                foreach (var u in treffer)
+                {
+                    var zust = KontenService.Zustaendigkeiten(u.Zustaendig);
+                    if (u.Rolle == BenutzerRolle.Lehrer)
+                        liste.Add(new SchildVorschlagDto($"u|{u.Id}|{klasse}", "uebernehmen", u.Id, u.Benutzername, k, klasse,
+                            $"{k} ist laut SchILD Klassenleitung {klasse} – Konto {u.Benutzername} ist bisher Lehrkraft.",
+                            $"Rolle Lehrkraft → Klassenleitung, zuständig {klasse}", u.Gesperrt));
+                    else if (u.Rolle == BenutzerRolle.Klassenlehrer)
+                    {
+                        if (zust.Contains(klasse, StringComparer.OrdinalIgnoreCase)) continue;   // passt schon
+                        string bisher = zust.Count == 0 ? "–" : string.Join(", ", zust);
+                        liste.Add(new SchildVorschlagDto($"u|{u.Id}|{klasse}", "uebernehmen", u.Id, u.Benutzername, k, klasse,
+                            $"{k} ist laut SchILD Klassenleitung {klasse} – Konto {u.Benutzername} ist bisher zuständig für {bisher}.",
+                            $"zuständig {bisher} → {KontenService.ZustaendigText(string.Join(",", zust.Append(klasse)))}",
+                            u.Gesperrt));
+                    }
+                    else
+                        liste.Add(new SchildVorschlagDto("", "hinweis", u.Id, u.Benutzername, k, klasse,
+                            $"{k} ist laut SchILD Klassenleitung {klasse} – Konto {u.Benutzername} hat die Rolle " +
+                            $"{KontenService.RollenText(u.Rolle)}. Ein Konto hat nur eine Rolle – bei Bedarf von Hand ändern.",
+                            null, u.Gesperrt));
+                }
+            }
+
+        // 2. Konto ist zuständig für X, laut SchILD leitet X aber jemand anderes (entfernen – nur einzeln).
+        foreach (var u in personal.Where(b => b.Rolle == BenutzerRolle.Klassenlehrer).OrderBy(b => b.Benutzername, Cmp))
+        {
+            var zust = KontenService.Zustaendigkeiten(u.Zustaendig);
+            foreach (var z in zust)
+            {
+                if (!leitung.TryGetValue(z, out var laut)) continue;   // keine Angabe aus SchILD: bleibt
+                if (laut.Any(k => string.Equals(k, Kz(u), StringComparison.OrdinalIgnoreCase))) continue;
+                var rest = zust.Where(x => !string.Equals(x, z, StringComparison.OrdinalIgnoreCase)).ToList();
+                liste.Add(new SchildVorschlagDto($"e|{u.Id}|{z}", "entfernen", u.Id, u.Benutzername, Kz(u), z,
+                    $"Konto {u.Benutzername} ({Kz(u)}) ist zuständig für {z}, laut SchILD ist die Klassenleitung " +
+                    $"{string.Join(", ", laut)}. Ist es eine Stellvertretung von Hand, so lassen.",
+                    rest.Count == 0 ? "Rolle Klassenleitung → Lehrkraft" : $"zuständig {string.Join(", ", zust)} → {string.Join(", ", rest)}",
+                    u.Gesperrt));
+            }
+        }
+
+        var rang = new Dictionary<string, int> { ["uebernehmen"] = 0, ["entfernen"] = 1, ["hinweis"] = 2, ["keinKonto"] = 3 };
+        return new SchildVorschlaegeDto(sj, gesamt, leitung.Count,
+            liste.OrderBy(v => rang[v.Art]).ThenBy(v => v.Klasse, Cmp).ThenBy(v => v.Konto ?? "", Cmp).ToList());
     }
 
     // -----------------------------------------------------------------
@@ -620,21 +865,71 @@ public class KontenController : ControllerBase
 
     private async Task<List<KontoDto>> AlsDto(List<Benutzer> konten)
     {
-        var info = await KontenService.SchuelerInfoAsync(_db,
-            konten.Where(k => k.SchuelerId != null).Select(k => k.SchuelerId!.Value));
+        var schuelerIds = konten.Where(k => k.SchuelerId != null).Select(k => k.SchuelerId!.Value).Distinct().ToList();
+        var info = await KontenService.SchuelerInfoAsync(_db, schuelerIds);
+        // 5.2c-2 (197): Name und Stand laut SchILD für „wieder aktiv, aber gesperrt“ und „Benutzername passt nicht mehr“.
+        var stand = schuelerIds.Count == 0
+            ? new Dictionary<int, (string Vorname, string Nachname, bool Importiert, bool Abgang)>()
+            : (await _db.Schueler.AsNoTracking().Where(x => schuelerIds.Contains(x.Id))
+                    .Select(x => new { x.Id, x.Vorname, x.Nachname, x.ExtId, x.Status }).ToListAsync())
+                .ToDictionary(x => x.Id, x => (x.Vorname, x.Nachname, Importiert: !string.IsNullOrEmpty(x.ExtId),
+                    Abgang: x.Status == "abgang"));
+        // 5.2c-2 (194): Namen der Lehrkräfte nur für den Admin.
+        var namen = IstAdmin
+            ? await LehrkraftNamenAsync(konten.Where(k => k.Rolle != BenutzerRolle.Schueler && k.LehrerKuerzel != null)
+                .Select(k => k.LehrerKuerzel!))
+            : new Dictionary<string, string>();
         var ich = IchId;
         return konten.Select(u =>
         {
             (string Name, string? Klasse, string Stufe)? s =
                 u.SchuelerId is int sid && info.TryGetValue(sid, out var x) ? x : null;
+            (string Vorname, string Nachname, bool Importiert, bool Abgang)? st =
+                u.Rolle == BenutzerRolle.Schueler && u.SchuelerId is int sid2 && stand.TryGetValue(sid2, out var y) ? y : null;
+            bool importiert = st.HasValue && st.Value.Importiert;
             return new KontoDto(
                 u.Id, u.Benutzername, u.Rolle.ToString(), KontenService.RollenText(u.Rolle),
                 u.LehrerKuerzel, u.Zustaendig, u.SchuelerId,
                 s?.Name, s == null ? null : s.Value.Klasse ?? s.Value.Stufe,
                 Verwaist: u.Rolle == BenutzerRolle.Schueler && s == null,
                 u.Gesperrt, u.MussPasswortAendern, u.AngelegtAm, u.LetzteAnmeldung, u.PasswortGeaendertAm,
-                Ich: u.Id == ich);
+                Ich: u.Id == ich,
+                Lehrkraft: u.Rolle != BenutzerRolle.Schueler && u.LehrerKuerzel != null
+                           && namen.TryGetValue(u.LehrerKuerzel.Trim(), out var n) ? n : null,
+                NameGeaendert: importiert && NamePasstNicht(u.Benutzername, st!.Value.Vorname, st.Value.Nachname),
+                WiederAktiv: u.Gesperrt && importiert && !st!.Value.Abgang);
         }).ToList();
+    }
+
+    // „vorname.nachname“ bzw. „vorname.nachname2“ – so bildet die App Benutzernamen für Schüler (PasswortRegeln.NameVorschlag).
+    private static readonly Regex GebildeterName = new(@"^[a-z0-9-]+\.[a-z0-9-]+$", RegexOptions.Compiled);
+
+    /// <summary>
+    /// 5.2c-2 (197): Der Benutzername ist nach dem Muster „vorname.nachname“ gebildet, passt aber nicht mehr zum Namen laut
+    /// SchILD (z. B. nach einer Namensänderung). Selbst gewählte Namen wie „s05A“ bleiben unberührt.
+    /// </summary>
+    private static bool NamePasstNicht(string benutzername, string vorname, string nachname)
+    {
+        var name = benutzername.Trim().ToLowerInvariant();
+        if (!GebildeterName.IsMatch(name)) return false;
+        var basis = PasswortRegeln.NameVorschlag(vorname, nachname);
+        return !Regex.IsMatch(name, "^" + Regex.Escape(basis) + @"\d*$");
+    }
+
+    /// <summary>5.2c-2 (194): „Vorname Nachname“ je Kürzel laut Lehrkraefte.dat (echte Namen vor Pseudo-Namen).</summary>
+    private async Task<Dictionary<string, string>> LehrkraftNamenAsync(IEnumerable<string> kuerzel)
+    {
+        var liste = kuerzel.Select(k => k.Trim()).Where(k => k.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var ergebnis = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (liste.Count == 0) return ergebnis;
+        var klein = liste.Select(k => k.ToLower()).ToList();
+        var treffer = await _db.Lehrkraefte.AsNoTracking()
+            .Where(l => klein.Contains(l.Kuerzel.ToLower()))
+            .Select(l => new { l.Kuerzel, l.Vorname, l.Nachname, l.IstPseudo })
+            .ToListAsync();
+        foreach (var l in treffer.OrderBy(t => t.IstPseudo))
+            ergebnis.TryAdd(l.Kuerzel.Trim(), $"{l.Vorname} {l.Nachname}".Trim());
+        return ergebnis;
     }
 
     /// <summary>„Mia Müller" → „Müller Mia" (zum Sortieren nach Nachnamen).</summary>

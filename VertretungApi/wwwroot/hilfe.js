@@ -231,6 +231,10 @@ const HI_THEMEN = [
         "Klassen zusammen.",
       "Danach zeigt das Stundenblatt nur diese Schülerinnen und Schüler, und sie sehen nur ihre eigene Gruppe im Plan.",
       "Ändern kannst du die Gruppe jederzeit unter „Meine Gruppen“ im Kontomenü.",
+      { zwischen: "Gruppen aus SchILD" },
+      "Steht bei einer Gruppe **„aus SchILD“**, kommt die Liste vom Sekretariat (SchILD) und wird mit jedem Import " +
+        "aktualisiert. Du kannst sie ansehen, aber nicht ändern – fehlt jemand oder ist jemand zu viel, sag bitte dem " +
+        "Sekretariat Bescheid.",
     ],
   },
   {
@@ -330,6 +334,8 @@ const HI_THEMEN = [
       "Kontomenü → „Schülerpasswörter“: Hier setzt du das Passwort eines Schülerkontos deiner Klasse bzw. Stufe zurück.",
       "Das **Startpasswort erscheint nur einmal** – gleich notieren oder den Zugangszettel drucken.",
       "Außerdem kannst du Konten sperren und wieder entsperren.",
+      "Der Filter **„Laut SchILD aktiv, gesperrt“** zeigt Konten, die nach einem Abgang gesperrt wurden, obwohl die " +
+        "Schülerin bzw. der Schüler laut SchILD wieder da ist (Wiedereintritt). Passt das, „Entsperren“.",
     ],
   },
 
@@ -342,6 +348,39 @@ const HI_THEMEN = [
         "drucken oder als CSV speichern, bevor du die Liste schließt – die Startpasswörter sind danach weg.",
       "**Protokoll:** wer wann was an welchem Konto geändert hat – ohne Passwörter, ein Jahr lang.",
       "**Downloads:** wer wann welche Datei mit Schülerdaten geladen hat.",
+      "**SchILD:** Vorschläge für Klassenleitungen laut SchILD und die Liste der SchILD-Importe (siehe eigene Themen).",
+      "Bei Lehrkräften steht der **Name laut SchILD** neben dem Kürzel (nur für dich und die Lehrkraft selbst sichtbar); " +
+        "die Suche findet auch Namen. Filter **„Laut SchILD aktiv, gesperrt“**: nach einem Wiedereintritt entsperren. " +
+        "Filter **„Name laut SchILD geändert“**: im Konto steht ein Vorschlag für den neuen Benutzernamen – " +
+        "„Umbenennen“ behält das Passwort; den neuen Namen bitte mitteilen.",
+    ],
+  },
+  {
+    id: "schildVorschlaege", gruppe: "admin", titel: "Vorschläge aus SchILD",
+    inhalt: [
+      "Konten verwalten → Reiter „SchILD“ → „Vorschläge“: Die Klassenleitung jeder Klasse kommt mit dem SchILD-Import " +
+        "vom Verwaltungsrechner (Klassen.dat). Hier steht, wo die Konten nicht dazu passen.",
+      { liste: [
+        "**Übernehmen:** Das Konto der Lehrkraft bekommt die Rolle Klassenleitung bzw. die Klasse dazu.",
+        "**Zuständigkeit entfernen:** Das Konto ist für eine Klasse zuständig, die laut SchILD jemand anderes leitet. Ist " +
+          "es eine Stellvertretung, die du von Hand eingetragen hast, einfach so lassen.",
+        "**Hinweis:** Verwaltungs- und Stufenkoordinations-Konten haben nur eine Rolle – bei Bedarf von Hand ändern.",
+        "**Kein Konto:** über die Sammelanlage (Lehrkräfte) anlegen – mit „Klassenleitung laut SchILD gleich eintragen“.",
+      ] },
+      "Nichts geschieht von selbst. Jede Änderung steht im Protokoll; die Lehrkraft wird auf ihren Geräten abgemeldet " +
+        "(neue Rolle). „Alle übernehmen“ übernimmt nur die Vorschläge „Übernehmen“, Entfernen geht einzeln.",
+      "Konten ohne Kürzel bleiben unberührt; Stufenkoordinationen gibt es in SchILD nicht – sie bleiben von Hand.",
+    ],
+  },
+  {
+    id: "schildImporte", gruppe: "admin", titel: "SchILD-Importe",
+    inhalt: [
+      "Konten verwalten → Reiter „SchILD“ → „SchILD-Importe“: jeder Import vom Verwaltungsrechner mit Zeit, " +
+        "Windows-Benutzer, Schuljahr, Abschnitt, Stichtag („gilt ab“), Pseudodaten bzw. echte Daten und den Zahlen.",
+      "**Schlüssel:** die Kennung des Schlüssels, mit dem die Prüfsummen gebildet wurden (verrät den Schlüssel nicht). " +
+        "Eine **Neu-Zuordnung** (Schlüssel verloren) ist markiert und nennt die bisherige Kennung.",
+      "Die Liste enthält keine Namen und lässt sich nur lesen. Den Import selbst startet das Sekretariat im " +
+        "Desktop-Programm.",
     ],
   },
   {
@@ -349,6 +388,8 @@ const HI_THEMEN = [
     inhalt: [
       "Kontomenü → „Gruppenlisten“: alle Schülergruppen aus dem Plan an einem Ort.",
       "Normalerweise pflegt sie die Lehrkraft der Gruppe; du kannst jede Gruppe ändern.",
+      "Gruppen mit **„aus SchILD“** kommen mit dem SchILD-Import und lassen sich hier nicht ändern – auch nicht von " +
+        "dir. Änderungen über SchILD, danach neu importieren.",
     ],
   },
   {
@@ -433,6 +474,9 @@ function hiKontext() {
   if (hiSichtbar("pflicht")) return { themen: ["konto", "anmelden"] };
   if (hiSichtbar("verwaltung")) {
     if (r.admin && verw.reiter === "downloads") return { themen: ["downloads", "konten"] };
+    if (r.admin && verw.reiter === "schild")
+      return { themen: verw.schildTeil === "importe"
+        ? ["schildImporte", "schildVorschlaege", "konten"] : ["schildVorschlaege", "schildImporte", "konten"] };
     return { themen: r.admin ? ["konten", "gruppenlisten", "downloads"] : ["schuelerkonten"] };
   }
   if (hiSichtbar("klassenbuch")) {

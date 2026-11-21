@@ -125,6 +125,7 @@
       <button type="button" role="tab" data-reiter="sammel" aria-selected="false">Sammelanlage</button>
       <button type="button" role="tab" data-reiter="protokoll" aria-selected="false">Protokoll</button>
       <button type="button" role="tab" data-reiter="downloads" aria-selected="false">Downloads</button>
+      <button type="button" role="tab" data-reiter="schild" aria-selected="false">SchILD</button>
     </div>
 
     <!-- Konten -->
@@ -151,6 +152,8 @@
             <option value="nie">Nie angemeldet</option>
             <option value="gesperrt">Gesperrt</option>
             <option value="verwaist">Schüler fehlt</option>
+            <option value="wiederaktiv">Laut SchILD aktiv, gesperrt</option>
+            <option value="namegeaendert">Name laut SchILD geändert</option>
           </select>
         </div>
         <button id="kNeu" class="hauptknopf klein" type="button">Neues Konto</button>
@@ -174,6 +177,9 @@
           <p class="feld">Klassen bzw. Stufen</p>
           <div id="sGruppen" class="gruppen"></div>
         </div>
+        <!-- Phase 5.2c-2 (Entscheidung 192): Klassenleitung laut SchILD gleich als Rolle eintragen -->
+        <label id="sLeitungBox" class="schalter gross" hidden><input type="checkbox" id="sLeitung" checked />
+          <span id="sLeitungText">Klassenleitung laut SchILD gleich eintragen</span></label>
         <p id="sFehler" class="fehler" role="alert" hidden></p>
         <button id="sVorschau" class="hauptknopf" type="button">Vorschau</button>
       </div>
@@ -226,6 +232,31 @@
         protokolliert. Einträge werden nach einem Jahr gelöscht.</p>
       <p id="pInfo" class="such-info" role="status"></p>
       <ul id="pListe" class="p-liste" aria-label="Protokoll"></ul>
+    </section>
+
+    <!-- Phase 5.2c-2 (Entscheidungen 192, 196): Vorschläge aus SchILD und SchILD-Importe – nur Admin -->
+    <section id="vSchild" class="verw-bereich" aria-label="SchILD" hidden>
+      <div id="schTeile" class="modi verw-reiter sch-teile" role="tablist" aria-label="SchILD">
+        <button type="button" role="tab" data-teil="vorschlaege" aria-selected="true">Vorschläge</button>
+        <button type="button" role="tab" data-teil="importe" aria-selected="false">SchILD-Importe</button>
+      </div>
+      <div id="schVorschlaege">
+        <p class="kleingedruckt ohne-einzug">Klassenleitung laut SchILD (Klassen.dat, kommt mit jedem Import vom
+          Verwaltungsrechner) im Vergleich mit den Konten. Nichts geschieht von selbst: „Übernehmen“ ändert Rolle bzw.
+          Zuständigkeit des Kontos, steht im Kontenprotokoll und meldet die Lehrkraft auf ihren Geräten ab.</p>
+        <p id="schInfo" class="such-info" role="status"></p>
+        <div class="knopfreihe klein">
+          <button id="schAlle" class="hauptknopf klein" type="button" hidden>Alle übernehmen</button>
+        </div>
+        <p id="schFehler" class="fehler" role="alert" hidden></p>
+        <ul id="schListe" class="p-liste sch-liste" aria-label="Vorschläge aus SchILD"></ul>
+      </div>
+      <div id="schImporte" hidden>
+        <p class="kleingedruckt ohne-einzug">Jeder SchILD-Import vom Verwaltungsrechner mit Zahlen, Stichtag und Kennung des
+          Schlüssels – ohne Namen. Nur lesen.</p>
+        <p id="siInfo" class="such-info" role="status"></p>
+        <ul id="siListe" class="p-liste" aria-label="SchILD-Importe"></ul>
+      </div>
     </section>
 
     <!-- Phase 4.3 (Entscheidung 65): Download-Protokoll -->

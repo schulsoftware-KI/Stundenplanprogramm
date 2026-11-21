@@ -225,6 +225,7 @@ public class AuthController : ControllerBase
         var ergebnis = new List<object>();
         foreach (var k in standard)
         {
+            bool zurueck = false;
             var konto = await _db.Benutzer.FirstOrDefaultAsync(b => b.Benutzername == k.Name);
             if (konto == null)
             {
@@ -238,11 +239,21 @@ public class AuthController : ControllerBase
                     AngelegtAm = DateTime.UtcNow
                 });
             }
-            else if (k.Zustaendig != null && string.IsNullOrWhiteSpace(konto.Zustaendig))
+            else if (konto.Rolle != k.Rolle || konto.LehrerKuerzel != k.Kuerzel || konto.Zustaendig != k.Zustaendig)
             {
-                konto.Zustaendig = k.Zustaendig;   // ältere Testkonten (vor Schritt 5) nachtragen
+                // Ältere Testkonten nachtragen bzw. – seit 5.2c-2 – nach einem Test der „Vorschläge aus SchILD“ wieder auf
+                // den Standard setzen (Rolle, Kürzel, Zuständigkeit; das Passwort bleibt).
+                konto.Rolle = k.Rolle;
+                konto.LehrerKuerzel = k.Kuerzel;
+                konto.Zustaendig = k.Zustaendig;
+                konto.SicherheitsStempel = NeuerStempel();
+                zurueck = true;
             }
-            ergebnis.Add(new { k.Name, rolle = k.Rolle.ToString(), angelegt = konto == null, zustaendig = k.Zustaendig });
+            ergebnis.Add(new
+            {
+                k.Name, rolle = k.Rolle.ToString(), angelegt = konto == null, zustaendig = k.Zustaendig,
+                zurueckgesetzt = zurueck
+            });
         }
 
         // Pseudo-Schülerkonten: ein Schüler der Klasse 05A (Sek I) und einer der Q1 (Sek II).
@@ -331,6 +342,7 @@ public class AuthController : ControllerBase
             lehrerKuerzel = u.LehrerKuerzel,
             schuelerId = u.SchuelerId,
             anzeige = await AnzeigeName(u),
+            name = await LehrkraftName(u),        // 5.2c-2 (194): eigener Name laut Lehrkraefte.dat (nur fürs Kontomenü)
             zustaendig = KontenService.ZustaendigText(u.Zustaendig),
             mussPasswortAendern = u.MussPasswortAendern,
             passwortRegel = KontenService.Regeln(u.Rolle)
@@ -345,6 +357,22 @@ public class AuthController : ControllerBase
             if (s != null) return $"{s.Vorname} {s.Nachname}";
         }
         return string.IsNullOrWhiteSpace(u.LehrerKuerzel) ? u.Benutzername : u.LehrerKuerzel;
+    }
+
+    /// <summary>
+    /// 5.2c-2 (Entscheidung 194): Name der Lehrkraft laut Lehrkraefte.dat („Anna Schulz“) – nur für das eigene Konto
+    /// (Kontomenü „L23 · Anna Schulz“). Schüler und Konten ohne Kürzel: null.
+    /// </summary>
+    private async Task<string?> LehrkraftName(Benutzer u)
+    {
+        if (u.Rolle == BenutzerRolle.Schueler || string.IsNullOrWhiteSpace(u.LehrerKuerzel)) return null;
+        var k = u.LehrerKuerzel.Trim().ToLower();
+        var l = await _db.Lehrkraefte.AsNoTracking()
+            .Where(x => x.Kuerzel.ToLower() == k)
+            .OrderBy(x => x.IstPseudo).ThenBy(x => x.Id)
+            .Select(x => new { x.Vorname, x.Nachname })
+            .FirstOrDefaultAsync();
+        return l == null ? null : $"{l.Vorname} {l.Nachname}".Trim();
     }
 
     private string ErzeugeToken(Benutzer u, DateTime gueltigBis)

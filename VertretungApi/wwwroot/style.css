@@ -663,6 +663,19 @@ main.verwaltung { max-width: 920px; }
 .verw-kopf .textknopf { display: inline-flex; align-items: center; gap: 4px; }
 .verw-reiter { margin-bottom: 12px; }
 .verw-reiter button[aria-selected="true"] { background: var(--akzent); color: var(--auf-akzent); }
+/* Phase 5.2c-2: fünf Reiter der Kontenverwaltung – auf schmalen Handys zweizeilig statt abgeschnitten (gleich breit,
+   solange Platz ist); die Reiter des Klassenbuchs bleiben, wie sie sind. */
+#verwReiter, #schTeile { display: flex; flex-wrap: wrap; }
+#verwReiter button, #schTeile button { flex: 1 1 0; min-width: max-content; min-height: 44px; }
+/* Phase 5.2c-2: Reiter „SchILD“ – Vorschläge und Importprotokoll */
+.sch-teile { margin-bottom: 10px; }
+.sch-liste .p-eintrag { gap: 3px; }
+.sch-liste .knopfreihe.klein { margin: 6px 0 0 0; }
+.sch-knopf { min-height: 44px; }
+.p-eintrag.sch-uebernehmen { border-left: 4px solid var(--akzent); }
+.p-eintrag.sch-entfernen { border-left: 4px solid var(--verlegung); }
+.p-text .marke { margin-left: 6px; }
+#sLeitungBox { margin-top: 10px; }
 
 .k-werkzeuge { display: grid; gap: 8px; margin-bottom: 6px; }
 .k-filter { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

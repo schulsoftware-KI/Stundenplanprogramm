@@ -201,7 +201,7 @@ Grundplan (Schlüssel passen dann zu den Wochenplänen). Ohne Grundplan bzw. mit
 | Methode | Pfad | Zweck | Auth |
 |---|---|---|---|
 | GET | `/api/konten/rechte` | was darf ich in der Kontenverwaltung? | KontenSehen |
-| GET | `/api/konten?q=&rolle=&filter=&limit=` | Kontenliste (`rolle`: Admin, Lehrer, Klassenlehrer, Stufenkoordination, Schueler, Personal; `filter`: pflicht, nie, gesperrt, verwaist) | KontenSehen |
+| GET | `/api/konten?q=&rolle=&filter=&limit=` | Kontenliste (`rolle`: Admin, Lehrer, Klassenlehrer, Stufenkoordination, Schueler, Personal; `filter`: pflicht, nie, gesperrt, verwaist, seit 5.2c-2 wiederaktiv, namegeaendert) | KontenSehen |
 | GET | `/api/konten/{id}` | ein Konto | KontenSehen |
 | POST | `/api/konten/{id}/passwort` | Passwort zurücksetzen → `{ konto, startPasswort }` | KontenSehen |
 | POST | `/api/konten/{id}/sperren` · `/entsperren` | Konto sperren / entsperren | KontenSehen |
@@ -211,7 +211,9 @@ Grundplan (Schlüssel passen dann zu den Wochenplänen). Ohne Grundplan bzw. mit
 | DELETE | `/api/konten/{id}` | Konto löschen | Admin |
 | GET | `/api/konten/protokoll?konto=&limit=` | Kontenprotokoll (neueste zuerst) | Admin |
 | GET | `/api/konten/sammel/uebersicht` | Lehrkräfte und Klassen/Stufen mit Anzahl vorhandener Konten | Admin |
-| POST | `/api/konten/sammel` | Sammelanlage `{ art: "Lehrer"\|"Schueler", gruppen: ["05A","Q1"], nur?: [...], anlegen }` | Admin |
+| POST | `/api/konten/sammel` | Sammelanlage `{ art: "Lehrer"\|"Schueler", gruppen: ["05A","Q1"], nur?: [...], anlegen, klassenleitungEintragen? }` | Admin |
+| GET | `/api/konten/schild-vorschlaege` | 5.2c-2: Vorschläge aus SchILD (Klassenleitung laut Klassen.dat ↔ Konten) | Admin |
+| POST | `/api/konten/schild-vorschlaege` | gewählte Vorschläge übernehmen `{ schluessel: ["u\|12\|05A", "e\|7\|07B"] }` | Admin |
 
 - **KontenSehen** = Admin (alle Konten) sowie Klassenleitung/Stufenkoordination: nur die
   Schülerkonten ihrer Klasse(n) bzw. Stufe(n) (Feld `Zustaendig`, z. B. „05A“ oder „Q1“) –
@@ -814,7 +816,8 @@ Der Desktop liest die SchILD-Dateien auf dem Verwaltungsrechner und schickt nur,
 166): je Schüler HMAC-Prüfsummen (`extId` aus Nachname + Vorname + Geburtsdatum, `extIdSchild` aus der SchILD-ID, zwei
 Teil-Prüfsummen für 5.2c), Name, Jahrgang, SchILD-Status, bei Status 0 das Aufnahmedatum und die **Plan-Schlüssel** der
 Klasse und der zugeordneten Kurse/Gruppen. **Nie:** Geburtsdatum, SchILD-ID im Klartext, Noten, Kursart des Schülers,
-Lehrkräftedaten, Status 1 (Warteliste). Den Reiter „Import“ im Desktop liefert Schritt b-2b; bis dahin lässt sich der Weg
+Status 1 (Warteliste); von den Lehrkräften seit 5.2c-2 nur Klassenleitung (Kürzel) und Kürzel, Nachname, Vorname der
+Lehrkräfte des Plans. Den Reiter „Import“ im Desktop liefert Schritt b-2b; bis dahin lässt sich der Weg
 mit fertigen Testdateien prüfen. Vorschlag und Entscheidungen: `claude/5.2b_Vorschlag.md` im Claude-Projekt.
 
 | Methode | Pfad | Zweck | Auth |
@@ -822,6 +825,7 @@ mit fertigen Testdateien prüfen. Vorschlag und Entscheidungen: `claude/5.2b_Vor
 | GET | `/api/schild/status?schuljahr=..&abschnitt=..` | Betriebsart, Kalender, Grundpläne, Schülerzahlen, letzter Import, Vorschlag für „Änderungen gelten ab“ | `X-Api-Key` |
 | POST | `/api/schild/import` | Probelauf (`probelauf: true`, Standard) bzw. Import (`probelauf: false`, `vorschau`, `abgaenge`) | `X-Api-Key` |
 | POST | `/api/schild/seed-entfernen` | nur Entwicklung: alle Pseudo-Schüler samt Klassenbuchdaten entfernen (wie ein neuer Seed) | `X-Api-Key` |
+| GET | `/api/schild/protokolle?limit=` | seit 5.2c-2: Importprotokoll für die App (ohne Namen) | Admin (Anmeldung, nicht `X-Api-Key`) |
 
 - **Probelauf = Import ohne Speichern** (78): dieselbe Rechnung; die Antwort enthält Zahlen, je Schüler eine Zeile je
   Kategorie (neu · Name bzw. Geburtsdatum geändert · Klassenwechsel · Kurs-/Gruppenwechsel · Status/Jahrgang geändert ·
@@ -945,6 +949,44 @@ Entscheidungen 185–198 (`claude/5.2c_Vorschlag.md`, Claude-Projekt). API: `Ser
   `SchuelerLernplattformen.dat`; ganz ohne SchILD-ID sperrt das „#Klasse“-Paar zu Recht), „Vorname korrigiert“,
   „Nachname geändert + Klassenwechsel“, „Neuaufnahme mit demselben Namen wie ein Mitschüler“ (Namensgleiche).
 - **Datenschutz:** Bericht, Importprotokoll und Log ohne Namen; Namen nur in den Zeilen der Vorschau im Fenster.
+
+## Konten und Anzeigen aus SchILD (Phase 5.2c-2)
+
+Entscheidungen 191–197 (`claude/5.2c_Vorschlag.md` §5–§7). API: `Services/SchildImportService.cs`
+(`KlassenleitungVormerken`, `LehrkraefteVormerken`, Gruppen der Neu-Zuordnung), `Controllers/KontenController.cs`,
+`Controllers/SchildController.cs` (`protokolle`), `Services/KlassenbuchService.cs` (Gruppen „aus SchILD“); Desktop:
+`SchildNutzlast.cs`, `SchildZuordnung.cs` (`KuerzelFest`), `SchildDialog_Import.cs`, `SchildFolgestand.cs`; PWA:
+`konten.js`, `klassenbuch.js`, `app.js`, `hilfe.js`. **Keine Schemaänderung** (Spalten und Tabelle kamen mit
+`SchildAbgleich`).
+
+- **Klassenleitung (191):** Der Desktop schickt je Sek-I-Klasse des Plans `klassenleitungen: [{ klasse, kuerzel }]` laut
+  `Klassen.dat` – übersetzt über die feste Kürzeltabelle der Zuordnung (von Hand bzw. gleich, keine Vorschläge); Kürzel
+  ohne festes Gegenstück gehen nicht mit (Bericht). Die API speichert sie an der Klasse (`Lerngruppe.Klassenleitung`);
+  Klassen ohne Angabe behalten ihren Wert. Änderungen erscheinen als Hinweis („Klassenleitung 07B: L23 → L41“), die Konten
+  ändern sich nicht.
+- **Vorschläge aus SchILD (192):** PWA → Konten verwalten → Reiter „SchILD“ → „Vorschläge“: Lehrkraft-Konto einer
+  Klassenleitung → „Übernehmen“ (Rolle Klassenleitung bzw. Klasse dazu); Klassenleitungs-Konto für eine Klasse, die laut
+  SchILD jemand anderes leitet → „Zuständigkeit entfernen“ (nur einzeln – Stellvertretungen von Hand bleiben möglich);
+  Verwaltung/Stufenkoordination → nur Hinweis; ohne Konto → Verweis auf die Sammelanlage. Nichts automatisch; jede
+  Änderung im Kontenprotokoll, neuer Sicherheitsstempel. „Alle übernehmen“ nimmt nur die Vorschläge „Übernehmen“.
+  Konten ohne Kürzel bleiben unberührt. Sammelanlage Lehrkräfte: Häkchen „Klassenleitung laut SchILD gleich eintragen“.
+- **Namen der Lehrkräfte (193/194):** `lehrkraefte: [{ kuerzel, nachname, vorname }]` nur für Kürzel des Plans (der
+  Desktop filtert, die API noch einmal über den Grundplan); mit `Lehrkraefte.dat` wird die Liste dieser Art ganz ersetzt
+  (Tabelle `Lehrkraefte`), ohne Datei bleibt sie. Sichtbar nur für den Admin (Konten: Liste, Suche, Detail, Sammelanlage)
+  und die Lehrkraft selbst (Kontomenü „L23 · Anna Schulz“, Feld `name` der Anmeldung). Schüler sehen weiter nur Kürzel.
+- **Gruppeneditor (195):** `KbGruppeDto`/`KbGruppeKurzDto` + `ausSchild`, `schildAb`; Text „Diese Liste kommt seit …
+  aus SchILD …“, Marke „aus SchILD“ in „Gruppenlisten“/„Meine Gruppen“.
+- **SchILD-Importe (196):** `GET /api/schild/protokolle?limit=` – nur Admin mit Anmeldung (JWT, nicht über den
+  X-Api-Key), ohne Namen; PWA → Reiter „SchILD“ → „SchILD-Importe“.
+- **Konten-Hinweise (197):** Filter `wiederaktiv` (Schülerkonto gesperrt, laut SchILD aktiv – z. B. Wiedereintritt) und
+  `namegeaendert` (Benutzername nach dem Muster `vorname.nachname` passt nicht mehr zum Namen laut SchILD); im Detail
+  „Umbenennen in …“ (Admin, über `PUT /api/konten/{id}`, das Passwort bleibt) und „Gesperrt durch“.
+- **Neu-Zuordnung, Namensgleiche:** Zeilen einer Gruppe stehen untereinander (`gruppe`); je Gruppe ein Vorschlag
+  (`vorschlag`: passender Eintritt, dann die meisten gemeinsamen Kurse, dann gleiche Klasse – nur, wenn eindeutig).
+  Desktop: Knopf „Vorschlag übernehmen…“ setzt die Häkchen, danach „Vorschau berechnen“.
+- **Folgestand** (Standard aus): „Klassenleitung wechselt“ (eine Klasse in `Klassen.dat`, möglichst zu „L2“) und
+  „Lehrkraft heißt anders“ (ein Nachname in `Lehrkraefte.dat`, möglichst „L1“).
+- **`seed-konten`** setzt Rolle, Kürzel und Zuständigkeit der Standard-Testkonten wieder auf den Standard (Passwort bleibt).
 
 ## Vertretungen aus Untis (U-1b und U-2, Desktop)
 
@@ -1224,5 +1266,5 @@ Entscheidungen 158–162 (`claude/Projektstand_und_Fahrplan.md` §6).
    App-Adresse einschränken, Login-Bremse hinter dem Reverse-Proxy je echter Adresse.~~ Phase 5.1.
 5. **Phase 5.2:** SchILD-NRW-3-Schnittstelle (`.dat`-Dateien) – Import per Desktop statt Pseudodaten-Seed
    (5.2a Prüflauf und Zuordnung, 5.2b-1 Gültigkeit, 5.2b-2a Import in der API, 5.2b-2b-1 Reiter „Import“ im Desktop,
-   5.2b-2b-2 „Folgestand erzeugen“, **5.2c-1 „dieselbe Person?“ und Neu-Zuordnung**; als Nächstes 5.2c-2 Konten und
-   Anzeigen).
+   5.2b-2b-2 „Folgestand erzeugen“, 5.2c-1 „dieselbe Person?“ und Neu-Zuordnung, **5.2c-2 Konten und Anzeigen**; als
+   Nächstes E-1 Schuleinstellungen in der App und 5.3 Halbjahres-/Schuljahreswechsel).

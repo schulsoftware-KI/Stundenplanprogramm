@@ -25,8 +25,13 @@ namespace Stundenplan_V2.Vertretung
 
         public SchildVorschauZeileDto D { get; }
 
-        /// <summary>Abgang laut SchILD bzw. fehlt im Export – nur diese lassen sich bestätigen (80).</summary>
-        public bool Bestaetigbar => D.Id != null && (D.Kategorie == SchildDialog.KatAbgang || D.Kategorie == SchildDialog.KatFehlt);
+        /// <summary>Abgang laut SchILD bzw. fehlt im Export (80) und – seit 5.2c-1 – Paare lassen sich bestätigen.</summary>
+        public bool Bestaetigbar => D.Id != null && (D.Kategorie == SchildDialog.KatAbgang || D.Kategorie == SchildDialog.KatFehlt
+                                                     || IstPaar);
+
+        /// <summary>5.2c-1: Paar „dieselbe Person?“ bzw. der Neu-Zuordnung (Häkchen = zusammenführen bzw. zuordnen).</summary>
+        public bool IstPaar => D.Id != null && !string.IsNullOrEmpty(D.PartnerExtId)
+                               && (D.Kategorie == SchildDialog.KatPaar || D.Kategorie == SchildDialog.KatZuordnung);
         public Visibility BestaetigenSichtbar => Bestaetigbar ? Visibility.Visible : Visibility.Collapsed;
 
         public bool Bestaetigt
@@ -49,6 +54,7 @@ namespace Stundenplan_V2.Vertretung
         public string HinweisText => string.Join(" · ", new[]
         {
             D.KontoWirdGesperrt ? "Konto wird bei Bestätigung gesperrt" : null,
+            IstPaar && D.Vorausgewaehlt ? "vorausgewählt" : null,
             D.Hinweis
         }.Where(x => !string.IsNullOrEmpty(x)));
 
@@ -69,8 +75,13 @@ namespace Stundenplan_V2.Vertretung
     {
         internal const string KatAbgang = "abgangLautSchild";
         internal const string KatFehlt = "fehltImExport";
+        internal const string KatPaar = "dieselbePerson";        // 5.2c-1
+        internal const string KatZuordnung = "zuordnung";        // 5.2c-1 (Neu-Zuordnung)
         private static readonly string[] KatReihenfolge =
-            { KatAbgang, KatFehlt, "neu", "nameGeaendert", "klassenwechsel", "kurswechsel", "statusGeaendert" };
+        {
+            KatAbgang, KatFehlt, KatPaar, KatZuordnung, "neu", "zusammengefuehrt", "nameGeaendert", "klassenwechsel",
+            "kurswechsel", "statusGeaendert"
+        };
 
         private SchildStatusAntwort? _imStatus;
         private SchildSchluessel? _imSchluessel;
@@ -84,6 +95,10 @@ namespace Stundenplan_V2.Vertretung
         private string? _imLokaleSperre;             // Grund, aus dem der Desktop nichts sendet
         private int? _imAusgefuehrt;                 // Protokoll-Nr. des gerade ausgeführten Imports
         private bool _imDatumSetzen, _imDatumVonHand, _imAnsichtSetzen;
+        // 5.2c-1: Paare geändert (neue Vorschau nötig), Neu-Zuordnung (Schlüssel verloren) mit eigenem Schlüssel
+        private bool _imPaareGeaendert;
+        private bool _imNeuzuordnung;
+        private SchildSchluessel? _imNeuSchluessel;
 
         private sealed class ImAnsicht
         {
@@ -124,6 +139,15 @@ namespace Stundenplan_V2.Vertretung
             "löscht sie samt Klassenbuchdaten.\n\n" +
             "„Bericht kopieren“ enthält nur Zahlen, Kurs- und Gruppenbezeichnungen – keine Namen. Die Namen der Vorschau bleiben " +
             "in diesem Fenster.\n\n" +
+            "„Dieselbe Person?“: Ein Schüler im Export ohne Treffer und ein Schüler der Datenbank, der im Export fehlt, bilden " +
+            "ein Paar, wenn Vorname + Geburtsdatum oder Nachname + Geburtsdatum gleich sind (Namensänderung, korrigierter " +
+            "Vorname) oder der Name in derselben Klasse gleich ist (korrigiertes Geburtsdatum). Vorausgewählt sind nur sichere " +
+            "Paare. Häkchen = zusammenführen: Der bisherige Datensatz bekommt Name und Prüfsummen aus dem Export, Konto und " +
+            "Klassenbuchdaten bleiben. Nach einer Änderung der Häkchen rechnet „Vorschau berechnen“ neu. Mit SchILD-ID " +
+            "(SchuelerLernplattformen.dat) erkennt der Import Namensänderungen ohne Paare.\n\n" +
+            "Schlüssel verloren: Nur wenn es keine Sicherung gibt, „Schlüssel verloren – neu zuordnen…“. Dann ordnet die API die " +
+            "bisherigen Schüler über Name + Klasse zu (eindeutige vorausgewählt, Namensgleiche und andere Klassen nur von Hand) " +
+            "und gibt ihnen die Prüfsummen des neuen Schlüssels. Danach sofort „Schlüssel sichern…“.\n\n" +
             "Testen mit Pseudodaten: Nach dem Import eines Pseudo-Exports macht „Folgestand erzeugen…“ (unten) daraus einen " +
             "neuen Ordner mit typischen Änderungen bis zum nächsten Export. Dann wie bei einem neuen Export: Prüflauf, Vorschau, " +
             "Abgänge bestätigen, Importieren. Das Fenster nennt die Zahlen, die die Vorschau zeigen sollte.";
@@ -137,6 +161,9 @@ namespace Stundenplan_V2.Vertretung
             "klassenwechsel" => "Klassenwechsel",
             "kurswechsel" => "Kurs-/Gruppenwechsel",
             "statusGeaendert" => "Status/Jahrgang geändert",
+            KatPaar => "dieselbe Person?",
+            KatZuordnung => "Neu-Zuordnung",
+            "zusammengefuehrt" => "zusammengeführt",
             _ => kategorie
         };
 
@@ -208,11 +235,19 @@ namespace Stundenplan_V2.Vertretung
                 ImBand("Import gesperrt:\n• " + string.Join("\n• ", _imVorschau.Sperren.Select(s => s.Text)), FarbeRot);
                 TxtImportKopf.Text = "Import (gesperrt)";
             }
+            else if (_imVorschau != null && _imPaareGeaendert)
+            {
+                ImBand("Häkchen bei „" + (_imNeuzuordnung ? "Neu-Zuordnung" : "dieselbe Person?") + "“ geändert – die Wahl " +
+                       "ändert Wechsel und Zahlen. Bitte „Vorschau berechnen“ (die Häkchen bleiben), erst danach „Importieren…“.",
+                       FarbeGelb);
+                TxtImportKopf.Text = "Import (Vorschau neu berechnen)";
+            }
             else if (_imVorschau != null)
             {
-                ImBand("Vorschau bereit – nichts ist gespeichert. Zeilen prüfen, Abgänge bestätigen, dann „Importieren…“.",
-                       FarbeGelb);
-                TxtImportKopf.Text = "Import (Vorschau)";
+                ImBand((_imNeuzuordnung ? "NEU-ZUORDNUNG über Name + Klasse (Schlüssel verloren). " : "") +
+                       "Vorschau bereit – nichts ist gespeichert. Zeilen prüfen, Abgänge bestätigen" +
+                       (_imZeilen.Any(x => x.IstPaar) ? ", Paare prüfen" : "") + ", dann „Importieren…“.", FarbeGelb);
+                TxtImportKopf.Text = _imNeuzuordnung ? "Import (Neu-Zuordnung)" : "Import (Vorschau)";
             }
             else
             {
@@ -233,7 +268,8 @@ namespace Stundenplan_V2.Vertretung
 
             BtnImVorschau.IsEnabled = an && vor == null;
             BtnImImportieren.IsEnabled = an && vor == null && _imLokaleSperre == null && _imAusgefuehrt == null
-                                         && _imVorschau != null && !_imVorschau.Gesperrt && _imNutzlast != null;
+                                         && _imVorschau != null && !_imVorschau.Gesperrt && _imNutzlast != null
+                                         && !_imPaareGeaendert;
             BtnImBericht.IsEnabled = an && _imBericht != null;
             BtnImStatus.IsEnabled = an;
             BtnImEinstellungen.IsEnabled = an;
@@ -248,6 +284,15 @@ namespace Stundenplan_V2.Vertretung
             bool bestaetigbar = DgImport.ItemsSource is IEnumerable<SchildImportZeile> sichtbar && sichtbar.Any(x => x.Bestaetigbar);
             BtnImAlle.IsEnabled = an && _imAusgefuehrt == null && bestaetigbar;
             BtnImKeine.IsEnabled = an && _imAusgefuehrt == null && bestaetigbar;
+            // 5.2c-1: „Schlüssel verloren – neu zuordnen…“ nur, wenn importierte Schüler da sind und der Schlüssel fehlt, nicht
+            // lesbar ist oder nicht zum letzten Import passt – bzw. während einer Neu-Zuordnung („… abbrechen“).
+            if (_export != null && !_imNeuzuordnung) ImSchluesselLaden(_export.IstPseudo);
+            bool neuMoeglich = st != null && _export != null && st.Pseudo == _export.IstPseudo && st.Schueler.Importiert > 0
+                               && (_imSchluessel == null || _imSchluessel.Neu
+                                   || (st.KennungLetzterImport != null && _imSchluessel.Kennung != st.KennungLetzterImport));
+            BtnImNeu.Visibility = _imNeuzuordnung || neuMoeglich ? Visibility.Visible : Visibility.Collapsed;
+            BtnImNeu.Content = _imNeuzuordnung ? "Neu-Zuordnung abbrechen" : "Schlüssel verloren – neu zuordnen…";
+            BtnImNeu.IsEnabled = an && (_imNeuzuordnung || vor == null);
             ImZeigeSchluessel();
             ImZeigeAuswahl();
             FolgeAnzeigen();   // 5.2b-2b-2: „Folgestand erzeugen…“ (gleiche Anlässe: Prüflauf, Zuordnung, laufender Vorgang)
@@ -275,12 +320,48 @@ namespace Stundenplan_V2.Vertretung
 
         private void ImZeigeAuswahl()
         {
-            int kandidaten = _imZeilen.Count(x => x.Bestaetigbar);
-            if (kandidaten == 0 || _imAusgefuehrt != null) { TxtImAuswahl.Text = ""; return; }
-            var gewaehlt = _imZeilen.Where(x => x.Bestaetigt).ToList();
+            int kandidaten = _imZeilen.Count(x => x.Bestaetigbar && !x.IstPaar);
+            int paare = _imZeilen.Count(x => x.IstPaar);
+            if (kandidaten + paare == 0 || _imAusgefuehrt != null) { TxtImAuswahl.Text = ""; return; }
+            var gewaehlt = _imZeilen.Where(x => x.Bestaetigt && !x.IstPaar).ToList();
             int konten = gewaehlt.Count(x => x.D.KontoWirdGesperrt);
-            TxtImAuswahl.Text = $"Abgänge bestätigt: {gewaehlt.Count} von {kandidaten} (Schülerkonten, die gesperrt werden: {konten}). " +
-                                "Nicht bestätigte bleiben unverändert in ihren Klassen und Kursen.";
+            var t = new StringBuilder();
+            if (kandidaten > 0)
+                t.Append($"Abgänge bestätigt: {gewaehlt.Count} von {kandidaten} (Schülerkonten, die gesperrt werden: {konten}). " +
+                         "Nicht bestätigte bleiben unverändert in ihren Klassen und Kursen.");
+            if (paare > 0)
+                t.Append((t.Length > 0 ? " " : "") +
+                         $"Paare ({(_imNeuzuordnung ? "zuordnen" : "zusammenführen")}): {_imZeilen.Count(x => x.IstPaar && x.Bestaetigt)} " +
+                         $"von {paare} angehakt" + (_imPaareGeaendert ? " – geändert, bitte „Vorschau berechnen“." : "."));
+            TxtImAuswahl.Text = t.ToString();
+        }
+
+        /// <summary>5.2c-1: ein Häkchen bei einem Paar wurde geändert – die Vorschau muss neu berechnet werden.</summary>
+        private void ImPaarGeaendert()
+        {
+            _imPaareGeaendert = true;
+            ImAnzeigen();
+        }
+
+        /// <summary>5.2c-1: gewählte Paare der aktuellen Vorschau (null = keine Paare in der Vorschau → Vorauswahl der API).</summary>
+        private List<SchildPaar>? ImPaarWahl()
+        {
+            if (_imVorschau == null || !_imZeilen.Any(x => x.IstPaar)) return null;
+            return _imZeilen.Where(x => x.IstPaar && x.Bestaetigt)
+                            .Select(x => new SchildPaar { Id = x.D.Id!.Value, ExtId = x.D.PartnerExtId! }).ToList();
+        }
+
+        /// <summary>5.2c-1: Neu-Zuordnung beenden (neuen, nicht gespeicherten Schlüssel im Speicher löschen).</summary>
+        private void ImNeuzuordnungBeenden()
+        {
+            if (_imNeuSchluessel != null && _imNeuSchluessel.Neu)
+            {
+                if (ReferenceEquals(_imSchluessel, _imNeuSchluessel)) _imSchluessel = null;
+                _imNeuSchluessel.Vergessen();
+            }
+            _imNeuSchluessel = null;
+            _imNeuzuordnung = false;
+            _imSchluesselArt = null;
         }
 
         private void ImZeigeStatus(SchildStatusAntwort st, string adresse)
@@ -297,6 +378,7 @@ namespace Stundenplan_V2.Vertretung
                 t.Append($" · letzter Import: Nr. {li.Id} vom {zeit:dd.MM.yyyy HH:mm}, gilt ab {Dat(li.GiltAb)}");
             }
             else t.Append(" · noch kein Import");
+            if (st.KennungLetzterImport != null) t.Append($" · Schlüssel beim letzten Import: Kennung {st.KennungLetzterImport}");
             TxtImServer.Text = t.ToString();
         }
 
@@ -342,6 +424,7 @@ namespace Stundenplan_V2.Vertretung
             _imBericht = null;
             _imLokaleSperre = null;
             _imAusgefuehrt = null;
+            _imPaareGeaendert = false;
             if (TxtImBericht != null) TxtImBericht.Text = (grund != null ? grund + "\n\n" : "") + ImportHilfe;
             ImAnzeigen();
         }
@@ -350,6 +433,7 @@ namespace Stundenplan_V2.Vertretung
         private void ImNeuerExport()
         {
             _imDatumVonHand = false;
+            ImNeuzuordnungBeenden();   // 5.2c-1: eine Neu-Zuordnung gilt nur für den Export, mit dem sie begonnen wurde
             _imSchluesselArt = null;
         }
 
@@ -383,7 +467,8 @@ namespace Stundenplan_V2.Vertretung
         private void ImSchluesselLaden(bool pseudo, bool erzwingen = false)
         {
             if (!erzwingen && _imSchluesselArt == pseudo) return;
-            _imSchluessel?.Vergessen();
+            // 5.2c-1: der (noch nicht gespeicherte) Schlüssel einer Neu-Zuordnung bleibt im Speicher.
+            if (!ReferenceEquals(_imSchluessel, _imNeuSchluessel)) _imSchluessel?.Vergessen();
             _imSchluessel = null;
             _imSchluesselFehler = null;
             _imSchluesselArt = pseudo;
@@ -524,11 +609,14 @@ namespace Stundenplan_V2.Vertretung
             }
             var client = ImClient();
             if (client == null) return;
+            // 5.2c-1: Häkchen der Paare und Bestätigungen der Abgänge aus der bisherigen Vorschau mitnehmen.
+            var paare = ImPaarWahl();
+            var behalten = ImBestaetigungen();
             ImStart("Frage den Status der API ab …");
             string? sperre = null;
             try
             {
-                sperre = await ImVorschauAsync(client);
+                sperre = await ImVorschauAsync(client, paare, behalten);
             }
             catch (SchildServerFehler ex)
             {
@@ -543,8 +631,21 @@ namespace Stundenplan_V2.Vertretung
             if (sperre != null) ImSperre(sperre);
         }
 
+        /// <summary>Bestätigungen der Abgänge (Kategorie|Id → an/aus) der aktuellen Vorschau – ohne Paare.</summary>
+        private Dictionary<string, bool>? ImBestaetigungen()
+        {
+            if (_imVorschau == null) return null;
+            var d = new Dictionary<string, bool>(StringComparer.Ordinal);
+            foreach (var zeile in _imZeilen.Where(x => x.Bestaetigbar && !x.IstPaar && x.D.Id != null))
+                d[$"{zeile.D.Kategorie}|{zeile.D.Id}"] = zeile.Bestaetigt;
+            return d;
+        }
+
+        /// <param name="paare">gewählte Paare (null = Vorauswahl der API)</param>
+        /// <param name="behalten">Bestätigungen der Abgänge aus der bisherigen Vorschau</param>
         /// <returns>null = Vorschau angezeigt (auch mit Sperren der API); sonst der Grund, aus dem der Desktop nichts sendet.</returns>
-        private async Task<string?> ImVorschauAsync(SchildImportClient client)
+        private async Task<string?> ImVorschauAsync(SchildImportClient client, List<SchildPaar>? paare = null,
+            Dictionary<string, bool>? behalten = null)
         {
             var ex = _export!;
             var erg = _ergebnis!;
@@ -579,34 +680,63 @@ namespace Stundenplan_V2.Vertretung
             DateOnly giltAb = ImGiltAbSetzen(st);
 
             // 4. Schlüssel (170): vorhandenen nehmen; neu nur, wenn noch niemand importiert ist.
-            ImSchluesselLaden(pseudo, erzwingen: true);
+            //    5.2c-1: bei der Neu-Zuordnung der Schlüssel aus „Schlüssel verloren – neu zuordnen…“.
             string art = SchildSchluessel.ArtText(pseudo);
-            if (_imSchluessel == null && SchildSchluessel.Vorhanden(pseudo))
-                return _imSchluesselFehler ?? "Die Schlüsseldatei ist nicht lesbar.";
-            if (_imSchluessel == null && st.Schueler.Importiert > 0)
-                return $"Für diesen Windows-Benutzer gibt es auf diesem Rechner keinen Schlüssel ({art}), in der Datenbank " +
-                       $"stehen aber schon {st.Schueler.Importiert} importierte Schüler. Ohne den bisherigen Schlüssel erkennt " +
-                       "der Import sie nicht wieder (alle wären „neu“). Abhilfe: „Schlüssel einlesen…“ mit der Sicherung vom " +
-                       "bisherigen Rechner bzw. Benutzer." +
-                       (st.Pseudo ? " In der Entwicklung geht auch „Seed-Schüler entfernen…“ – das entfernt auch die früher " +
-                                    "importierten Pseudo-Schüler." : "");
-            var schluessel = _imSchluessel ?? SchildSchluessel.Erzeugen(pseudo);
-            _imSchluessel = schluessel;
+            SchildSchluessel schluessel;
+            if (_imNeuzuordnung)
+            {
+                if (_imNeuSchluessel == null || _imNeuSchluessel.Pseudo != pseudo)
+                    return "Die Neu-Zuordnung hat keinen Schlüssel (mehr) – bitte „Schlüssel verloren – neu zuordnen…“ noch einmal.";
+                if (st.Schueler.Importiert == 0)
+                    return "In der Datenbank stehen keine importierten Schüler – eine Neu-Zuordnung ist nicht nötig " +
+                           "(„Neu-Zuordnung abbrechen“, dann normal „Vorschau berechnen“).";
+                schluessel = _imNeuSchluessel;
+                _imSchluessel = schluessel;
+            }
+            else
+            {
+                ImSchluesselLaden(pseudo, erzwingen: true);
+                string neuZu = " Gibt es keine Sicherung mehr: „Schlüssel verloren – neu zuordnen…“ (ordnet die Schüler über Name + " +
+                               "Klasse neu zu).";
+                if (_imSchluessel == null && SchildSchluessel.Vorhanden(pseudo))
+                    return (_imSchluesselFehler ?? "Die Schlüsseldatei ist nicht lesbar.") +
+                           (st.Schueler.Importiert > 0 ? neuZu : "");
+                if (_imSchluessel == null && st.Schueler.Importiert > 0)
+                    return $"Für diesen Windows-Benutzer gibt es auf diesem Rechner keinen Schlüssel ({art}), in der Datenbank " +
+                           $"stehen aber schon {st.Schueler.Importiert} importierte Schüler. Ohne den bisherigen Schlüssel erkennt " +
+                           "der Import sie nicht wieder (alle wären „neu“). Abhilfe: „Schlüssel einlesen…“ mit der Sicherung vom " +
+                           "bisherigen Rechner bzw. Benutzer." + neuZu +
+                           (st.Pseudo ? " In der Entwicklung geht auch „Seed-Schüler entfernen…“ – das entfernt auch die früher " +
+                                        "importierten Pseudo-Schüler." : "");
+                // 5.2c-1 (189): ein anderer Schlüssel als beim letzten Import würde niemanden wiedererkennen.
+                if (_imSchluessel != null && st.Schueler.Importiert > 0 && st.KennungLetzterImport != null
+                    && !string.Equals(_imSchluessel.Kennung, st.KennungLetzterImport, StringComparison.OrdinalIgnoreCase))
+                    return $"Der Schlüssel dieses Rechners ({art}, Kennung {_imSchluessel.Kennung}) ist ein anderer als beim " +
+                           $"letzten Import (Kennung {st.KennungLetzterImport}). Mit diesem Schlüssel würde der Import die " +
+                           $"{st.Schueler.Importiert} Schüler nicht wiedererkennen. Abhilfe: „Schlüssel einlesen…“ mit der Sicherung " +
+                           $"des Schlüssels {st.KennungLetzterImport}." + neuZu;
+                schluessel = _imSchluessel ?? SchildSchluessel.Erzeugen(pseudo);
+                _imSchluessel = schluessel;
+            }
 
             // 5. Nutzlast
             TxtStatus.Text = "Bilde die Prüfsummen …";
             var bau = SchildNutzlast.Baue(ex, erg, plan, schluessel, ImSchuljahr(), giltAb);
             if (bau.Nutzlast == null) return string.Join("\n", bau.Sperren);
+            bau.Nutzlast.Neuzuordnung = _imNeuzuordnung;
+            bau.Nutzlast.Paare = paare;
 
             // 6. Probelauf
             TxtStatus.Text = $"Schicke {bau.Schueler} Schüler als Probelauf …";
             var v = await client.VorschauAsync(bau.Nutzlast);
             _imBau = bau;
             _imNutzlast = bau.Nutzlast;
-            ImZeigeVorschau(v, null);
+            ImZeigeVorschau(v, behalten);
             _log?.Invoke($"SchILD-Import: Vorschau ({art}, Abschnitt {erg.Abschnitt}, gilt ab {Dat(giltAb)}) – {v.Zahlen.ImExport} " +
                          $"Schüler, neu {v.Zahlen.Neu}, Klassenwechsel {v.Zahlen.Klassenwechsel}, Kurswechsel {v.Zahlen.Kurswechsel}, " +
-                         $"Abgang laut SchILD {v.Zahlen.AbgangLautSchild}, fehlt {v.Zahlen.FehltImExport}" +
+                         $"Abgang laut SchILD {v.Zahlen.AbgangLautSchild}, fehlt {v.Zahlen.FehltImExport}, " +
+                         $"Paare {v.Zahlen.DieselbePerson + v.Zahlen.ZuordnungPaare} (angewendet " +
+                         $"{v.Zahlen.Zusammengefuehrt + v.Zahlen.NeuZugeordnet})" + (_imNeuzuordnung ? ", Neu-Zuordnung" : "") +
                          (v.Gesperrt ? $", gesperrt ({string.Join(", ", v.Sperren.Select(s => s.Art))})" : "") + ".");
             return null;
         }
@@ -619,11 +749,17 @@ namespace Stundenplan_V2.Vertretung
             _imVorschau = v;
             _imAusgefuehrt = null;
             _imLokaleSperre = null;
+            _imPaareGeaendert = false;
             foreach (var d in v.Schueler)
             {
-                bool an = d.Vorausgewaehlt;
-                if (behalten != null && d.Id is int id && behalten.TryGetValue($"{d.Kategorie}|{id}", out bool b)) an = b;
-                _imZeilen.Add(new SchildImportZeile(d, an) { Geaendert = ImZeigeAuswahl });
+                var zeile = new SchildImportZeile(d, false);
+                // Paare (5.2c-1): Häkchen = in dieser Vorschau angewendet; Abgänge: Vorauswahl bzw. bisherige Bestätigung.
+                bool an = zeile.IstPaar ? d.Gewaehlt : d.Vorausgewaehlt;
+                if (!zeile.IstPaar && behalten != null && d.Id is int id && behalten.TryGetValue($"{d.Kategorie}|{id}", out bool b))
+                    an = b;
+                zeile = new SchildImportZeile(d, an);
+                zeile.Geaendert = zeile.IstPaar ? ImPaarGeaendert : ImZeigeAuswahl;
+                _imZeilen.Add(zeile);
             }
 
             _imAnsichtSetzen = true;
@@ -656,6 +792,12 @@ namespace Stundenplan_V2.Vertretung
                     else if (s.Art == "UnbekannteSchluessel")
                         text.Append("\n• Plan-Schlüssel unbekannt: Im Wocheneditor die richtige Plan-Spalte wählen bzw. den Grundplan " +
                                     "veröffentlichen, dann Prüflauf und Vorschau wiederholen.");
+                    else if (s.Art == "Schluessel")
+                        text.Append("\n• Anderer Schlüssel: „Schlüssel einlesen…“ mit der Sicherung des bisherigen Schlüssels. Nur wenn " +
+                                    "es keine Sicherung gibt: „Schlüssel verloren – neu zuordnen…“.");
+                    else if (s.Art == "Neuzuordnung")
+                        text.Append("\n• Neu-Zuordnung nicht möglich bzw. nicht nötig: „Neu-Zuordnung abbrechen“, dann normal " +
+                                    "„Vorschau berechnen“.");
                 }
             }
             TxtImBericht.Text = text.ToString();
@@ -683,7 +825,8 @@ namespace Stundenplan_V2.Vertretung
             }
             if (_imSchluessel != null)
                 b.Append($"  Schlüssel ({SchildSchluessel.ArtText(_imSchluessel.Pseudo)}): Kennung {_imSchluessel.Kennung}" +
-                         (_imSchluessel.Neu ? " – neu, wird beim Import gespeichert" : "") + "\n");
+                         (_imSchluessel.Neu ? " – neu, wird beim Import gespeichert" : "") +
+                         (_imNeuzuordnung ? " – NEU-ZUORDNUNG über Name + Klasse" : "") + "\n");
             return b.ToString().TrimEnd();
         }
 
@@ -697,6 +840,12 @@ namespace Stundenplan_V2.Vertretung
             var nutzlast = _imNutzlast;
             var schluessel = _imSchluessel;
             if (_laeuft || v == null || nutzlast == null || schluessel == null || v.Gesperrt || _imAusgefuehrt != null) return;
+            if (_imPaareGeaendert)
+            {
+                MessageBox.Show(this, "Die Häkchen bei den Paaren wurden geändert – bitte zuerst „Vorschau berechnen“.",
+                    "SchILD-Import", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
             string? vor = ImVoraussetzung();
             if (vor != null)
             {
@@ -713,8 +862,13 @@ namespace Stundenplan_V2.Vertretung
             var client = ImClient();
             if (client == null) return;
 
-            var bestaetigt = _imZeilen.Where(x => x.Bestaetigt && x.D.Id != null).ToList();
-            int kandidaten = _imZeilen.Count(x => x.Bestaetigbar);
+            var bestaetigt = _imZeilen.Where(x => x.Bestaetigt && x.D.Id != null && !x.IstPaar).ToList();
+            int kandidaten = _imZeilen.Count(x => x.Bestaetigbar && !x.IstPaar);
+            // 5.2c-1: genau die Paare, die die Vorschau angewendet hat (die Häkchen sind seitdem unverändert).
+            var paare = v.Schueler.Where(d => d.Id != null && !string.IsNullOrEmpty(d.PartnerExtId) && d.Gewaehlt
+                                              && (d.Kategorie == KatPaar || d.Kategorie == KatZuordnung))
+                                  .Select(d => new SchildPaar { Id = d.Id!.Value, ExtId = d.PartnerExtId! }).ToList();
+            bool neuzuordnung = nutzlast.Neuzuordnung;
             int konten = bestaetigt.Count(x => x.D.KontoWirdGesperrt);
             var zz = v.Zahlen;
             bool pseudo = nutzlast.Pseudo;
@@ -726,6 +880,9 @@ namespace Stundenplan_V2.Vertretung
                 $"\nneu: {zz.Neu} · Name/Geburtsdatum geändert: {zz.NameGeaendert} · Klassenwechsel: {zz.Klassenwechsel} · " +
                 $"Kurs-/Gruppenwechsel: {zz.Kurswechsel} · Status/Jahrgang: {zz.StatusGeaendert}\n" +
                 $"Abgänge bestätigt: {bestaetigt.Count} von {kandidaten} (Schülerkonten, die gesperrt werden: {konten})\n" +
+                (zz.DieselbePerson > 0 ? $"„Dieselbe Person?“: {zz.Zusammengefuehrt} von {zz.DieselbePerson} Paaren werden zusammengeführt\n" : "") +
+                (neuzuordnung ? $"NEU-ZUORDNUNG: {zz.NeuZugeordnet} Schüler über Name + Klasse zugeordnet (mögliche Paare: " +
+                                $"{zz.ZuordnungPaare}) – sie bekommen die Prüfsummen des neuen Schlüssels\n" : "") +
                 $"neue Lerngruppen: {zz.NeueLerngruppen} · Kurse/Gruppen ab jetzt aus SchILD: {zz.GruppenAusSchild}\n" +
                 (schluessel.Neu
                     ? $"\nDer Schlüssel ({art}, Kennung {schluessel.Kennung}) wird jetzt für diesen Windows-Benutzer gespeichert" +
@@ -736,10 +893,18 @@ namespace Stundenplan_V2.Vertretung
             if (MessageBox.Show(this, frage, "SchILD-Import", MessageBoxButton.YesNo,
                     pseudo ? MessageBoxImage.Question : MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
                 return;
+            // 5.2c-1 (Frage E): Neu-Zuordnung mit echten Daten – zweite Rückfrage.
+            if (neuzuordnung && !pseudo &&
+                MessageBox.Show(this, "Wirklich neu zuordnen? Wurde die Sicherung des bisherigen Schlüssels gesucht (USB-Stick, Tresor, " +
+                                      "zweiter Rechner)? Mit der Sicherung („Schlüssel einlesen…“) ist keine Neu-Zuordnung nötig.\n\n" +
+                                      "Die Neu-Zuordnung wird im Importprotokoll vermerkt.",
+                    "SchILD-Import – Neu-Zuordnung", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No)
+                != MessageBoxResult.Yes)
+                return;
 
             bool schluesselNeu = schluessel.Neu;
             var behalten = new Dictionary<string, bool>(StringComparer.Ordinal);
-            foreach (var zeile in _imZeilen.Where(x => x.Bestaetigbar && x.D.Id != null))
+            foreach (var zeile in _imZeilen.Where(x => x.Bestaetigbar && !x.IstPaar && x.D.Id != null))
                 behalten[$"{zeile.D.Kategorie}|{zeile.D.Id}"] = zeile.Bestaetigt;
             SchildImportErgebnisDto? fertig = null;
             ImStart("Importiere …");
@@ -747,7 +912,16 @@ namespace Stundenplan_V2.Vertretung
             {
                 if (schluesselNeu)
                 {
-                    try { schluessel.Speichern(); }
+                    try
+                    {
+                        // 5.2c-1: eine nicht lesbare alte Schlüsseldatei wird bei der Neu-Zuordnung beiseitegelegt (umbenannt).
+                        if (neuzuordnung && SchildSchluessel.Vorhanden(pseudo))
+                        {
+                            string? alt = SchildSchluessel.Beiseite(pseudo);
+                            _log?.Invoke($"SchILD: alte Schlüsseldatei ({art}) beiseitegelegt: {alt}");
+                        }
+                        schluessel.Speichern();
+                    }
                     catch (Exception fx)
                     {
                         MessageBox.Show(this, "Der Schlüssel konnte nicht gespeichert werden – es wurde nichts importiert.\n\n" +
@@ -758,7 +932,7 @@ namespace Stundenplan_V2.Vertretung
                 }
 
                 var ausgang = await client.ImportierenAsync(
-                    nutzlast.AlsImport(v.Vorschau, bestaetigt.Select(x => x.D.Id!.Value).ToList(), Environment.UserName));
+                    nutzlast.AlsImport(v.Vorschau, bestaetigt.Select(x => x.D.Id!.Value).ToList(), Environment.UserName, paare));
                 if (ausgang.Ergebnis is SchildImportErgebnisDto ergebnis)
                 {
                     fertig = ergebnis;
@@ -772,13 +946,20 @@ namespace Stundenplan_V2.Vertretung
                     _imVorschau = null;
                     _imNutzlast = null;
                     _imAusgefuehrt = ergebnis.ProtokollId;
+                    if (neuzuordnung)
+                    {
+                        // Der neue Schlüssel ist gespeichert – ab jetzt gilt er; die Neu-Zuordnung ist beendet.
+                        _imNeuSchluessel = null;
+                        _imNeuzuordnung = false;
+                    }
                     _imBericht = ImBerichtText(ergebnis.Bericht);
                     TxtImBericht.Text = _imBericht;
                     var ez = ergebnis.Zahlen;
                     _log?.Invoke($"SchILD-Import ausgeführt (Protokoll Nr. {ergebnis.ProtokollId}, {art}, gilt ab " +
                                  $"{Dat(ergebnis.GiltAb)}): neu {ez.Neu}, Name geändert {ez.NameGeaendert}, Klassenwechsel " +
                                  $"{ez.Klassenwechsel}, Kurswechsel {ez.Kurswechsel}, Abgänge bestätigt {ergebnis.AbgaengeBestaetigt}, " +
-                                 $"übersprungen {ergebnis.Uebersprungen}.");
+                                 $"übersprungen {ergebnis.Uebersprungen}, zusammengeführt {ez.Zusammengefuehrt}" +
+                                 (neuzuordnung ? $", Neu-Zuordnung {ez.NeuZugeordnet} (Schlüssel {schluessel.Kennung})" : "") + ".");
                     try
                     {
                         var st = await client.StatusAsync(ImSchuljahr(), nutzlast.Abschnitt);
@@ -813,14 +994,91 @@ namespace Stundenplan_V2.Vertretung
             if (fertig == null) return;
             MessageBox.Show(this, $"Import ausgeführt (Protokoll Nr. {fertig.ProtokollId}).\n\nneu: {fertig.Zahlen.Neu} · " +
                                   $"Klassenwechsel: {fertig.Zahlen.Klassenwechsel} · Kurs-/Gruppenwechsel: {fertig.Zahlen.Kurswechsel}\n" +
-                                  $"Abgänge bestätigt: {fertig.AbgaengeBestaetigt} · übersprungen: {fertig.Uebersprungen}",
+                                  $"Abgänge bestätigt: {fertig.AbgaengeBestaetigt} · übersprungen: {fertig.Uebersprungen}" +
+                                  (fertig.Zahlen.Zusammengefuehrt > 0 ? $"\nzusammengeführt: {fertig.Zahlen.Zusammengefuehrt}" : "") +
+                                  (neuzuordnung ? $"\nneu zugeordnet: {fertig.Zahlen.NeuZugeordnet} (neuer Schlüssel, Kennung " +
+                                                  $"{schluessel.Kennung})" : ""),
                 "SchILD-Import", MessageBoxButton.OK, MessageBoxImage.Information);
-            if (schluesselNeu && !pseudo &&
+            if (schluesselNeu && (!pseudo || neuzuordnung) &&
                 MessageBox.Show(this, "Das war der erste Import mit diesem Schlüssel. Ohne ihn erkennt der nächste Import die " +
                                       "Schüler nicht wieder (z. B. nach einem Rechnerwechsel).\n\nJetzt „Schlüssel sichern…“ " +
                                       "(Datei mit Kennwort für USB-Stick bzw. Tresor)?",
                     "Schlüssel sichern", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
                 await ImSichernAsync(pseudo);
+        }
+
+        // =====================================================
+        //  5.2c-1: Schlüssel verloren – neu zuordnen (Entscheidung 190, Frage E)
+        // =====================================================
+
+        private async void BtnImNeu_Click(object sender, RoutedEventArgs e)
+        {
+            if (_laeuft || _export == null) return;
+            if (_imNeuzuordnung)
+            {
+                ImNeuzuordnungBeenden();
+                ImVorschauVerwerfen("Neu-Zuordnung abgebrochen – es wurde nichts gespeichert.");
+                return;
+            }
+            string? vor = ImVoraussetzung();
+            if (vor != null)
+            {
+                MessageBox.Show(this, vor, "Neu zuordnen", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            var st = _imStatus;
+            bool pseudo = _export.IstPseudo;
+            string art = SchildSchluessel.ArtText(pseudo);
+            if (st == null || st.Pseudo != pseudo || st.Schueler.Importiert == 0)
+            {
+                MessageBox.Show(this, "Zuerst „Status abfragen“ bzw. „Vorschau berechnen“ – eine Neu-Zuordnung gibt es nur, wenn in der " +
+                                      $"Datenbank schon importierte Schüler ({art}) stehen.", "Neu zuordnen",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            ImSchluesselLaden(pseudo, erzwingen: true);
+            var vorhanden = _imSchluessel;
+            if (vorhanden != null && !vorhanden.Neu && st.KennungLetzterImport != null
+                && string.Equals(vorhanden.Kennung, st.KennungLetzterImport, StringComparison.OrdinalIgnoreCase))
+            {
+                MessageBox.Show(this, $"Der Schlüssel dieses Rechners (Kennung {vorhanden.Kennung}) ist derselbe wie beim letzten Import – " +
+                                      "eine Neu-Zuordnung ist nicht nötig. Einfach „Vorschau berechnen“.", "Neu zuordnen",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            bool lesbar = vorhanden != null && !vorhanden.Neu;
+            string text =
+                $"Schlüssel verloren – die {st.Schueler.Importiert} importierten Schüler ({art}) neu zuordnen?\n\n" +
+                "Zuerst bitte die Sicherung suchen (USB-Stick, Tresor, alter Rechner) und „Schlüssel einlesen…“ – dann ist keine " +
+                "Neu-Zuordnung nötig.\n\n" +
+                "Die Neu-Zuordnung ordnet die bisherigen Schüler über Name + Klasse (Oberstufe: Jahrgang) den Schülern des Exports zu. " +
+                "Eindeutige Paare sind vorausgewählt; Namensgleiche und Schüler, die gleichzeitig die Klasse gewechselt haben, " +
+                "ordnest du in der Vorschau von Hand zu. Zugeordnete Schüler behalten Konto und Klassenbuchdaten und bekommen die " +
+                "Prüfsummen des " + (lesbar ? $"Schlüssels dieses Rechners (Kennung {vorhanden!.Kennung})" : "neuen Schlüssels") + ". " +
+                "Gespeichert wird erst mit „Importieren…“; danach sofort „Schlüssel sichern…“.\n\n" +
+                (SchildSchluessel.Vorhanden(pseudo) && !lesbar
+                    ? "Die vorhandene, nicht lesbare Schlüsseldatei wird beim Import umbenannt (nicht gelöscht).\n\n" : "") +
+                "Vorschau der Neu-Zuordnung berechnen?";
+            if (MessageBox.Show(this, text, "Schlüssel verloren – neu zuordnen", MessageBoxButton.YesNo, MessageBoxImage.Warning,
+                    MessageBoxResult.No) != MessageBoxResult.Yes)
+                return;
+            if (!pseudo &&
+                MessageBox.Show(this, "Echte Schülerdaten: Ist die Sicherung des bisherigen Schlüssels wirklich nicht mehr zu finden?\n\n" +
+                                      "Die Neu-Zuordnung wird im Importprotokoll vermerkt.", "Neu zuordnen – echte Daten",
+                    MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
+                return;
+
+            ImNeuzuordnungBeenden();
+            _imNeuSchluessel = lesbar ? vorhanden : SchildSchluessel.Erzeugen(pseudo);
+            _imSchluessel = _imNeuSchluessel;
+            _imSchluesselArt = pseudo;
+            _imNeuzuordnung = true;
+            ImVorschauVerwerfen(null);   // keine Paare aus einer früheren (normalen) Vorschau mitnehmen
+            _log?.Invoke($"SchILD: Neu-Zuordnung begonnen ({art}, Schlüssel Kennung {_imNeuSchluessel!.Kennung}" +
+                         (lesbar ? ", vorhandener Schlüssel" : ", neu erzeugt") + ").");
+            await Task.Yield();
+            BtnImVorschau_Click(sender, e);
         }
 
         // =====================================================
@@ -1010,6 +1268,7 @@ namespace Stundenplan_V2.Vertretung
             }
             finally { neu.Vergessen(); }
             _log?.Invoke($"SchILD: Schlüssel ({art}, Kennung {kennung}) aus einer Sicherung eingelesen.");
+            ImNeuzuordnungBeenden();   // 5.2c-1: mit der Sicherung ist keine Neu-Zuordnung mehr nötig
             _imSchluesselArt = null;
             ImVorschauVerwerfen("Schlüssel eingelesen – bitte die Vorschau neu berechnen.");
             MessageBox.Show(this, $"Eingelesen: Schlüssel für {art}, Kennung {kennung}.\n\nGespeichert für diesen Windows-Benutzer " +
@@ -1090,6 +1349,9 @@ namespace Stundenplan_V2.Vertretung
             _imBau = null;
             _imSchluessel?.Vergessen();
             _imSchluessel = null;
+            if (_imNeuSchluessel != null && _imNeuSchluessel.Neu) _imNeuSchluessel.Vergessen();
+            _imNeuSchluessel = null;
+            _imNeuzuordnung = false;
         }
     }
 }

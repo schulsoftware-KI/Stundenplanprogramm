@@ -12,7 +12,8 @@ namespace VertretungApi.Controllers;
 //  Phase 5.2b-2: SchILD-Import (Desktop → API, Header X-Api-Key wie beim Grundplan).
 //
 //    GET  api/schild/status          – Betriebsart, Kalender, Grundpläne, Schülerzahlen, letzter
-//                                      Import, Vorschlag für „Änderungen gelten ab“ (79).
+//                                      Import, Vorschlag für „Änderungen gelten ab“ (79), seit 5.2c-1
+//                                      die Kennung des Schlüssels beim letzten Import (189).
 //    POST api/schild/import          – Probelauf (Vorschau mit Prüfsumme) bzw. Import (78).
 //    POST api/schild/seed-entfernen  – nur Entwicklung: Seed-Schüler samt Klassenbuchdaten entfernen
 //                                      (Punkt A), danach Vorschau neu berechnen.
@@ -67,6 +68,11 @@ public class SchildController : ControllerBase
             .ToListAsync();
         var letzter = protokolle.OrderByDescending(p => p.Zeit).ThenByDescending(p => p.Id).FirstOrDefault();
         var spaetester = protokolle.OrderByDescending(p => p.GiltAb).FirstOrDefault();
+        // 5.2c-1 (189): Kennung des Schlüssels beim letzten Import dieser Art (über alle Schuljahre) – verrät ihn nicht.
+        string? kennung = await _db.SchildImportProtokolle.AsNoTracking()
+            .Where(p => p.IstPseudo == pseudo && p.SchluesselKennung != null)
+            .OrderByDescending(p => p.Zeit).ThenByDescending(p => p.Id)
+            .Select(p => p.SchluesselKennung).FirstOrDefaultAsync();
 
         DateOnly? halbjahrAb = DateOnly.TryParseExact(_cfg["Klassenbuch:HalbjahrAb"], "yyyy-MM-dd",
             CultureInfo.InvariantCulture, DateTimeStyles.None, out var hj) ? hj : null;
@@ -101,8 +107,11 @@ public class SchildController : ControllerBase
                 id = letzter.Id, zeit = letzter.Zeit, akteur = letzter.Akteur, abschnitt = letzter.Abschnitt,
                 giltAb = letzter.GiltAb, neu = letzter.Neu, geaendert = letzter.Geaendert,
                 klassenwechsel = letzter.Klassenwechsel, kurswechsel = letzter.Kurswechsel, abgaenge = letzter.Abgaenge,
-                unveraendert = letzter.Unveraendert, uebersprungen = letzter.Uebersprungen
+                unveraendert = letzter.Unveraendert, uebersprungen = letzter.Uebersprungen,
+                kennung = letzter.SchluesselKennung, neuZuordnung = letzter.NeuZuordnung,
+                zusammengefuehrt = letzter.Zusammengefuehrt, neuZugeordnet = letzter.NeuZugeordnet
             },
+            kennungLetzterImport = kennung,
             fruehestensAb = importiert > 0 ? spaetester?.GiltAb : null,
             vorschlagGiltAb = vorschlag
         });
@@ -129,7 +138,8 @@ public class SchildController : ControllerBase
         {
             var vorschau = await SchildImportService.BerechnenAsync(_db, dto, Produktiv, heute);
             _log.LogInformation("SchILD-Import: Vorschau {Schuljahr}, Abschnitt {Abschnitt}, gilt ab {GiltAb} – {Anzahl} Schüler, " +
-                                "gesperrt {Gesperrt}", dto.Schuljahr, dto.Abschnitt, dto.GiltAb, vorschau.ImExport, vorschau.Gesperrt);
+                                "Paare {Paare}, Neu-Zuordnung {Neuzuordnung}, gesperrt {Gesperrt}", dto.Schuljahr, dto.Abschnitt,
+                dto.GiltAb, vorschau.ImExport, vorschau.DieselbePerson + vorschau.ZuordnungPaare, dto.Neuzuordnung, vorschau.Gesperrt);
             return Ok(vorschau.Antwort(probelauf: true));
         }
 
@@ -160,10 +170,12 @@ public class SchildController : ControllerBase
 
         _log.LogInformation("SchILD-Import ausgeführt (Protokoll {Id}): {Schuljahr}, Abschnitt {Abschnitt}, gilt ab {GiltAb}, {Art} – " +
                             "neu {Neu}, geändert {Geaendert}, Klassenwechsel {Klassen}, Kurswechsel {Kurse}, Abgänge {Abgaenge}, " +
-                            "unverändert {Unveraendert}, übersprungen {Uebersprungen}",
+                            "unverändert {Unveraendert}, übersprungen {Uebersprungen}, zusammengeführt {Zusammengefuehrt}, " +
+                            "Neu-Zuordnung {Neuzuordnung} ({NeuZugeordnet}), Schlüssel {Kennung}",
             protokoll.Id, protokoll.Schuljahr, protokoll.Abschnitt, protokoll.GiltAb, protokoll.IstPseudo ? "Pseudodaten" : "echte Daten",
             protokoll.Neu, protokoll.Geaendert, protokoll.Klassenwechsel, protokoll.Kurswechsel, protokoll.Abgaenge,
-            protokoll.Unveraendert, protokoll.Uebersprungen);
+            protokoll.Unveraendert, protokoll.Uebersprungen, protokoll.Zusammengefuehrt, protokoll.NeuZuordnung,
+            protokoll.NeuZugeordnet, protokoll.SchluesselKennung ?? "–");
         return Ok(lauf.ImportAntwort(protokoll));
     }
 

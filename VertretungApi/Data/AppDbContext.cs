@@ -25,6 +25,7 @@ public class AppDbContext : DbContext
     public DbSet<KlassenbuchEintrag> KlassenbuchEintraege => Set<KlassenbuchEintrag>();        // Phase 3.4
     public DbSet<DownloadProtokoll> DownloadProtokolle => Set<DownloadProtokoll>();           // Phase 4.2
     public DbSet<SchildImportProtokoll> SchildImportProtokolle => Set<SchildImportProtokoll>(); // Phase 5.2b
+    public DbSet<Lehrkraft> Lehrkraefte => Set<Lehrkraft>();                     // Phase 5.2c
 
     // Grundplan + Kalender (Phase 2, Schritt 1)
     public DbSet<GrundplanVersion> GrundplanVersionen => Set<GrundplanVersion>();
@@ -75,6 +76,8 @@ public class AppDbContext : DbContext
         b.Entity<Schueler>().HasIndex(s => s.ExtId);
         b.Entity<Schueler>().HasIndex(s => s.ExtIdSchild);
         b.Entity<SchildImportProtokoll>().HasIndex(p => p.Zeit);
+        // Phase 5.2c (Entscheidung 193): ein Name je Kürzel und Art (Pseudo/echt).
+        b.Entity<Lehrkraft>().HasIndex(l => new { l.Kuerzel, l.IstPseudo }).IsUnique();
 
         // Phase 3.1: neue Tabelle. Die alte Phase-1A-Tabelle "Lektionen" (eine Lerngruppe je
         // Lektion, nie benutzt) bleibt in bestehenden Entwicklungs-DBs ungenutzt liegen.

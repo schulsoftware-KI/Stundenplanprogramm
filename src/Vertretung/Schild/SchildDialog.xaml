@@ -11,7 +11,7 @@
          Zuordnung SchILD ↔ Plan mit Festlegungen von Hand (schild_zuordnung.json); 5.2a-3: Muster der
          Kursbezeichnung und „gemeinsam mit …“; 5.2b-2b: Reiter „Import“ (SchildDialog_Import.cs) – sendet nur
          dort und nur Prüfsummen statt Geburtsdatum und SchILD-ID; 5.2b-2b-2: „Folgestand erzeugen…“
-         (SchildDialog_Folgestand.cs). -->
+         (SchildDialog_Folgestand.cs); 5.2c-1: Paare „dieselbe Person?“ und „Schlüssel verloren – neu zuordnen…“. -->
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -197,6 +197,10 @@
                         <Button x:Name="BtnImEinlesen" Content="Schlüssel einlesen…" Padding="10,3" VerticalAlignment="Center"
                                 Click="BtnImEinlesen_Click"
                                 ToolTip="Liest eine Sicherung des Schlüssels ein (neuer Rechner oder anderer Windows-Benutzer)."/>
+                        <!-- 5.2c-1 (Entscheidung 190): nur sichtbar, wenn der Schlüssel fehlt bzw. nicht zum letzten Import passt -->
+                        <Button x:Name="BtnImNeu" Content="Schlüssel verloren – neu zuordnen…" Padding="10,3" Margin="6,0,0,0"
+                                VerticalAlignment="Center" Visibility="Collapsed" Click="BtnImNeu_Click"
+                                ToolTip="Nur wenn es keine Sicherung des bisherigen Schlüssels gibt: ordnet die schon importierten Schüler über Name + Klasse neu zu (eindeutige vorausgewählt, Namensgleiche von Hand). Gespeichert wird erst mit „Importieren…“."/>
                     </WrapPanel>
                     <WrapPanel Grid.Row="3" Margin="0,0,0,6">
                         <Button x:Name="BtnImVorschau" Content="Vorschau berechnen" Padding="14,3" Margin="0,0,6,0"
@@ -236,7 +240,7 @@
                                                 <CheckBox HorizontalAlignment="Center" VerticalAlignment="Center"
                                                           Visibility="{Binding BestaetigenSichtbar}"
                                                           IsChecked="{Binding Bestaetigt, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                          ToolTip="Abgang bestätigen: Zugehörigkeiten enden am Vortag von „gilt ab“, das Schülerkonto wird gesperrt."/>
+                                                          ToolTip="Abgang bestätigen: Zugehörigkeiten enden am Vortag von „gilt ab“, das Schülerkonto wird gesperrt. Bei Paaren („dieselbe Person?“, Neu-Zuordnung): zusammenführen bzw. zuordnen – danach „Vorschau berechnen“."/>
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>

@@ -577,8 +577,9 @@ dotnet tool install --global dotnet-ef        # nur einmal
 dotnet ef migrations add <Name> -o Data/Migrations
 ```
 (vergeben sind „Grundlinie“, – seit U-1a, Raum im Grundplan und Wechsel-Merker der Vertretungen –
-`U1a_RaumUndWechsel` und – seit 5.2b-1, Gültigkeit der Zugehörigkeiten und Felder für den SchILD-Import –
-`SchildImport`). Den Ordner `Data/Migrations` danach ins Repo übernehmen.
+`U1a_RaumUndWechsel`, – seit 5.2b-1, Gültigkeit der Zugehörigkeiten und Felder für den SchILD-Import –
+`SchildImport` und – seit 5.2c-1, Kennung des Schlüssels im Importprotokoll, Klassenleitung, Tabelle `Lehrkraefte` –
+`SchildAbgleich`). Den Ordner `Data/Migrations` danach ins Repo übernehmen.
 Fehlt nach einer Modelländerung die Migration, bricht der Start mit „pending changes“ und einem Hinweis
 ab, statt mit unvollständigem Schema zu laufen. SQLite in der Entwicklung bleibt bei EnsureCreated +
 Schema-Nachrüstung und braucht keine Migrations.
@@ -914,6 +915,37 @@ Knopf **„Folgestand erzeugen…“** unten im Fenster „SchILD-Daten prüfen 
   importiert ist (alle Abgänge bestätigt) – Kurs-/Gruppenwechsel enthält auch Klassenwechsel, die die Gruppen ändern.
 - **Datenschutz:** Pseudo-Namen nur im Fenster und in `FOLGESTAND.txt`; das Log nennt nur Zahlen.
 
+## SchILD-Abgleich: „dieselbe Person?“ und Neu-Zuordnung (Phase 5.2c-1)
+
+Entscheidungen 185–198 (`claude/5.2c_Vorschlag.md`, Claude-Projekt). API: `Services/SchildImportService.cs`
+(`PaareBilden`), `Controllers/SchildController.cs`; Desktop: `src/Vertretung/Schild/SchildDialog_Import.cs`,
+`SchildNutzlast.cs`, `SchildSchluessel.cs`, `SchildFolgestand.cs`. **Schemaänderung** (Migration `SchildAbgleich`):
+`SchildImportProtokolle` + `SchluesselKennung`, `NeuZuordnung`, `KennungVorher`, `Zusammengefuehrt`, `NeuZugeordnet`;
+`Lerngruppen` + `Klassenleitung`; neue Tabelle `Lehrkraefte` (beides genutzt ab 5.2c-2).
+
+- **„Dieselbe Person?“:** Ein Schüler des Exports ohne Treffer und ein Schüler der Datenbank, der im Export fehlt, bilden
+  ein Paar, wenn die Teil-Prüfsumme Vorname + Geburtsdatum (Nachname geändert) oder Nachname + Geburtsdatum (Vorname
+  korrigiert) gleich ist oder der Name in derselben Klasse bzw. demselben Jahrgang gleich ist (Geburtsdatum korrigiert).
+  Verschiedene SchILD-IDs schließen aus. **Vorausgewählt** nur Teil-Prüfsumme + gleiche Klasse/Jahrgang + eindeutig.
+  **Zusammenführen** = der bisherige Datensatz bekommt Name und Prüfsummen aus dem Export, danach der normale Abgleich
+  (Kategorie „zusammengeführt“, ggf. Klassen- bzw. Kurswechsel); Konto und Klassenbuchdaten bleiben. Die Nutzlast trägt
+  die Wahl als `paare: [{ id, extId }]` (`null` = Vorauswahl der API); die angewendeten Paare gehören zur Prüfsumme der
+  Vorschau. Im Desktop: Häkchen ändern → „Vorschau berechnen“ → erst dann „Importieren…“.
+- **Kennung des Schlüssels** („1A2B-3C4D“, verrät ihn nicht) in jeder Nutzlast (`kennung`) und im Importprotokoll;
+  `GET /api/schild/status` nennt `kennungLetzterImport`. Ein anderer Schlüssel als beim letzten Import derselben Art
+  sperrt (Desktop schon vor dem Senden, API mit der Sperre `Schluessel`).
+- **Neu-Zuordnung** (Schlüssel verloren, Entscheidung 72/190): Knopf „Schlüssel verloren – neu zuordnen…“ (nur sichtbar,
+  wenn importierte Schüler da sind und der Schlüssel fehlt, nicht lesbar ist oder nicht passt; bei echten Daten doppelte
+  Rückfrage). Nutzlast mit `neuzuordnung: true`; Sperre, wenn ein Schüler über die Prüfsummen erkannt wird oder die
+  Kennung zum letzten Import passt. Paare über Name + Klasse (Oberstufe: Jahrgang): eindeutig = vorausgewählt;
+  Namensgleiche und „gleicher Name, andere Klasse“ nur von Hand (mit Vergleich der Kurse/Gruppen). Zugeordnete Datensätze
+  bekommen alle Prüfsummen des neuen Schlüssels; eine nicht lesbare alte Schlüsseldatei wird beim Import umbenannt
+  (`…_ersetzt_<Datum>.dat`), nie gelöscht. Danach „Schlüssel sichern…“.
+- **Folgestand** (Testdaten, Standard aus): „Änderungen ohne SchILD-ID“ (die geänderten Schüler fehlen in
+  `SchuelerLernplattformen.dat`; ganz ohne SchILD-ID sperrt das „#Klasse“-Paar zu Recht), „Vorname korrigiert“,
+  „Nachname geändert + Klassenwechsel“, „Neuaufnahme mit demselben Namen wie ein Mitschüler“ (Namensgleiche).
+- **Datenschutz:** Bericht, Importprotokoll und Log ohne Namen; Namen nur in den Zeilen der Vorschau im Fenster.
+
 ## Vertretungen aus Untis (U-1b und U-2, Desktop)
 
 Übergangsphase: Die Schule plant die Vertretungen weiter in Untis; App und Klassenbuch zeigen sie trotzdem. Nur
@@ -1192,4 +1224,5 @@ Entscheidungen 158–162 (`claude/Projektstand_und_Fahrplan.md` §6).
    App-Adresse einschränken, Login-Bremse hinter dem Reverse-Proxy je echter Adresse.~~ Phase 5.1.
 5. **Phase 5.2:** SchILD-NRW-3-Schnittstelle (`.dat`-Dateien) – Import per Desktop statt Pseudodaten-Seed
    (5.2a Prüflauf und Zuordnung, 5.2b-1 Gültigkeit, 5.2b-2a Import in der API, 5.2b-2b-1 Reiter „Import“ im Desktop,
-   **5.2b-2b-2 „Folgestand erzeugen“**; als Nächstes 5.2c Abgleich-Feinheiten und Konten).
+   5.2b-2b-2 „Folgestand erzeugen“, **5.2c-1 „dieselbe Person?“ und Neu-Zuordnung**; als Nächstes 5.2c-2 Konten und
+   Anzeigen).

@@ -94,8 +94,9 @@ namespace Stundenplan_V2.Vertretung
             var win = new Window
             {
                 Title = "Folgestand erzeugen",
-                Width = 600,
+                Width = 620,
                 SizeToContent = SizeToContent.Height,
+                MaxHeight = SystemParameters.WorkArea.Height - 40,   // 5.2c-1: mehr Häkchen – notfalls scrollen
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 Owner = this,
                 ResizeMode = ResizeMode.NoResize
@@ -133,13 +134,27 @@ namespace Stundenplan_V2.Vertretung
             var chkKlasse = Wahl("2 Klassenwechsel Sek I", true);
             var chkKurs = Wahl("3 Kurswechsel Oberstufe (ohne Überschneidung im Stundenplan)", true);
             var chkGruppe = Wahl("1 Gruppenwechsel Sek I (parallele Gruppe, z. B. Religion)", true);
-            var chkName = Wahl("1 Namensänderung (mit SchILD-ID)", true);
-            var chkGeb = Wahl("1 korrigiertes Geburtsdatum (mit SchILD-ID)", true);
+            var chkName = Wahl("1 Namensänderung (Sek I)", true);
+            var chkGeb = Wahl("1 korrigiertes Geburtsdatum (Oberstufe)", true);
             var chkNeu = Wahl("2 Neuaufnahmen (Status 0, Aufnahme in zwei Wochen)", true);
             var chkFehlt = Wahl("1 Schüler fehlt im Export (ohne Abgang)", true);
             var chkKlasseFehlt = Wahl("eine ganze Klasse fehlt (prüft die Sperre „Teil-Export“ – dieser Stand lässt sich nicht " +
                                       "importieren)", false);
             chkKlasseFehlt.Margin = new Thickness(0, 6, 0, 10);
+
+            // 5.2c-1 (Entscheidungen 186–190): „dieselbe Person?“ und Neu-Zuordnung – Standard aus
+            panel.Children.Add(new TextBlock
+            {
+                Text = "Für „dieselbe Person?“ und die Neu-Zuordnung (5.2c):", FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(0, 0, 0, 4)
+            });
+            var chkOhneId = Wahl("Änderungen ohne SchILD-ID (die Schüler mit geändertem Namen bzw. Geburtsdatum fehlen in " +
+                                 "SchuelerLernplattformen.dat) – die Vorschau erkennt sie dann nur als Paar „dieselbe Person?“", false);
+            var chkVorname = Wahl("1 Vorname korrigiert (Sek I)", false);
+            var chkNameKlasse = Wahl("1 Nachname geändert + Klassenwechsel (Sek I)", false);
+            var chkGleich = Wahl("1 Neuaufnahme mit demselben Namen wie ein Mitschüler derselben Klasse (Namensgleiche, anderes " +
+                                 "Geburtsdatum)", false);
+            chkGleich.Margin = new Thickness(0, 0, 0, 10);
 
             var startZeile = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 2) };
             startZeile.Children.Add(new TextBlock { Text = "Startwert für den Zufall:", VerticalAlignment = VerticalAlignment.Center,
@@ -164,7 +179,7 @@ namespace Stundenplan_V2.Vertretung
             knoepfe.Children.Add(ok);
             knoepfe.Children.Add(abbr);
             panel.Children.Add(knoepfe);
-            win.Content = panel;
+            win.Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
 
             SchildFolgestandOptionen? ergebnis = null;
             ok.Click += (_, __) =>
@@ -186,10 +201,15 @@ namespace Stundenplan_V2.Vertretung
                     Neuaufnahmen = chkNeu.IsChecked == true,
                     FehltOhneAbgang = chkFehlt.IsChecked == true,
                     KlasseFehlt = chkKlasseFehlt.IsChecked == true,
-                    Startwert = start
+                    Startwert = start,
+                    OhneSchildId = chkOhneId.IsChecked == true,
+                    Vorname = chkVorname.IsChecked == true,
+                    NameUndKlasse = chkNameKlasse.IsChecked == true,
+                    Namensgleiche = chkGleich.IsChecked == true
                 };
                 if (!(o.Abgaenge || o.Klassenwechsel || o.Kurswechsel || o.Gruppenwechsel || o.Namensaenderung || o.Geburtsdatum
-                      || o.Neuaufnahmen || o.FehltOhneAbgang || o.KlasseFehlt))
+                      || o.Neuaufnahmen || o.FehltOhneAbgang || o.KlasseFehlt || o.Vorname || o.NameUndKlasse || o.Namensgleiche
+                      || o.OhneSchildId))
                 {
                     MessageBox.Show(win, "Bitte mindestens eine Änderung wählen.", "Folgestand",
                         MessageBoxButton.OK, MessageBoxImage.Information);

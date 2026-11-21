@@ -552,6 +552,40 @@ namespace VertretungApi.Data.Migrations
                     b.ToTable("KontoProtokolle");
                 });
 
+            modelBuilder.Entity("VertretungApi.Model.Lehrkraft", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("ImportAm")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IstPseudo")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Kuerzel")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Nachname")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Vorname")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Kuerzel", "IstPseudo")
+                        .IsUnique();
+
+                    b.ToTable("Lehrkraefte");
+                });
+
             modelBuilder.Entity("VertretungApi.Model.Lektion", b =>
                 {
                     b.Property<int>("Id")
@@ -659,6 +693,9 @@ namespace VertretungApi.Data.Migrations
                     b.Property<bool>("IstPseudo")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("Klassenleitung")
+                        .HasColumnType("text");
+
                     b.Property<int>("Kursart")
                         .HasColumnType("integer");
 
@@ -716,6 +753,9 @@ namespace VertretungApi.Data.Migrations
                     b.Property<bool>("IstPseudo")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("KennungVorher")
+                        .HasColumnType("text");
+
                     b.Property<int>("Klassenwechsel")
                         .HasColumnType("integer");
 
@@ -724,6 +764,15 @@ namespace VertretungApi.Data.Migrations
 
                     b.Property<int>("Neu")
                         .HasColumnType("integer");
+
+                    b.Property<int>("NeuZugeordnet")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("NeuZuordnung")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("SchluesselKennung")
+                        .HasColumnType("text");
 
                     b.Property<string>("Schuljahr")
                         .IsRequired()
@@ -740,6 +789,9 @@ namespace VertretungApi.Data.Migrations
 
                     b.Property<DateTime>("Zeit")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Zusammengefuehrt")
+                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 

@@ -69,6 +69,22 @@ namespace Stundenplan_V2.Vertretung
 
         public static string ArtText(bool pseudo) => pseudo ? "Pseudodaten" : "echte Daten";
 
+        /// <summary>
+        /// 5.2c-1 (Neu-Zuordnung, Entscheidung 190): eine vorhandene, nicht lesbare Schlüsseldatei beiseitelegen – sie wird
+        /// umbenannt („…_ersetzt_JJJJ-MM-TT_HHMM.dat“), nie gelöscht. Liefert den neuen Pfad bzw. null, wenn es keine gibt.
+        /// </summary>
+        public static string? Beiseite(bool pseudo)
+        {
+            string pfad = Pfad(pseudo);
+            if (!File.Exists(pfad)) return null;
+            string basis = Path.GetFileNameWithoutExtension(pfad) + "_ersetzt_" +
+                           DateTime.Now.ToString("yyyy-MM-dd_HHmm", CultureInfo.InvariantCulture);
+            string ziel = Path.Combine(Ordner, basis + ".dat");
+            for (int n = 2; File.Exists(ziel); n++) ziel = Path.Combine(Ordner, $"{basis}_{n}.dat");
+            File.Move(pfad, ziel);
+            return ziel;
+        }
+
         /// <summary>Neuer Zufallsschlüssel (noch nicht gespeichert).</summary>
         public static SchildSchluessel Erzeugen(bool pseudo) => new(RandomNumberGenerator.GetBytes(Laenge), pseudo, true);
 

@@ -30,6 +30,19 @@ namespace VertretungApi.Services;
 //
 //  Datenschutz: Die Vorschau nennt Namen (nötig zum Bestätigen) – sie geht nur an den Desktop.
 //  Bericht, Importprotokoll, Fehlermeldungen und Log enthalten keine Namen.
+//
+//  Phase 5.2c-1 (Entscheidungen 186–190):
+//  - „Dieselbe Person?“: Ein Schüler des Exports ohne Treffer und ein Datensatz „fehlt im Export“
+//    bilden ein Paar, wenn Vorname + Geburtsdatum (V1) oder Nachname + Geburtsdatum (N1) gleich sind
+//    oder der Name in derselben Klasse bzw. demselben Jahrgang gleich ist. Verschiedene SchILD-IDs
+//    schließen aus. Vorausgewählt nur V1/N1 + gleiche Klasse/Jahrgang + eindeutig. Zusammenführen =
+//    der bisherige Datensatz bekommt die neue Identität (Konto und Klassenbuchdaten bleiben), danach
+//    läuft der normale Abgleich. Die Wahl kommt als Liste „paare“ und gehört zur Prüfsumme der Vorschau.
+//  - Kennung des Schlüssels: Weicht sie vom letzten Import derselben Art ab, sperrt die Vorschau.
+//  - Neu-Zuordnung (Schlüssel verloren): nur wenn kein Schüler über die Prüfsummen erkannt wird; Paare
+//    über Name + Klasse bzw. Jahrgang (eindeutig = vorausgewählt, Namensgleiche nur von Hand, gleicher
+//    Name in einer anderen Klasse desselben Jahrgangs nur von Hand); zugeordnete Datensätze bekommen
+//    alle neuen Prüfsummen.
 // =====================================================================
 
 public static class SchildImportService
@@ -39,6 +52,8 @@ public static class SchildImportService
     public const int MaxSchluessel = 5000;
 
     private static readonly Regex PruefsummeMuster = new(@"^[A-Za-z0-9+/=_\-]{16,128}$", RegexOptions.Compiled);
+    private static readonly Regex KennungMuster = new(@"^[0-9A-F]{4}-[0-9A-F]{4}$", RegexOptions.Compiled);
+    private static readonly Regex Leerraum = new(@"\s+", RegexOptions.Compiled);
 
     /// <summary>Kategorien der Vorschau (Schlüssel für den Desktop).</summary>
     public static class Kategorie
@@ -50,9 +65,16 @@ public static class SchildImportService
         public const string StatusGeaendert = "statusGeaendert";
         public const string AbgangLautSchild = "abgangLautSchild";
         public const string FehltImExport = "fehltImExport";
+        // Phase 5.2c-1
+        public const string DieselbePerson = "dieselbePerson";
+        public const string Zuordnung = "zuordnung";
+        public const string Zusammengefuehrt = "zusammengefuehrt";
 
         public static readonly string[] Reihenfolge =
-            { AbgangLautSchild, FehltImExport, Neu, NameGeaendert, Klassenwechsel, Kurswechsel, StatusGeaendert };
+        {
+            AbgangLautSchild, FehltImExport, DieselbePerson, Zuordnung, Neu, Zusammengefuehrt, NameGeaendert,
+            Klassenwechsel, Kurswechsel, StatusGeaendert
+        };
     }
 
     /// <summary>SchILD-Status → Status in der Datenbank (Entscheidung 80); null = nicht erlaubt.</summary>
@@ -74,6 +96,10 @@ public static class SchildImportService
         dto.Akteur = Leer(dto.Akteur);
         dto.PlanSchluessel = dto.PlanSchluessel?
             .Select(Leer).Where(k => k != null).Select(k => k!).ToList();
+        dto.Kennung = Leer(dto.Kennung)?.ToUpperInvariant();
+        if (dto.Paare != null)
+            foreach (var p in dto.Paare.Where(x => x != null))
+                p.ExtId = (p.ExtId ?? "").Trim();
         if (dto.Schueler == null) return;
         foreach (var s in dto.Schueler)
         {
@@ -103,6 +129,12 @@ public static class SchildImportService
         if (!dto.Probelauf && dto.Vorschau == null) f.Add("Beim Import fehlt die Prüfsumme der Vorschau (vorschau).");
         if ((dto.PlanSchluessel?.Count ?? 0) > MaxSchluessel) f.Add($"Höchstens {MaxSchluessel} Plan-Schlüssel.");
         if (dto.PlanSchluessel?.Any(k => k.Length > 100) == true) f.Add("Ein Plan-Schlüssel ist länger als 100 Zeichen.");
+        if (dto.Kennung != null && !KennungMuster.IsMatch(dto.Kennung))
+            f.Add("Die Kennung des Schlüssels (kennung) hat ein ungültiges Format (erwartet „1A2B-3C4D“).");
+        if (dto.Neuzuordnung && dto.Kennung == null) f.Add("Bei einer Neu-Zuordnung fehlt die Kennung des Schlüssels.");
+        if (dto.Paare != null && (dto.Paare.Count > MaxSchueler
+                                  || dto.Paare.Any(p => p == null || p.Id <= 0 || !PruefsummeMuster.IsMatch(p.ExtId))))
+            f.Add("Die gewählten Paare (paare) sind unvollständig oder fehlerhaft.");
         if (dto.Schueler == null || dto.Schueler.Count == 0)
         {
             f.Add("Keine Schüler übermittelt.");
@@ -154,6 +186,10 @@ public static class SchildImportService
 
     internal static string Sha(string text)
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
+
+    /// <summary>Name zum Vergleichen (5.2c): wie die Eingabe der Prüfsumme – NFC, Leerzeichen zusammengefasst, groß.</summary>
+    internal static string NameNorm(string? s)
+        => Leerraum.Replace((s ?? "").Normalize(NormalizationForm.FormC).Trim(), " ").ToUpperInvariant();
 }
 
 /// <summary>Grund, aus dem die Vorschau den Import sperrt (Entscheidung 168).</summary>
@@ -172,6 +208,10 @@ public sealed class SchildVorschauZeile
     public bool Vorausgewaehlt { get; init; }
     public bool KontoWirdGesperrt { get; init; }
     public string? Hinweis { get; set; }
+    /// <summary>5.2c-1: bei Paaren („dieselbe Person?“, Neu-Zuordnung) die Prüfsumme des Schülers im Export.</summary>
+    public string? PartnerExtId { get; init; }
+    /// <summary>5.2c-1: Paar ist in dieser Vorschau angewendet (zusammengeführt bzw. zugeordnet).</summary>
+    public bool Gewaehlt { get; init; }
 }
 
 /// <summary>Ein Plan-Schlüssel des Grundplans, der am „gilt ab“ gilt.</summary>
@@ -259,6 +299,8 @@ public sealed class SchildImportLauf
     private readonly HashSet<int> _abgangLautSchildIds = new();
     private readonly HashSet<int> _geaenderteIds = new();
     private readonly HashSet<Zugehoerigkeit> _beendet = new();
+    private readonly List<(int Id, string ExtId)> _angewendetePaare = new();   // 5.2c-1: Teil der Prüfsumme der Vorschau
+    private string? _letzteKennung;                                             // Kennung beim letzten Import dieser Art
 
     public SchildImportLauf(SchildImportDto dto, bool produktiv, DateOnly heute)
     {
@@ -282,6 +324,8 @@ public sealed class SchildImportLauf
 
     public int ImExport, Neu, NameGeaendert, Klassenwechsel, Kurswechsel, StatusGeaendert,
         AbgangLautSchild, FehltImExport, Unveraendert, AbgangNichtInDatenbank;
+    // 5.2c-1: Paare „dieselbe Person?“ (normal) bzw. der Neu-Zuordnung
+    public int DieselbePerson, Zusammengefuehrt, ZuordnungPaare, NeuZugeordnet;
 
     public List<(string Schluessel, string Art, int Schueler)> Unbekannt { get; } = new();
     public List<(string Typ, string Schluessel)> NeueLerngruppen { get; } = new();
@@ -307,6 +351,10 @@ public sealed class SchildImportLauf
         public HashSet<string> Geschuetzt = new(StringComparer.OrdinalIgnoreCase);
         public Schueler? Treffer;
         public bool UeberSchild;
+        /// <summary>5.2c-1: über ein gewähltes Paar gefunden – Text des Signals („gleicher Vorname und Geburtsdatum“).</summary>
+        public string? Paar;
+        /// <summary>5.2c-1: Hinweise zu nicht gewählten Paaren (für die Zeile „neu“).</summary>
+        public List<string> PaarHinweise = new();
     }
 
     // ----------------------------------------------------------------
@@ -368,6 +416,11 @@ public sealed class SchildImportLauf
             .Where(b => b.Rolle == BenutzerRolle.Schueler && b.SchuelerId != null)
             .ToListAsync();
         var protokolle = await db.SchildImportProtokolle.AsNoTracking().Where(p => p.Schuljahr == _sj).ToListAsync();
+        // 5.2c-1 (189): Kennung des Schlüssels beim letzten Import dieser Art (über alle Schuljahre).
+        _letzteKennung = await db.SchildImportProtokolle.AsNoTracking()
+            .Where(p => p.IstPseudo == dto.Pseudo && p.SchluesselKennung != null)
+            .OrderByDescending(p => p.Zeit).ThenByDescending(p => p.Id)
+            .Select(p => p.SchluesselKennung).FirstOrDefaultAsync();
 
         Stand = StandPruefsumme(version, schueler, lerngruppen, zug, protokolle);
         VorschauPruefsumme = SchildImportService.Sha(Stand + "|" + NutzlastPruefsumme(dto));
@@ -468,6 +521,26 @@ public sealed class SchildImportLauf
 
         // ---- 6. Erkennung: zuerst SchILD-ID, dann Name + Geburtsdatum (85, 167) ----
         var kandidaten = schueler.Where(s => !string.IsNullOrEmpty(s.ExtId) && s.IstPseudo == dto.Pseudo).ToList();
+
+        // 5.2c-1 (189/190): Kennung des Schlüssels und Voraussetzungen der Neu-Zuordnung. Diese Sperren beenden die
+        // Rechnung sofort (mit einem fremden Schlüssel wären alle Zeilen „neu“ + „fehlt“); die älteren Sperren nicht.
+        int sperrenVorher = Sperren.Count;
+        if (dto.Neuzuordnung && kandidaten.Count == 0)
+            Sperre("Neuzuordnung", "In der Datenbank stehen noch keine importierten Schüler dieser Art – eine Neu-Zuordnung " +
+                                   "ist nicht nötig; ein normaler Import genügt.");
+        if (kandidaten.Count > 0 && _letzteKennung != null && dto.Kennung != null)
+        {
+            bool gleich = string.Equals(_letzteKennung, dto.Kennung, StringComparison.OrdinalIgnoreCase);
+            if (!dto.Neuzuordnung && !gleich)
+                Sperre("Schluessel", $"Der Schlüssel dieses Rechners (Kennung {dto.Kennung}) ist ein anderer als beim letzten " +
+                                     $"Import (Kennung {_letzteKennung}). Mit einem anderen Schlüssel werden die Schüler nicht " +
+                                     "wiedererkannt. Abhilfe: „Schlüssel einlesen…“ mit der Sicherung – nur wenn der bisherige " +
+                                     "Schlüssel verloren ist: „Schlüssel verloren – neu zuordnen…“.");
+            if (dto.Neuzuordnung && gleich)
+                Sperre("Neuzuordnung", $"Der Schlüssel dieses Rechners (Kennung {dto.Kennung}) ist derselbe wie beim letzten " +
+                                       "Import – eine Neu-Zuordnung ist nicht nötig.");
+        }
+        if (Sperren.Count > sperrenVorher) return;
         var nachSchild = kandidaten.Where(s => s.ExtIdSchild != null)
             .GroupBy(s => s.ExtIdSchild!, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
@@ -495,7 +568,21 @@ public sealed class SchildImportLauf
         }
         if (dbDoppelt)
             Sperre("DoppeltePruefsumme", "In der Datenbank stehen mehrere Schüler mit derselben Prüfsumme – sie lassen sich " +
-                                         "nicht eindeutig zuordnen (Zusammenführen kommt mit 5.2c).");
+                                         "nicht eindeutig zuordnen. Bitte die Datenbank prüfen lassen (zwei Datensätze " +
+                                         "nachträglich zusammenführen geht noch nicht).");
+        if (dto.Neuzuordnung)
+        {
+            int erkannt = eingaenge.Count(x => x.Treffer != null);
+            if (erkannt > 0)
+            {
+                Sperre("Neuzuordnung", $"{erkannt} Schüler werden mit dem Schlüssel dieses Rechners schon erkannt – der Schlüssel " +
+                                       "passt, eine Neu-Zuordnung ist nicht nötig („Vorschau berechnen“ ohne Neu-Zuordnung).");
+                return;
+            }
+        }
+
+        // ---- 6b. Paare (5.2c-1): „dieselbe Person?“ (186–188) bzw. Neu-Zuordnung über Name + Klasse (190) ----
+        PaareBilden(eingaenge, kandidaten, vergeben, ZeilenVon, lgById);
 
         // ---- 7. Lerngruppen: vorhandene finden, fehlende anlegen, Übernahmen (81) ----
         var vorhandeneLg = new Dictionary<string, Lerngruppe>(StringComparer.Ordinal);
@@ -564,13 +651,21 @@ public sealed class SchildImportLauf
         // ---- 8. Gefundene Schüler: Änderungen ermitteln ----
         var getroffen = new HashSet<int>();
         var neueZeilen = new List<SchildVorschauZeile>();
-        var neueOhneId = new List<(SchildVorschauZeile Zeile, string? Klasse, string Stufe)>();
         foreach (var e in eingaenge.Where(x => x.Treffer != null))
         {
             var s = e.Treffer!;
             getroffen.Add(s.Id);
             var zeilen = ZeilenVon(s.Id);
             string statusAlt = string.IsNullOrEmpty(s.Status) ? "aktiv" : s.Status!;
+            string altName = $"{s.Vorname} {s.Nachname}";
+
+            // 5.2c-1 (190): bei der Neu-Zuordnung bekommt jeder zugeordnete Datensatz alle neuen Prüfsummen – auch ein
+            // schon abgegangener und einer, dessen Abgang nicht bestätigt wird.
+            if (_dto.Neuzuordnung)
+            {
+                var d0 = e.D;
+                _schreiben.Add(_ => Identitaet(s, d0, ersetzen: true));
+            }
 
             if (e.Abgang)
             {
@@ -595,6 +690,8 @@ public sealed class SchildImportLauf
                 l.Add(text);
             }
 
+            if (e.Paar != null && !_dto.Neuzuordnung)
+                Merke(SchildImportService.Kategorie.Zusammengefuehrt, $"bisher {altName} – {e.Paar} (zusammengeführt)");
             if (e.UeberSchild && !string.Equals(s.ExtId, e.D.ExtId, StringComparison.Ordinal))
             {
                 string alt = $"{s.Vorname} {s.Nachname}";
@@ -690,7 +787,8 @@ public sealed class SchildImportLauf
             });
 
             if (texte.Count == 0) { Unveraendert++; continue; }
-            if (texte.ContainsKey(SchildImportService.Kategorie.NameGeaendert) || texte.ContainsKey(SchildImportService.Kategorie.StatusGeaendert))
+            if (texte.ContainsKey(SchildImportService.Kategorie.NameGeaendert) || texte.ContainsKey(SchildImportService.Kategorie.StatusGeaendert)
+                || texte.ContainsKey(SchildImportService.Kategorie.Zusammengefuehrt))
                 _geaenderteIds.Add(s.Id);
             foreach (var (kat, l) in texte)
             {
@@ -732,10 +830,10 @@ public sealed class SchildImportLauf
             var zeile = new SchildVorschauZeile
             {
                 Kategorie = SchildImportService.Kategorie.Neu, Name = Name(e.D), Klasse = e.Klasse?.Schluessel,
-                Stufe = e.D.Stufe, Aenderung = teile.Count == 0 ? null : string.Join(", ", teile)
+                Stufe = e.D.Stufe, Aenderung = teile.Count == 0 ? null : string.Join(", ", teile),
+                Hinweis = e.PaarHinweise.Count == 0 ? null : string.Join("; ", e.PaarHinweise.Distinct())
             };
             neueZeilen.Add(zeile);
-            if (e.D.ExtIdSchild == null) neueOhneId.Add((zeile, e.Klasse?.Schluessel, e.D.Stufe));
         }
 
         // ---- 10. Fehlt im Export (nicht vorausgewählt, 80) ----
@@ -753,20 +851,8 @@ public sealed class SchildImportLauf
                 Klasse = klasse, Stufe = s.Stufe, Aenderung = "nicht im Export, kein Abgang gemeldet",
                 Vorausgewaehlt = false, KontoWirdGesperrt = konten.Any(k => k.SchuelerId == s.Id && !k.Gesperrt)
             };
-            // Ohne SchILD-ID: geänderter Name erscheint als „neu“ + „fehlt“ (Zusammenführen kommt mit 5.2c).
-            if (s.ExtIdSchild == null)
-            {
-                var paar = neueOhneId.Where(n => klasse != null ? Cmp.Equals(n.Klasse ?? "", klasse)
-                                                                 : n.Klasse == null && Cmp.Equals(n.Stufe, s.Stufe)).ToList();
-                if (paar.Count > 0)
-                {
-                    zeile.Hinweis = $"möglicherweise dieselbe Person wie „{string.Join("“, „", paar.Select(n => n.Zeile.Name))}“ " +
-                                    "(neu) – Zusammenführen kommt mit 5.2c";
-                    foreach (var n in paar)
-                        n.Zeile.Hinweis = $"möglicherweise dieselbe Person wie „{zeile.Name}“ (fehlt im Export) – " +
-                                          "Zusammenführen kommt mit 5.2c";
-                }
-            }
+            // 5.2c-1: nicht gewählte Paare („dieselbe Person?“ bzw. Neu-Zuordnung) als Hinweis.
+            if (_paarHinweiseDb.TryGetValue(s.Id, out var ph)) zeile.Hinweis = string.Join("; ", ph.Distinct());
             fehltZeilen.Add(zeile);
             AbgangVormerken(s, zeilen, konten, null);
         }
@@ -839,6 +925,195 @@ public sealed class SchildImportLauf
     }
 
     // ----------------------------------------------------------------
+    //  5.2c-1: Paare – „dieselbe Person?“ (186–188) bzw. Neu-Zuordnung (190)
+    // ----------------------------------------------------------------
+
+    private readonly Dictionary<int, List<string>> _paarHinweiseDb = new();
+
+    private sealed record PaarKandidat(Eingang E, Schueler S, string Signal, bool Stark, bool GleicheGruppe, string GruppeDb);
+
+    /// <summary>
+    /// Bildet die Paare, wendet die Vorauswahl bzw. die gewählten Paare der Nutzlast an (gefundener Schüler =
+    /// bisheriger Datensatz) und legt je Paar eine Zeile an. Danach gehört die Liste der angewendeten Paare zur
+    /// Prüfsumme der Vorschau – beim Import schickt der Desktop genau diese Liste.
+    /// </summary>
+    private void PaareBilden(List<Eingang> eingaenge, List<Schueler> kandidaten, HashSet<int> vergeben,
+        Func<int, List<Zugehoerigkeit>> zeilenVon, Dictionary<int, Lerngruppe> lgById)
+    {
+        PaareRechnen(eingaenge, kandidaten, vergeben, zeilenVon, lgById);
+        var b = new StringBuilder("Q");
+        foreach (var (id, ext) in _angewendetePaare.OrderBy(x => x.Id).ThenBy(x => x.ExtId, StringComparer.Ordinal))
+            b.Append('|').Append(id).Append(':').Append(ext);
+        VorschauPruefsumme = SchildImportService.Sha(VorschauPruefsumme + "|" + b);
+    }
+
+    private void PaareRechnen(List<Eingang> eingaenge, List<Schueler> kandidaten, HashSet<int> vergeben,
+        Func<int, List<Zugehoerigkeit>> zeilenVon, Dictionary<int, Lerngruppe> lgById)
+    {
+        bool neuZu = _dto.Neuzuordnung;
+        var offeneDb = kandidaten.Where(s => !vergeben.Contains(s.Id)
+                                             && (neuZu || (s.Status != "abgang" && zeilenVon(s.Id).Any(OffenAb)))).ToList();
+        var offeneEx = eingaenge.Where(e => e.Treffer == null && (neuZu || !e.Abgang)).ToList();
+        if (offeneDb.Count == 0 || offeneEx.Count == 0) return;
+
+        static string NameKey(string nach, string vor) => SchildImportService.NameNorm(nach) + "\n" + SchildImportService.NameNorm(vor);
+        var gruppeDb = offeneDb.ToDictionary(s => s.Id, s => (KlasseAktuell(zeilenVon(s.Id), lgById) ?? s.Stufe).Trim());
+        string GruppeEx(Eingang e) => ((e.Status != "extern" ? e.D.Klasse : null) ?? e.D.Stufe).Trim();
+
+        Dictionary<string, List<Schueler>> Index(Func<Schueler, string?> key)
+        {
+            var d = new Dictionary<string, List<Schueler>>(StringComparer.Ordinal);
+            foreach (var s in offeneDb)
+            {
+                var k = key(s);
+                if (k == null) continue;
+                if (!d.TryGetValue(k, out var l)) d[k] = l = new List<Schueler>();
+                l.Add(s);
+            }
+            return d;
+        }
+        var nachNameGruppe = Index(s => NameKey(s.Nachname, s.Vorname) + "|" + gruppeDb[s.Id].ToUpperInvariant());
+        var nachNameStufe = Index(s => NameKey(s.Nachname, s.Vorname) + "|" + s.Stufe.Trim().ToUpperInvariant());
+        var nachV1 = Index(s => s.ExtIdVornameGeb);
+        var nachN1 = Index(s => s.ExtIdNachnameGeb);
+        List<Schueler> Treffer(Dictionary<string, List<Schueler>> d, string? k)
+            => k != null && d.TryGetValue(k, out var l) ? l : new List<Schueler>();
+
+        var paare = new List<PaarKandidat>();
+        foreach (var e in offeneEx)
+        {
+            string gEx = GruppeEx(e);
+            string nk = NameKey(e.D.Nachname, e.D.Vorname);
+            var gesehen = new HashSet<int>();
+            if (neuZu)
+            {
+                foreach (var s in Treffer(nachNameGruppe, nk + "|" + gEx.ToUpperInvariant()))
+                    if (gesehen.Add(s.Id))
+                        paare.Add(new PaarKandidat(e, s, "gleicher Name, gleiche " + (e.D.Klasse != null ? "Klasse" : "Stufe"),
+                            true, true, gruppeDb[s.Id]));
+                // Gleicher Name in einer anderen Klasse desselben Jahrgangs nur, wenn es in der eigenen Klasse keinen gibt
+                // (sonst wären Namensgleiche in Parallelklassen nie eindeutig).
+                if (gesehen.Count > 0) continue;
+                foreach (var s in Treffer(nachNameStufe, nk + "|" + e.D.Stufe.Trim().ToUpperInvariant()))
+                    if (gesehen.Add(s.Id))
+                        paare.Add(new PaarKandidat(e, s, $"gleicher Name, andere Klasse ({gruppeDb[s.Id]} → {gEx})",
+                            false, false, gruppeDb[s.Id]));
+                continue;
+            }
+
+            var v1 = Treffer(nachV1, e.D.ExtIdVornameGeb).Select(s => s.Id).ToHashSet();
+            var n1 = Treffer(nachN1, e.D.ExtIdNachnameGeb).Select(s => s.Id).ToHashSet();
+            var nm = Treffer(nachNameGruppe, nk + "|" + gEx.ToUpperInvariant()).Select(s => s.Id).ToHashSet();
+            foreach (var s in offeneDb.Where(x => v1.Contains(x.Id) || n1.Contains(x.Id) || nm.Contains(x.Id)))
+            {
+                // Verschiedene SchILD-IDs = zwei Personen (186).
+                if (s.ExtIdSchild != null && e.D.ExtIdSchild != null
+                    && !string.Equals(s.ExtIdSchild, e.D.ExtIdSchild, StringComparison.Ordinal)) continue;
+                bool gleich = Cmp.Equals(gruppeDb[s.Id], gEx);
+                string signal = v1.Contains(s.Id) ? "gleicher Vorname und Geburtsdatum"
+                              : n1.Contains(s.Id) ? "gleicher Nachname und Geburtsdatum"
+                              : "gleicher Name in " + (e.D.Klasse != null ? "derselben Klasse" : "demselben Jahrgang") +
+                                ", anderes Geburtsdatum";
+                if (!gleich) signal += $", Klasse {gruppeDb[s.Id]} → {gEx}";
+                paare.Add(new PaarKandidat(e, s, signal, v1.Contains(s.Id) || n1.Contains(s.Id), gleich, gruppeDb[s.Id]));
+            }
+        }
+        if (paare.Count == 0) return;
+
+        var jeEx = paare.GroupBy(p => p.E).ToDictionary(g => g.Key, g => g.Count());
+        var jeDb = paare.GroupBy(p => p.S.Id).ToDictionary(g => g.Key, g => g.Count());
+        bool Eindeutig(PaarKandidat p) => jeEx[p.E] == 1 && jeDb[p.S.Id] == 1;
+        bool Vorauswahl(PaarKandidat p) => p.Stark && p.GleicheGruppe && Eindeutig(p);
+
+        // Wahl: ohne Liste die Vorauswahl der API, sonst genau die gewählten Paare (je Seite höchstens eines).
+        List<PaarKandidat> gewuenscht;
+        if (_dto.Paare == null) gewuenscht = paare.Where(Vorauswahl).ToList();
+        else
+        {
+            var wahl = new HashSet<(int, string)>(_dto.Paare.Select(x => (x.Id, x.ExtId)));
+            gewuenscht = paare.Where(p => wahl.Contains((p.S.Id, p.E.D.ExtId))).ToList();
+            int passend = gewuenscht.Select(p => (p.S.Id, p.E.D.ExtId)).Distinct().Count();
+            if (passend < wahl.Count)
+                Hinweise.Add($"{wahl.Count - passend} gewählte Paare passen nicht (mehr) zu dieser Vorschau und werden nicht angewendet.");
+        }
+        var angewendet = new HashSet<PaarKandidat>();
+        var belegtEx = new HashSet<Eingang>();
+        var belegtDb = new HashSet<int>();
+        int doppelt = 0;
+        foreach (var p in gewuenscht.OrderBy(x => x.E.Nr).ThenBy(x => x.S.Id))
+        {
+            if (belegtEx.Contains(p.E) || belegtDb.Contains(p.S.Id)) { doppelt++; continue; }
+            belegtEx.Add(p.E);
+            belegtDb.Add(p.S.Id);
+            angewendet.Add(p);
+            p.E.Treffer = p.S;
+            p.E.Paar = p.Signal;
+            vergeben.Add(p.S.Id);
+            _angewendetePaare.Add((p.S.Id, p.E.D.ExtId));
+        }
+        if (doppelt > 0)
+            Hinweise.Add($"{doppelt} gewählte Paare überschneiden sich mit einem anderen (ein Schüler kann nur einen Partner " +
+                         "haben) – angewendet wird jeweils das erste.");
+
+        // Bei unsicheren Paaren helfen der Vergleich der Kurse/Gruppen und der Eintritt (bisher ↔ im Export) beim Entscheiden.
+        string KurseVergleich(PaarKandidat p)
+        {
+            var bisher = zeilenVon(p.S.Id).Where(z => OffenAb(z) && lgById[z.LerngruppeId].Typ != LerngruppeTyp.Klasse)
+                .Select(z => lgById[z.LerngruppeId].Bezeichnung.Trim()).ToHashSet(Cmp);
+            var export = p.E.Kurse.Select(k => k.Schluessel).ToHashSet(Cmp);
+            int n = Math.Max(bisher.Count, export.Count);
+            string kurse = n == 0 ? "" : $" · gemeinsame Kurse/Gruppen: {bisher.Count(export.Contains)} von {n}";
+            // Eintritt: bisher seit … (Beginn der ersten Zeile; leer = Schuljahresbeginn) ↔ im Export Neuaufnahme ab …
+            var vonListe = zeilenVon(p.S.Id).Select(z => z.GueltigVon).ToList();
+            DateOnly? seit = vonListe.Count == 0 || vonListe.Any(v => v == null) ? null : vonListe.Min();
+            string bisherSeit = vonListe.Count == 0 ? "" : seit is DateOnly sd ? $"bisher ab {D(sd)}" : "bisher seit Schuljahresbeginn";
+            string imExport = p.E.D.Status == 0 && p.E.D.Aufnahme is DateOnly auf ? $"im Export Neuaufnahme ab {D(auf)}" : "";
+            string eintritt = string.Join(", ", new[] { bisherSeit, imExport }.Where(x => x.Length > 0));
+            return kurse + (eintritt.Length > 0 ? " · " + eintritt : "");
+        }
+
+        string kat = neuZu ? SchildImportService.Kategorie.Zuordnung : SchildImportService.Kategorie.DieselbePerson;
+        string ansicht = neuZu ? "Neu-Zuordnung" : "dieselbe Person?";
+        foreach (var p in paare.OrderBy(x => x.E.D.Klasse ?? x.E.D.Stufe, Cmp).ThenBy(x => Name(x.E.D), Cmp).ThenBy(x => x.S.Id))
+        {
+            bool an = angewendet.Contains(p);
+            Zeilen.Add(new SchildVorschauZeile
+            {
+                Kategorie = kat, Id = p.S.Id, PartnerExtId = p.E.D.ExtId, Name = Name(p.E.D),
+                Klasse = p.E.Klasse?.Schluessel ?? p.E.D.Klasse, Stufe = p.E.D.Stufe,
+                Aenderung = $"bisher „{p.S.Vorname} {p.S.Nachname}“ ({p.GruppeDb}) – {p.Signal}" +
+                            (Eindeutig(p) && p.Stark ? "" : KurseVergleich(p)) +
+                            // Nachbesserung 21.11.: bei mehreren Partnern unterscheidbar machen, welche Zeilen zusammengehören
+                            (Eindeutig(p) ? "" : $" · Datensatz Nr. {p.S.Id} ↔ Export Nr. {p.E.Nr}"),
+                Vorausgewaehlt = Vorauswahl(p), Gewaehlt = an,
+                Hinweis = Eindeutig(p) ? null : "mehrere mögliche Partner – höchstens einen wählen"
+            });
+            if (an) continue;
+            p.E.PaarHinweise.Add($"möglicherweise dieselbe Person wie „{p.S.Vorname} {p.S.Nachname}“ – siehe „{ansicht}“");
+            if (!_paarHinweiseDb.TryGetValue(p.S.Id, out var l)) _paarHinweiseDb[p.S.Id] = l = new List<string>();
+            l.Add($"möglicherweise dieselbe Person wie „{Name(p.E.D)}“ – siehe „{ansicht}“");
+        }
+
+        int mehrdeutig = paare.Count(p => !Eindeutig(p));
+        if (neuZu)
+        {
+            ZuordnungPaare = paare.Count;
+            NeuZugeordnet = angewendet.Count;
+            Hinweise.Add($"Neu-Zuordnung über Name + Klasse: {angewendet.Count} von {offeneDb.Count} bisherigen Schülern zugeordnet" +
+                         (mehrdeutig > 0 ? $"; {mehrdeutig} Paare sind nicht eindeutig (Namensgleiche bzw. andere Klasse – von Hand wählen)" : "") +
+                         ". Zugeordnete Schüler bekommen die Prüfsummen des neuen Schlüssels; Konten und Klassenbuchdaten bleiben.");
+        }
+        else
+        {
+            DieselbePerson = paare.Count;
+            Zusammengefuehrt = angewendet.Count;
+            Hinweise.Add($"{paare.Count} Paare „dieselbe Person?“ (Schüler im Export ohne Treffer ↔ Datensatz, der im Export fehlt) – " +
+                         $"{angewendet.Count} werden zusammengeführt: der bisherige Datensatz bekommt Name und Prüfsummen aus dem " +
+                         "Export, Konto und Klassenbuchdaten bleiben. Häkchen ändern und „Vorschau berechnen“ rechnet neu.");
+        }
+    }
+
+    // ----------------------------------------------------------------
     //  Schreiben (nur Import)
     // ----------------------------------------------------------------
 
@@ -872,7 +1147,12 @@ public sealed class SchildImportLauf
             Abgaenge = bestaetigt,
             Unveraendert = Unveraendert,
             Uebersprungen = AbgangNichtInDatenbank + (AbgangLautSchild - lautSchild),
-            StandPruefsumme = Stand
+            StandPruefsumme = Stand,
+            SchluesselKennung = _dto.Kennung,
+            NeuZuordnung = _dto.Neuzuordnung,
+            KennungVorher = _dto.Neuzuordnung ? _letzteKennung : null,
+            Zusammengefuehrt = Zusammengefuehrt,
+            NeuZugeordnet = NeuZugeordnet
         };
         db.SchildImportProtokolle.Add(p);
         return p;
@@ -896,7 +1176,11 @@ public sealed class SchildImportLauf
         abgangNichtInDatenbank = AbgangNichtInDatenbank,
         unbekannteSchluessel = Unbekannt.Count,
         neueLerngruppen = NeueLerngruppen.Count,
-        gruppenAusSchild = Uebernahmen.Count
+        gruppenAusSchild = Uebernahmen.Count,
+        dieselbePerson = DieselbePerson,
+        zusammengefuehrt = Zusammengefuehrt,
+        zuordnungPaare = ZuordnungPaare,
+        neuZugeordnet = NeuZugeordnet
     };
 
     /// <summary>Vorschau für den Desktop (Probelauf, Sperre oder veraltete Vorschau).</summary>
@@ -907,6 +1191,9 @@ public sealed class SchildImportLauf
         abschnitt = _dto.Abschnitt,
         giltAb = _giltAb,
         pseudo = _dto.Pseudo,
+        neuzuordnung = _dto.Neuzuordnung,
+        kennung = _dto.Kennung,
+        kennungLetzterImport = _letzteKennung,
         grundplan = GrundplanBezeichnung,
         grundplanAb = GrundplanAb,
         gesperrt = Gesperrt,
@@ -940,6 +1227,8 @@ public sealed class SchildImportLauf
         zahlen = Zahlen(),
         abgaengeBestaetigt = p.Abgaenge,
         uebersprungen = p.Uebersprungen,
+        neuzuordnung = p.NeuZuordnung,
+        kennung = p.SchluesselKennung,
         hinweise = Hinweise,
         bericht = Bericht(p)
     };
@@ -953,8 +1242,19 @@ public sealed class SchildImportLauf
                      (_dto.Pseudo ? "Pseudodaten" : "echte Daten"));
         if (GrundplanBezeichnung != null && GrundplanAb is DateOnly ga)
             b.AppendLine($"Grundplan „{GrundplanBezeichnung}“ (gültig ab {D(ga)})");
+        if (_dto.Kennung != null)
+            b.AppendLine($"Schlüssel: Kennung {_dto.Kennung}" + (_letzteKennung != null && !_dto.Neuzuordnung
+                ? (string.Equals(_letzteKennung, _dto.Kennung, StringComparison.OrdinalIgnoreCase) ? " (wie beim letzten Import)" : $" (letzter Import: {_letzteKennung})")
+                : ""));
+        if (_dto.Neuzuordnung)
+            b.AppendLine("NEU-ZUORDNUNG über Name + Klasse (Schlüssel verloren)" +
+                         (_letzteKennung != null ? $" – bisher Kennung {_letzteKennung}, neu {_dto.Kennung}" : ""));
         foreach (var s in Sperren) b.AppendLine("GESPERRT: " + s.Text);
         b.AppendLine($"Schüler im Export: {ImExport}");
+        if (_dto.Neuzuordnung)
+            b.AppendLine($"  neu zugeordnet (Name + Klasse): {NeuZugeordnet} (mögliche Paare: {ZuordnungPaare})");
+        else if (DieselbePerson > 0)
+            b.AppendLine($"  dieselbe Person? {DieselbePerson} Paare – zusammengeführt: {Zusammengefuehrt}");
         b.AppendLine($"  neu: {Neu}");
         b.AppendLine($"  Name bzw. Geburtsdatum geändert: {NameGeaendert}");
         b.AppendLine($"  Klassenwechsel: {Klassenwechsel}");
@@ -1049,15 +1349,17 @@ public sealed class SchildImportLauf
         };
     }
 
-    private static void Identitaet(Schueler s, SchildSchuelerDto d)
+    /// <param name="ersetzen">5.2c-1 (Neu-Zuordnung): alle Prüfsummen ersetzen, auch durch „leer“ – die alten stammen
+    /// vom verlorenen Schlüssel und würden nie wieder passen.</param>
+    private static void Identitaet(Schueler s, SchildSchuelerDto d, bool ersetzen = false)
     {
         s.Nachname = d.Nachname;
         s.Vorname = d.Vorname;
         s.Stufe = d.Stufe;
         s.ExtId = d.ExtId;
-        if (d.ExtIdSchild != null) s.ExtIdSchild = d.ExtIdSchild;
-        if (d.ExtIdVornameGeb != null) s.ExtIdVornameGeb = d.ExtIdVornameGeb;
-        if (d.ExtIdNachnameGeb != null) s.ExtIdNachnameGeb = d.ExtIdNachnameGeb;
+        if (ersetzen || d.ExtIdSchild != null) s.ExtIdSchild = d.ExtIdSchild;
+        if (ersetzen || d.ExtIdVornameGeb != null) s.ExtIdVornameGeb = d.ExtIdVornameGeb;
+        if (ersetzen || d.ExtIdNachnameGeb != null) s.ExtIdNachnameGeb = d.ExtIdNachnameGeb;
     }
 
     private Lerngruppe NeueLerngruppe(SchildPlanEintrag p) => new()
@@ -1126,13 +1428,14 @@ public sealed class SchildImportLauf
         return SchildImportService.Sha(b.ToString());
     }
 
-    /// <summary>Prüfsumme der Nutzlast (ohne Probelauf/Vorschau/Abgänge/Akteur) – gleiche Daten, gleiche Summe.</summary>
+    /// <summary>Prüfsumme der Nutzlast (ohne Probelauf/Vorschau/Abgänge/Akteur/Paare) – gleiche Daten, gleiche Summe. Die
+    /// angewendeten Paare (5.2c-1) kommen in <see cref="PaareBilden"/> dazu.</summary>
     private static string NutzlastPruefsumme(SchildImportDto dto)
     {
         var b = new StringBuilder();
         b.Append("K|").Append(dto.Schuljahr).Append('|').Append(dto.Abschnitt).Append('|')
          .Append(SchildImportService.Iso(dto.GiltAb)).Append('|').Append(dto.Pseudo ? '1' : '0').Append('|')
-         .Append(dto.Plan).Append('\n');
+         .Append(dto.Plan).Append('|').Append(dto.Kennung).Append('|').Append(dto.Neuzuordnung ? '1' : '0').Append('\n');
         foreach (var k in (dto.PlanSchluessel ?? new List<string>()).Select(x => x.ToUpperInvariant()).Distinct()
                      .OrderBy(x => x, StringComparer.Ordinal))
             b.Append("H|").Append(k).Append('\n');

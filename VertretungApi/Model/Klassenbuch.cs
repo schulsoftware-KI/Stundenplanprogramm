@@ -73,6 +73,9 @@ public class Lerngruppe
     public string? Quelle { get; set; }
     // Ab diesem Tag kommt die Liste aus SchILD; eine Gruppe ist ab dann im Gruppeneditor nur lesbar.
     public DateOnly? SchildAb { get; set; }
+    // Phase 5.2c (Entscheidung 191; gefüllt ab 5.2c-2): Klassenleitung laut Klassen.dat (Plan-Kürzel,
+    // mehrere mit Komma) – nur bei Klassen; Vorschlag für die Zuständigkeit der Konten (74).
+    public string? Klassenleitung { get; set; }
 
     public List<Zugehoerigkeit> Mitglieder { get; set; } = new();
 }

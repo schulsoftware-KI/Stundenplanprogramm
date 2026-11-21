@@ -34,6 +34,26 @@ public class SchildImportDto
     /// <summary>Alle Plan-Schlüssel, die ab jetzt aus SchILD kommen – auch Gruppen ohne Schüler (Klassen, Kurse, Gruppen).</summary>
     public List<string>? PlanSchluessel { get; set; }
     public List<SchildSchuelerDto>? Schueler { get; set; }
+
+    // ---- Phase 5.2c-1 (Entscheidungen 188–190) ----
+    /// <summary>Kennung des HMAC-Schlüssels des Desktops („1A2B-3C4D“) – verrät den Schlüssel nicht (189).</summary>
+    public string? Kennung { get; set; }
+    /// <summary>Neu-Zuordnung über Name + Klasse nach einem verlorenen Schlüssel (190).</summary>
+    public bool Neuzuordnung { get; set; }
+    /// <summary>
+    /// Gewählte Paare (Datensatz der Datenbank ↔ Schüler des Exports): normal = „dieselbe Person?“ zusammenführen (188),
+    /// bei der Neu-Zuordnung = Zuordnung (190). null = Vorauswahl der API (erste Vorschau); beim Import genau die Paare,
+    /// die die Vorschau angewendet hat.
+    /// </summary>
+    public List<SchildPaarDto>? Paare { get; set; }
+}
+
+public class SchildPaarDto
+{
+    /// <summary>Id des Schülers in der Datenbank.</summary>
+    public int Id { get; set; }
+    /// <summary>Prüfsumme (extId) des Schülers im Export.</summary>
+    public string ExtId { get; set; } = "";
 }
 
 public class SchildSchuelerDto

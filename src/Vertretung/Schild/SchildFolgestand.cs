@@ -30,6 +30,15 @@ namespace Stundenplan_V2.Vertretung
     //   - 2 Neuaufnahmen (Status 0, Aufnahme in zwei Wochen; Sek I und Oberstufe)
     //   - 1 Schüler fehlt ohne Abgang
     //   - wahlweise: eine ganze Klasse fehlt (prüft die Sperre „Teil-Export“)
+    //  Seit 5.2c-1 (Entscheidungen 186–190, Standard aus):
+    //   - „Änderungen ohne SchILD-ID“: die Schüler mit geändertem Namen bzw.
+    //     Geburtsdatum fehlen in SchuelerLernplattformen.dat – die Vorschau erkennt
+    //     sie dann nur als Paar „dieselbe Person?“ (Teil-Prüfsummen bzw. Name +
+    //     Klasse). Die Datei bleibt sonst gleich (ganz ohne SchILD-ID wären die
+    //     beiden Schüler des „#Klasse“-Paars nicht zu unterscheiden – Sperre).
+    //   - 1 Vorname korrigiert (Sek I), 1 Nachname geändert + Klassenwechsel (Sek I),
+    //     1 Neuaufnahme mit demselben Namen wie ein Mitschüler derselben Klasse
+    //     (Namensgleiche – für die Neu-Zuordnung über Name + Klasse)
     //
     //  Damit die Zuordnung SchILD ↔ Plan gleich bleibt: nur feste Zuordnungen
     //  (eindeutig bzw. von Hand, nicht „gemeinsam“), jede Liste behält genug
@@ -56,6 +65,11 @@ namespace Stundenplan_V2.Vertretung
         public bool FehltOhneAbgang { get; set; } = true;
         public bool KlasseFehlt { get; set; }
         public int Startwert { get; set; } = 171;
+        // 5.2c-1 (Standard aus, damit Folgestand 1 aus 5.2b wiederholbar bleibt)
+        public bool OhneSchildId { get; set; }
+        public bool Vorname { get; set; }
+        public bool NameUndKlasse { get; set; }
+        public bool Namensgleiche { get; set; }
     }
 
     public sealed class SchildFolgestandErgebnis
@@ -83,15 +97,35 @@ namespace Stundenplan_V2.Vertretung
         public int AbgangNichtInDb { get; set; }
         public int FehltImExport { get; set; }
         public int Unveraendert { get; set; }
+        // 5.2c-1: Paare „dieselbe Person?“ (ohne SchILD-ID)
+        public bool OhneSchildId { get; set; }
+        public int Paare { get; set; }
+        public int PaareVorausgewaehlt { get; set; }
+        /// <summary>Nicht vorausgewählte Paare: erscheinen zusätzlich als „neu“ und „fehlt im Export“ (bis zum Häkchen).</summary>
+        public int NeuPaare { get; set; }
+        public int FehltPaare { get; set; }
+        /// <summary>Wechsel, die erst nach dem Häkchen bei einem nicht vorausgewählten Paar erscheinen.</summary>
+        public int KlassenwechselPaar { get; set; }
+        public int KurswechselPaar { get; set; }
 
         public string ErwartungText()
         {
             var sb = new StringBuilder();
             sb.AppendLine($"Erwartet in der Vorschau, wenn genau „{Ausgangsordner}“ importiert ist (alle Abgänge bestätigt):");
-            sb.AppendLine($"Schüler im Export {ImExport} · neu {Neu} · Name bzw. Geburtsdatum geändert {NameGeaendert} · " +
+            sb.AppendLine($"Schüler im Export {ImExport} · " +
+                          (Paare > 0 ? $"dieselbe Person? {Paare} (vorausgewählt {PaareVorausgewaehlt}) · zusammengeführt " +
+                                       $"{PaareVorausgewaehlt} · " : "") +
+                          $"neu {Neu + NeuPaare} · Name bzw. Geburtsdatum geändert {NameGeaendert} · " +
                           $"Klassenwechsel {Klassenwechsel} · Kurs-/Gruppenwechsel {Kurswechsel} · Status bzw. Jahrgang geändert 0 · " +
                           $"Abgang laut SchILD {AbgangLautSchild} · fehlt im Export {FehltImExport} · unverändert {Unveraendert} · " +
                           $"Abgang laut SchILD, nicht in der Datenbank {AbgangNichtInDb}.");
+            if (Paare > PaareVorausgewaehlt)
+                sb.AppendLine($"Nach Häkchen bei allen {Paare} Paaren und „Vorschau berechnen“: zusammengeführt {Paare} · neu {Neu} · " +
+                              $"fehlt im Export {FehltImExport - FehltPaare} · Klassenwechsel {Klassenwechsel + KlassenwechselPaar} · " +
+                              $"Kurs-/Gruppenwechsel {Kurswechsel + KurswechselPaar} (die übrigen Zahlen bleiben).");
+            if (OhneSchildId)
+                sb.AppendLine("Änderungen ohne SchILD-ID: Namens- und Datumsänderungen erscheinen als Paare „dieselbe Person?“ " +
+                              "statt als „Name bzw. Geburtsdatum geändert“.");
             if (AusFolgestand)
                 sb.AppendLine($"Der Ausgangsordner ist selbst ein Folgestand: Von den {AbgangNichtInDb} Schülern mit Status 8/9 daraus zählen " +
                               "die, deren Abgang schon importiert ist, bei „unverändert“ statt bei „nicht in der Datenbank“; Schüler, " +
@@ -359,6 +393,7 @@ namespace Stundenplan_V2.Vertretung
                 _ba = Lies(ex.Ordner, ba);
                 _le = Lies(ex.Ordner, le);
                 _lp = marker.Dateien.ContainsKey(lp) ? Lies(ex.Ordner, lp) : null;
+                E.OhneSchildId = opt.OhneSchildId;
 
                 bN = _ba.SpPflicht("Nachname"); bV = _ba.SpPflicht("Vorname"); bG = _ba.SpPflicht("Geburtsdatum");
                 bS = _ba.SpPflicht("Status"); bKl = _ba.SpPflicht("Klasse"); bJg = _ba.SpPflicht("Jahrgang");
@@ -538,21 +573,52 @@ namespace Stundenplan_V2.Vertretung
             private static string Bez(SchildZuordnungZeile u) => u.Art == SchildZuordnungArt.OhneKurs ? u.Schild : u.KursBez;
 
             /// <summary>Name, Vorname und Geburtsdatum in allen Dateien ändern (Name ohne #Klasse).</summary>
-            private void NeueIdentitaet(Person p, string nachname, DateOnly geb)
+            private void NeueIdentitaet(Person p, string nachname, string vorname, DateOnly geb)
             {
                 _ba.Setze(p.Basis, bN, nachname);
+                _ba.Setze(p.Basis, bV, vorname);
                 _ba.Setze(p.Basis, bG, D(geb));
                 foreach (int i in Leistungen(p.Key))
                 {
                     _le.Setze(i, lN, nachname);
+                    _le.Setze(i, lV, vorname);
                     _le.Setze(i, lG, D(geb));
                 }
                 if (_lp != null && _lpZeile.TryGetValue(p.Key, out int ip))
                 {
                     _lp.Setze(ip, pN, nachname);
+                    _lp.Setze(ip, pV, vorname);
                     _lp.Setze(ip, pG, D(geb));
                 }
             }
+
+            /// <summary>
+            /// 5.2c-1: Wie erkennt die Vorschau eine Änderung von Name bzw. Geburtsdatum? Mit SchILD-ID als „Name bzw.
+            /// Geburtsdatum geändert“, ohne als Paar „dieselbe Person?“ (vorausgewählt oder nicht).
+            /// </summary>
+            private void Erkannt(Person p, bool vorausgewaehlt, int klassenwechsel, int kurswechsel)
+            {
+                if (_opt.OhneSchildId)
+                {
+                    // Zeile in SchuelerLernplattformen.dat weg – für diesen Schüler gibt es dann keine SchILD-ID.
+                    if (_lp != null && _lpZeile.TryGetValue(p.Key, out int ip)) _lp.Entferne(ip);
+                    E.Paare++;
+                    if (vorausgewaehlt) { E.PaareVorausgewaehlt++; return; }
+                    E.NeuPaare++;
+                    E.FehltPaare++;
+                    E.KlassenwechselPaar += klassenwechsel;
+                    E.KurswechselPaar += kurswechsel;
+                    return;
+                }
+                E.NameGeaendert++;
+                E.Klassenwechsel += klassenwechsel;
+                E.Kurswechsel += kurswechsel;
+            }
+
+            private string Erkennung(string signal, bool vorausgewaehlt)
+                => _opt.OhneSchildId
+                    ? $"ohne SchILD-ID: Paar „dieselbe Person?“ über {signal}, " + (vorausgewaehlt ? "vorausgewählt" : "nicht vorausgewählt")
+                    : "gleiche SchILD-ID";
 
             private string[] AlsPerson(string[] z, Person p)
                 => Mit(z, _le.Kopf.Length, (lN, p.NameFeld), (lV, p.Vorname), (lG, D(p.Geb)));
@@ -605,16 +671,31 @@ namespace Stundenplan_V2.Vertretung
                     if (mitId) Geburtsdatum();
                     else E.NichtMoeglich.Add("Korrigiertes Geburtsdatum: ohne SchuelerLernplattformen.dat (SchILD-ID) nicht sinnvoll.");
                 }
+                // 5.2c-1
+                if (_opt.Vorname)
+                {
+                    if (mitId) Vorname();
+                    else E.NichtMoeglich.Add("Vorname korrigiert: ohne SchuelerLernplattformen.dat im Ausgangsordner nicht sinnvoll.");
+                }
+                if (_opt.NameUndKlasse)
+                {
+                    if (mitId) NameUndKlasse();
+                    else E.NichtMoeglich.Add("Nachname + Klassenwechsel: ohne SchuelerLernplattformen.dat im Ausgangsordner nicht sinnvoll.");
+                }
                 if (_opt.Neuaufnahmen) Neuaufnahmen();
+                if (_opt.Namensgleiche) Namensgleiche();
                 if (_opt.FehltOhneAbgang) FehltOhneAbgang();
                 if (_opt.KlasseFehlt) KlasseFehlt();
+                if (_opt.OhneSchildId && E.Paare > 0) E.Uebersicht.Add($"{E.Paare} Änderungen ohne SchILD-ID");
 
                 // ---- Erwartung (Ausgangsordner importiert, alle Abgänge bestätigt) ----
                 int imDb = _personen.Count(p => p.Status is 0 or 2 or 3 or 6);
-                E.FehltImExport = _entfernt.Count(k => _nach[k].Status is 0 or 2 or 3 or 6);
+                int fehltEntfernt = _entfernt.Count(k => _nach[k].Status is 0 or 2 or 3 or 6);
                 E.AbgangLautSchild = _abgaenge.Count;
                 E.AbgangNichtInDb = _personen.Count(p => p.Status is 8 or 9 && !_entfernt.Contains(p.Key));
-                E.Unveraendert = imDb - E.FehltImExport - E.AbgangLautSchild - _geaendert.Count;
+                E.Unveraendert = imDb - fehltEntfernt - E.AbgangLautSchild - _geaendert.Count;
+                // Nicht vorausgewählte Paare: der bisherige Datensatz „fehlt“ zusätzlich (er zählt schon bei den geänderten).
+                E.FehltImExport = fehltEntfernt + E.FehltPaare;
                 E.ImExport = _personen.Count(p => p.Status != 1 && !_entfernt.Contains(p.Key)) + E.Neu;
             }
 
@@ -815,13 +896,14 @@ namespace Stundenplan_V2.Vertretung
                 {
                     string nn = SchildGenerator.Nachnamen[_rnd.Next(SchildGenerator.Nachnamen.Length)];
                     if (SchildText.Gleich(nn, s.Nachname) || !NeuerSchluessel(nn, s.Vorname, s.Geb)) continue;
-                    NeueIdentitaet(s, nn, s.Geb);
+                    NeueIdentitaet(s, nn, s.Vorname, s.Geb);
                     Merke(nn, s.Vorname, s.Geb);
                     _benutzt.Add(s.Key);
                     _geaendert.Add(s.Key);
-                    E.NameGeaendert++;
-                    E.Aenderungen.Add($"Namensänderung: {s.Anzeige} → {s.Vorname} {nn} ({s.Stufe}, gleiche SchILD-ID)");
-                    E.Uebersicht.Add("1 Namensänderung (mit SchILD-ID)");
+                    Erkannt(s, true, 0, 0);
+                    E.Aenderungen.Add($"Namensänderung: {s.Anzeige} → {s.Vorname} {nn} ({s.Stufe}, " +
+                                      $"{Erkennung("Vorname + Geburtsdatum", true)})");
+                    E.Uebersicht.Add("1 Namensänderung" + (_opt.OhneSchildId ? "" : " (mit SchILD-ID)"));
                     return;
                 }
                 E.NichtMoeglich.Add("Namensänderung: kein freier Name gefunden.");
@@ -835,13 +917,14 @@ namespace Stundenplan_V2.Vertretung
                 {
                     var geb = s.Geb.AddDays(1 + _rnd.Next(9));
                     if (!NeuerSchluessel(s.Nachname, s.Vorname, geb)) continue;
-                    NeueIdentitaet(s, s.Nachname, geb);
+                    NeueIdentitaet(s, s.Nachname, s.Vorname, geb);
                     Merke(s.Nachname, s.Vorname, geb);
                     _benutzt.Add(s.Key);
                     _geaendert.Add(s.Key);
-                    E.NameGeaendert++;
-                    E.Aenderungen.Add($"Geburtsdatum korrigiert: {s.Anzeige} ({s.Stufe}) {D(s.Geb)} → {D(geb)} (gleiche SchILD-ID)");
-                    E.Uebersicht.Add("1 korrigiertes Geburtsdatum (mit SchILD-ID)");
+                    Erkannt(s, false, 0, 0);
+                    E.Aenderungen.Add($"Geburtsdatum korrigiert: {s.Anzeige} ({s.Stufe}) {D(s.Geb)} → {D(geb)} " +
+                                      $"({Erkennung("Name + " + (s.Oberstufe ? "Jahrgang" : "Klasse"), false)})");
+                    E.Uebersicht.Add("1 korrigiertes Geburtsdatum" + (_opt.OhneSchildId ? "" : " (mit SchILD-ID)"));
                     return;
                 }
                 E.NichtMoeglich.Add("Geburtsdatum: kein freies Datum gefunden.");
@@ -863,14 +946,16 @@ namespace Stundenplan_V2.Vertretung
                 if (n > 0) E.Uebersicht.Add($"{n} Neuaufnahme(n) (Status 0, Aufnahme {D(aufnahme)})");
             }
 
-            private bool Neuaufnahme(Person r, DateOnly aufnahme)
+            /// <param name="gleicherName">5.2c-1: Name und Vorname von <paramref name="r"/> übernehmen (Namensgleiche).</param>
+            private bool Neuaufnahme(Person r, DateOnly aufnahme, bool gleicherName = false)
             {
                 for (int versuch = 0; versuch < 200; versuch++)
                 {
-                    bool w = _rnd.Next(2) == 0;
-                    string vn = w ? SchildGenerator.VornamenW[_rnd.Next(SchildGenerator.VornamenW.Length)]
+                    bool w = gleicherName ? SchildGenerator.VornamenW.Contains(r.Vorname) : _rnd.Next(2) == 0;
+                    string vn = gleicherName ? r.Vorname
+                              : w ? SchildGenerator.VornamenW[_rnd.Next(SchildGenerator.VornamenW.Length)]
                                   : SchildGenerator.VornamenM[_rnd.Next(SchildGenerator.VornamenM.Length)];
-                    string nn = SchildGenerator.Nachnamen[_rnd.Next(SchildGenerator.Nachnamen.Length)];
+                    string nn = gleicherName ? r.Nachname : SchildGenerator.Nachnamen[_rnd.Next(SchildGenerator.Nachnamen.Length)];
                     var geb = r.Geb.AddDays(_rnd.Next(-150, 151));
                     if (!NeuerSchluessel(nn, vn, geb)) continue;
                     Merke(nn, vn, geb);
@@ -893,10 +978,118 @@ namespace Stundenplan_V2.Vertretung
                     _klassenBeteiligt.Add(r.Klasse);
                     E.Neu++;
                     E.Aenderungen.Add($"Neuaufnahme (Status 0, Aufnahme {D(aufnahme)}): {vn} {nn} ({r.Stufe}) – Kurse/Gruppen wie " +
-                                      $"{r.Anzeige}");
+                                      $"{r.Anzeige}" + (gleicherName
+                                          ? $" – Namensgleiche: derselbe Name wie {r.Anzeige} in derselben Klasse, Geburtsdatum " +
+                                            $"{D(geb)} statt {D(r.Geb)}"
+                                          : ""));
                     return true;
                 }
                 return false;
+            }
+
+            // ---- 5.2c-1: Vorname korrigiert, Nachname + Klassenwechsel, Namensgleiche ----
+
+            private void Vorname()
+            {
+                var s = Zufall(_personen.Where(p => Frei(p) && !p.Oberstufe && p.Klasse.Length > 0).ToList())
+                        ?? Zufall(_personen.Where(Frei).ToList());
+                if (s == null) { E.NichtMoeglich.Add("Vorname korrigiert: kein passender Schüler."); return; }
+                var liste = SchildGenerator.VornamenW.Contains(s.Vorname) ? SchildGenerator.VornamenW
+                          : SchildGenerator.VornamenM.Contains(s.Vorname) ? SchildGenerator.VornamenM
+                          : SchildGenerator.VornamenW.Concat(SchildGenerator.VornamenM).ToArray();
+                for (int versuch = 0; versuch < 200; versuch++)
+                {
+                    string vn = liste[_rnd.Next(liste.Length)];
+                    if (SchildText.Gleich(vn, s.Vorname) || !NeuerSchluessel(s.Nachname, vn, s.Geb)) continue;
+                    string vorher = s.Anzeige;
+                    NeueIdentitaet(s, s.Nachname, vn, s.Geb);
+                    Merke(s.Nachname, vn, s.Geb);
+                    _benutzt.Add(s.Key);
+                    _geaendert.Add(s.Key);
+                    Erkannt(s, true, 0, 0);
+                    E.Aenderungen.Add($"Vorname korrigiert: {vorher} → {vn} {s.NameFeld} ({s.Stufe}, " +
+                                      $"{Erkennung("Nachname + Geburtsdatum", true)})");
+                    E.Uebersicht.Add("1 korrigierter Vorname");
+                    return;
+                }
+                E.NichtMoeglich.Add("Vorname korrigiert: kein freier Vorname gefunden.");
+            }
+
+            /// <summary>Nachname ändert sich und der Schüler wechselt zugleich in eine Parallelklasse (Sek I).</summary>
+            private void NameUndKlasse()
+            {
+                var jgKlassen = _personen.Where(p => !p.Oberstufe && p.Klasse.Length >= 2)
+                    .GroupBy(p => p.Jg, StringComparer.Ordinal)
+                    .Select(g => (Jg: g.Key, Klassen: g.Select(p => p.Klasse).Distinct().OrderBy(k => k, StringComparer.Ordinal).ToList()))
+                    .Where(x => x.Klassen.Count >= 2).OrderBy(x => x.Jg, StringComparer.Ordinal).ToList();
+                for (int versuch = 0; versuch < 40 && jgKlassen.Count > 0; versuch++)
+                {
+                    var jk = jgKlassen[_rnd.Next(jgKlassen.Count)];
+                    var s = Zufall(_personen.Where(p => Frei(p) && !p.Oberstufe && p.Jg == jk.Jg && Entbehrlich(p)
+                                                        && Leistungen(p.Key).Count > 0).ToList());
+                    if (s == null) continue;
+                    var andere = jk.Klassen.Where(k => k != s.Klasse).ToList();
+                    string b = andere[_rnd.Next(andere.Count)];
+                    var r = Zufall(_personen.Where(p => p.Klasse == b && p.Status == 2 && !_benutzt.Contains(p.Key)
+                                                        && Leistungen(p.Key).Count > 0).ToList());
+                    if (r == null) continue;
+                    string? nn = null;
+                    for (int n = 0; n < 200 && nn == null; n++)
+                    {
+                        string kand = SchildGenerator.Nachnamen[_rnd.Next(SchildGenerator.Nachnamen.Length)];
+                        if (!SchildText.Gleich(kand, s.Nachname) && NeuerSchluessel(kand, s.Vorname, s.Geb)) nn = kand;
+                    }
+                    if (nn == null) continue;
+
+                    string vorher = s.Anzeige, klAlt = s.Klasse;
+                    var plaeneVorher = PlanVon(s.Key);
+                    var plaeneNachher = PlanVon(r.Key);
+                    var alt = Leistungen(s.Key);
+                    int pos = alt.Min();
+                    _ba.Setze(s.Basis, bKl, r.KlasseRoh);
+                    _ba.Setze(s.Basis, bN, nn);
+                    if (_lp != null && _lpZeile.TryGetValue(s.Key, out int ip)) _lp.Setze(ip, pN, nn);
+                    foreach (int i in alt) _le.Entferne(i);
+                    s.Nachname = nn;   // AlsPerson schreibt den neuen Namen in die kopierten Zeilen
+                    foreach (int i in Leistungen(r.Key)) _le.Einfuegen(pos, AlsPerson(_le.Zeilen[i], s));
+                    Merke(nn, s.Vorname, s.Geb);
+
+                    string gruppen = "";
+                    int kurs = 0;
+                    if (!plaeneVorher.SetEquals(plaeneNachher))
+                    {
+                        kurs = 1;
+                        var plus = plaeneNachher.Where(k => !plaeneVorher.Contains(k)).OrderBy(k => k, StringComparer.OrdinalIgnoreCase);
+                        var minus = plaeneVorher.Where(k => !plaeneNachher.Contains(k)).OrderBy(k => k, StringComparer.OrdinalIgnoreCase);
+                        gruppen = "; Kurs-/Gruppenwechsel: " + string.Join(", ", plus.Select(k => "+ " + k).Concat(minus.Select(k => "– " + k)));
+                    }
+                    Verlaesst(s);
+                    _benutzt.Add(s.Key); _benutzt.Add(r.Key);
+                    _geaendert.Add(s.Key);
+                    _klassenBeteiligt.Add(klAlt); _klassenBeteiligt.Add(b);
+                    Erkannt(s, false, 1, kurs);
+                    E.Aenderungen.Add($"Nachname geändert + Klassenwechsel: {vorher} ({klAlt}) → {s.Vorname} {nn} " +
+                                      $"({SchildText.KlasseNorm(b)}) (Leistungsdaten wie {r.Anzeige}){gruppen} – " +
+                                      $"{Erkennung("Vorname + Geburtsdatum, andere Klasse", false)}");
+                    E.Uebersicht.Add("1 Nachname geändert + Klassenwechsel");
+                    return;
+                }
+                E.NichtMoeglich.Add("Nachname + Klassenwechsel: kein passender Schüler gefunden.");
+            }
+
+            /// <summary>Neuaufnahme mit demselben Namen wie ein Mitschüler derselben Klasse (anderes Geburtsdatum).</summary>
+            private void Namensgleiche()
+            {
+                var aufnahme = DateOnly.FromDateTime(DateTime.Today.AddDays(14));
+                var r = Zufall(_personen.Where(p => !p.Oberstufe && p.Klasse.Length > 0 && p.Status == 2 && p.Id > 0
+                                                    && p.Zusatz.Length == 0 && !_benutzt.Contains(p.Key)
+                                                    && Leistungen(p.Key).Count > 0).ToList());
+                if (r == null || !Neuaufnahme(r, aufnahme, gleicherName: true))
+                {
+                    E.NichtMoeglich.Add("Namensgleiche: kein passender Schüler gefunden.");
+                    return;
+                }
+                E.Uebersicht.Add($"1 Neuaufnahme mit gleichem Namen wie ein Mitschüler (Status 0, Aufnahme {D(aufnahme)})");
             }
 
             private void FehltOhneAbgang()

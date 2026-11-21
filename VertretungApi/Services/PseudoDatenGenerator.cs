@@ -391,6 +391,7 @@ public static class PseudoDatenGenerator
         db.Zugehoerigkeiten.RemoveRange(db.Zugehoerigkeiten.Where(z => true));
         db.Schueler.RemoveRange(db.Schueler.Where(s => s.IstPseudo));
         db.Lerngruppen.RemoveRange(db.Lerngruppen.Where(l => l.IstPseudo || l.Typ == LerngruppeTyp.Gruppe));
+        db.Lehrkraefte.RemoveRange(db.Lehrkraefte.Where(l => l.IstPseudo));   // Phase 5.2c: Pseudo-Namen der Lehrkräfte
         db.SaveChanges();
     }
 

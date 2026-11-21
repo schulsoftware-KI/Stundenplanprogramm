@@ -46,13 +46,38 @@ namespace Stundenplan_V2.Vertretung
         public List<string> PlanSchluessel { get; set; } = new();
         public List<SchildNutzlastSchueler> Schueler { get; set; } = new();
 
-        /// <summary>Dieselbe Nutzlast als Import (probelauf = false) mit Prüfsumme der Vorschau und bestätigten Abgängen.</summary>
-        public SchildImportNutzlast AlsImport(string vorschau, List<int> abgaenge, string akteur) => new()
+        // ---- 5.2c-1 (Entscheidungen 188–190) ----
+        /// <summary>Kennung des Schlüssels („1A2B-3C4D“) – verrät ihn nicht; die API vergleicht sie mit dem letzten Import.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? Kennung { get; set; }
+        /// <summary>Neu-Zuordnung über Name + Klasse (Schlüssel verloren).</summary>
+        public bool Neuzuordnung { get; set; }
+        /// <summary>Gewählte Paare (zusammenführen bzw. zuordnen); null = Vorauswahl der API.</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<SchildPaar>? Paare { get; set; }
+
+        /// <summary>Dieselbe Nutzlast mit anderen Paaren (neue Vorschau nach geänderten Häkchen).</summary>
+        public SchildImportNutzlast MitPaaren(List<SchildPaar>? paare) => new()
+        {
+            Probelauf = true, Schuljahr = Schuljahr, Abschnitt = Abschnitt, GiltAb = GiltAb, Pseudo = Pseudo, Plan = Plan,
+            PlanSchluessel = PlanSchluessel, Schueler = Schueler, Kennung = Kennung, Neuzuordnung = Neuzuordnung, Paare = paare
+        };
+
+        /// <summary>
+        /// Dieselbe Nutzlast als Import (probelauf = false) mit Prüfsumme der Vorschau, bestätigten Abgängen und genau den Paaren,
+        /// die die Vorschau angewendet hat.
+        /// </summary>
+        public SchildImportNutzlast AlsImport(string vorschau, List<int> abgaenge, string akteur, List<SchildPaar> paare) => new()
         {
             Probelauf = false, Vorschau = vorschau, Abgaenge = abgaenge, Akteur = akteur,
             Schuljahr = Schuljahr, Abschnitt = Abschnitt, GiltAb = GiltAb, Pseudo = Pseudo, Plan = Plan,
-            PlanSchluessel = PlanSchluessel, Schueler = Schueler
+            PlanSchluessel = PlanSchluessel, Schueler = Schueler, Kennung = Kennung, Neuzuordnung = Neuzuordnung, Paare = paare
         };
+    }
+
+    /// <summary>5.2c-1: ein Paar Datensatz der Datenbank (Id) ↔ Schüler des Exports (Prüfsumme).</summary>
+    public sealed class SchildPaar
+    {
+        public int Id { get; set; }
+        public string ExtId { get; set; } = "";
     }
 
     public sealed class SchildNutzlastSchueler
@@ -271,7 +296,8 @@ namespace Stundenplan_V2.Vertretung
                 Pseudo = ex.IstPseudo,
                 Plan = string.IsNullOrWhiteSpace(plan.Bezeichnung) ? null : plan.Bezeichnung.Trim(),
                 PlanSchluessel = planSchluessel.ToList(),
-                Schueler = dtos
+                Schueler = dtos,
+                Kennung = schluessel.Kennung
             };
             return r;
         }

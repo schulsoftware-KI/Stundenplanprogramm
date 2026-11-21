@@ -43,6 +43,8 @@ namespace Stundenplan_V2.Vertretung
         public SchildLetzterImportDto? LetzterImport { get; set; }
         public DateOnly? FruehestensAb { get; set; }
         public DateOnly? VorschlagGiltAb { get; set; }
+        /// <summary>5.2c-1: Kennung des Schlüssels beim letzten Import dieser Art (null = noch keiner bzw. vor 5.2c).</summary>
+        public string? KennungLetzterImport { get; set; }
     }
 
     public sealed class SchildZeitraumDto
@@ -80,6 +82,10 @@ namespace Stundenplan_V2.Vertretung
         public int Abgaenge { get; set; }
         public int Unveraendert { get; set; }
         public int Uebersprungen { get; set; }
+        public string? Kennung { get; set; }
+        public bool NeuZuordnung { get; set; }
+        public int Zusammengefuehrt { get; set; }
+        public int NeuZugeordnet { get; set; }
     }
 
     public sealed class SchildSperreDto
@@ -103,6 +109,11 @@ namespace Stundenplan_V2.Vertretung
         public int UnbekannteSchluessel { get; set; }
         public int NeueLerngruppen { get; set; }
         public int GruppenAusSchild { get; set; }
+        // 5.2c-1
+        public int DieselbePerson { get; set; }
+        public int Zusammengefuehrt { get; set; }
+        public int ZuordnungPaare { get; set; }
+        public int NeuZugeordnet { get; set; }
     }
 
     /// <summary>Zeile der Vorschau (enthält Namen – bleibt im Fenster, nie im Bericht oder Log).</summary>
@@ -117,6 +128,10 @@ namespace Stundenplan_V2.Vertretung
         public bool Vorausgewaehlt { get; set; }
         public bool KontoWirdGesperrt { get; set; }
         public string? Hinweis { get; set; }
+        /// <summary>5.2c-1: bei Paaren die Prüfsumme des Schülers im Export.</summary>
+        public string? PartnerExtId { get; set; }
+        /// <summary>5.2c-1: Paar ist in dieser Vorschau angewendet.</summary>
+        public bool Gewaehlt { get; set; }
     }
 
     public sealed class SchildUnbekanntDto
@@ -149,6 +164,9 @@ namespace Stundenplan_V2.Vertretung
         public int Abschnitt { get; set; }
         public DateOnly GiltAb { get; set; }
         public bool Pseudo { get; set; }
+        public bool Neuzuordnung { get; set; }
+        public string? Kennung { get; set; }
+        public string? KennungLetzterImport { get; set; }
         public string? Grundplan { get; set; }
         public DateOnly? GrundplanAb { get; set; }
         public bool Gesperrt { get; set; }
@@ -180,6 +198,8 @@ namespace Stundenplan_V2.Vertretung
         public SchildZahlenDto Zahlen { get; set; } = new();
         public int AbgaengeBestaetigt { get; set; }
         public int Uebersprungen { get; set; }
+        public bool Neuzuordnung { get; set; }
+        public string? Kennung { get; set; }
         public List<string> Hinweise { get; set; } = new();
         public string Bericht { get; set; } = "";
     }

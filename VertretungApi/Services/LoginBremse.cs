@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
+using VertretungApi.Helpers;
 
 namespace VertretungApi.Services;
 
@@ -14,6 +15,14 @@ namespace VertretungApi.Services;
 //    von dort, eine Sperre träfe sonst alle Nutzer gleichzeitig.
 //  - Nach 30 Minuten ohne Fehlversuch ist alles vergessen; eine erfolgreiche
 //    Anmeldung setzt den Zähler des Kontos zurück.
+//
+//  P6a (Entscheidung 230):
+//  - Die Sperre je Adresse gilt nicht für Schuladressen (Zugriff:Schuladressen): Im Schul-WLAN erscheinen alle
+//    Geräte mit einer gemeinsamen öffentlichen Adresse – 20 Tippfehler am ersten Schultag sperrten sonst die
+//    Anmeldung für die ganze Schule. Die Sperre je Konto gilt dort unverändert.
+//  - Allgemein für Codes nutzbar: Falsche Codes des zweiten Faktors zählen beim Konto mit (gleicher Zähler wie das
+//    Passwort; das richtige Passwort setzt ihn bei einem Konto mit zweitem Faktor erst nach dem richtigen Code
+//    zurück). Weitere Codes (Einladungscodes in P7, Einrichtungscode in P8) bekommen einen eigenen Bereich.
 //
 //  Nur im Arbeitsspeicher: Ein Neustart der API setzt alle Zähler zurück.
 // =====================================================================
@@ -31,13 +40,23 @@ public class LoginBremse
 
     private readonly ConcurrentDictionary<string, Stand> _konten = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, Stand> _adressen = new();
+    private readonly Zugriffsschutz _zugriff;
+
+    public LoginBremse(Zugriffsschutz zugriff)
+    {
+        _zugriff = zugriff;
+    }
+
+    /// <summary>Schlüssel je Konto; bereich "" = Anmeldung (Passwort und zweiter Faktor).</summary>
+    private static string KontoSchluessel(string bereich, string benutzername)
+        => bereich.Length == 0 ? benutzername : bereich + "\u0001" + benutzername;
 
     /// <summary>Restliche Wartezeit, wenn Konto oder Adresse gerade gesperrt sind; sonst null.</summary>
-    public TimeSpan? Gesperrt(string benutzername, IPAddress? adresse)
+    public TimeSpan? Gesperrt(string benutzername, IPAddress? adresse, string bereich = "")
     {
         var jetzt = DateTimeOffset.UtcNow;
         TimeSpan? rest = null;
-        if (_konten.TryGetValue(benutzername, out var k) && k.SperreBis > jetzt)
+        if (_konten.TryGetValue(KontoSchluessel(bereich, benutzername), out var k) && k.SperreBis > jetzt)
             rest = k.SperreBis - jetzt;
         var a = AdressSchluessel(adresse);
         if (a != null && _adressen.TryGetValue(a, out var s) && s.SperreBis > jetzt)
@@ -48,14 +67,14 @@ public class LoginBremse
         return rest;
     }
 
-    public void Fehlschlag(string benutzername, IPAddress? adresse)
+    public void Fehlschlag(string benutzername, IPAddress? adresse, string bereich = "")
     {
-        Zaehle(_konten, benutzername, FreiJeKonto);
+        Zaehle(_konten, KontoSchluessel(bereich, benutzername), FreiJeKonto);
         var a = AdressSchluessel(adresse);
         if (a != null) Zaehle(_adressen, a, FreiJeAdresse);
     }
 
-    public void Erfolg(string benutzername) => _konten.TryRemove(benutzername, out _);
+    public void Erfolg(string benutzername, string bereich = "") => _konten.TryRemove(KontoSchluessel(bereich, benutzername), out _);
 
     private static void Zaehle(ConcurrentDictionary<string, Stand> tabelle, string schluessel, int frei)
     {
@@ -77,10 +96,12 @@ public class LoginBremse
         return new Stand(fehlversuche, jetzt + dauer, jetzt);
     }
 
-    private static string? AdressSchluessel(IPAddress? adresse)
+    private string? AdressSchluessel(IPAddress? adresse)
     {
         if (adresse == null) return null;
         if (adresse.IsIPv4MappedToIPv6) adresse = adresse.MapToIPv4();
-        return IPAddress.IsLoopback(adresse) ? null : adresse.ToString();
+        if (IPAddress.IsLoopback(adresse)) return null;
+        if (_zugriff.IstSchule(adresse)) return null;   // P6a (230)
+        return adresse.ToString();
     }
 }

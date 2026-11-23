@@ -51,6 +51,11 @@ namespace VertretungApi.Services;
 //    Liste dieser Art ganz ersetzt (193). Sichtbar nur für den Admin und die Lehrkraft selbst (194).
 //  - Neu-Zuordnung: Namensgleiche bilden Gruppen (Zeilen untereinander); je Gruppe ein Vorschlag (passender Eintritt,
 //    dann die meisten gemeinsamen Kurse) – nur, wenn er eindeutig ist. Angewendet wird er erst nach Bestätigung.
+//
+//  P4a (5.3a, Entscheidung 206): Warnungen zum Halbjahr – keine Sperren; der Desktop fragt vor dem Import nach:
+//  Abschnitt 2 mit „gilt ab“ vor „2. Halbjahr ab“, Abschnitt 1 mit „gilt ab“ im 2. Halbjahr, Abschnitt 2 ab dem
+//  2. Halbjahr ohne eigenen Grundplan (dazu, wenn erkennbar: unbekannte Plan-Schlüssel = SchILD liefert schon die Kurse
+//  des 2. Halbjahres). Sie stehen in „warnungen“ und als „WARNUNG:“ im Bericht.
 // =====================================================================
 
 public static class SchildImportService
@@ -213,9 +218,11 @@ public static class SchildImportService
     }
 
     /// <summary>Rechnet Abgleich und Vorschau (schreibt nichts). Der Import ruft danach <see cref="SchildImportLauf.Schreiben"/>.</summary>
-    public static async Task<SchildImportLauf> BerechnenAsync(AppDbContext db, SchildImportDto dto, bool produktiv, DateOnly heute)
+    /// <param name="halbjahrAb">P4a (206): Einstellung „2. Halbjahr ab“ (null = Standard 1. Februar).</param>
+    public static async Task<SchildImportLauf> BerechnenAsync(AppDbContext db, SchildImportDto dto, bool produktiv, DateOnly heute,
+        DateOnly? halbjahrAb = null)
     {
-        var lauf = new SchildImportLauf(dto, produktiv, heute);
+        var lauf = new SchildImportLauf(dto, produktiv, heute, halbjahrAb);
         await lauf.RechnenAsync(db);
         return lauf;
     }
@@ -359,12 +366,14 @@ public sealed class SchildImportLauf
     private readonly HashSet<Zugehoerigkeit> _beendet = new();
     private readonly List<(int Id, string ExtId)> _angewendetePaare = new();   // 5.2c-1: Teil der Prüfsumme der Vorschau
     private string? _letzteKennung;                                             // Kennung beim letzten Import dieser Art
+    private readonly DateOnly? _halbjahrAb;                                     // P4a: Einstellung „2. Halbjahr ab“
 
-    public SchildImportLauf(SchildImportDto dto, bool produktiv, DateOnly heute)
+    public SchildImportLauf(SchildImportDto dto, bool produktiv, DateOnly heute, DateOnly? halbjahrAb = null)
     {
         _dto = dto;
         _produktiv = produktiv;
         _heute = heute;
+        _halbjahrAb = halbjahrAb;
         _giltAb = dto.GiltAb;
         _vortag = dto.GiltAb.AddDays(-1);
         _sj = dto.Schuljahr;
@@ -372,6 +381,8 @@ public sealed class SchildImportLauf
 
     public List<SchildSperre> Sperren { get; } = new();
     public List<string> Hinweise { get; } = new();
+    /// <summary>P4a (206): Warnungen zum Halbjahr – der Desktop fragt vor dem Import nach (keine Sperre).</summary>
+    public List<string> Warnungen { get; } = new();
     public bool SeedEntfernenMoeglich { get; private set; }
     public bool Gesperrt => Sperren.Count > 0;
     public string? GrundplanBezeichnung { get; private set; }
@@ -465,6 +476,9 @@ public sealed class SchildImportLauf
         if (dto.Plan != null && !Cmp.Equals(dto.Plan, version.Bezeichnung.Trim()))
             Hinweise.Add($"Zugeordnet wurde mit der Plan-Spalte „{dto.Plan}“, am {D(_giltAb)} gilt aber der Grundplan " +
                          $"„{version.Bezeichnung}“ (ab {D(version.GueltigAb)}).");
+
+        // ---- 2a. P4a (206): Abschnitt und Stichtag zum 2. Halbjahr – Warnungen, keine Sperre ----
+        bool ohneNeuenPlan = HalbjahrPruefen(kal, version);
 
         var slots = await db.GrundplanSlots.AsNoTracking().Where(s => s.VersionId == version.Id).ToListAsync();
         var plan = SchildPlanIndex.Aus(slots);
@@ -572,6 +586,12 @@ public sealed class SchildImportLauf
             Sperre("UnbekannteSchluessel", $"{unbekannt.Count} von {alleSchluessel.Count} Plan-Schlüsseln gibt es im Grundplan " +
                                            $"am {D(_giltAb)} nicht (mehr als 10 %) – passt die Plan-Spalte? Grundplan zuerst " +
                                            "veröffentlichen.");
+        // P4a (206): zum 2. Halbjahr ohne eigenen Grundplan und dazu unbekannte Schlüssel – SchILD liefert dann vermutlich
+        // schon die Kurse des 2. Halbjahres, im Plan stehen noch die des 1. Halbjahres.
+        if (ohneNeuenPlan && Unbekannt.Count > 0)
+            Warnungen.Add($"{Unbekannt.Count} Plan-Schlüssel der Zuordnung gibt es im Grundplan „{version.Bezeichnung}“ nicht – " +
+                          "vermutlich stehen dort noch die Kurse des 1. Halbjahres, SchILD liefert schon die des 2. Halbjahres. " +
+                          "Dann zuerst den neuen Grundplan veröffentlichen.");
 
         // ---- 5. Doppelte Prüfsummen in der Nutzlast ----
         foreach (var g in eingaenge.Where(e => e.D.ExtIdSchild != null)
@@ -992,6 +1012,38 @@ public sealed class SchildImportLauf
             .ThenBy(z => z.Klasse ?? z.Stufe, Cmp).ThenBy(z => z.Name, Cmp).ToList();
         Zeilen.Clear();
         Zeilen.AddRange(sortiert);
+    }
+
+    // ----------------------------------------------------------------
+    //  P4a (206): Halbjahr
+    // ----------------------------------------------------------------
+
+    /// <summary>
+    /// Warnungen, wenn Abschnitt und „Änderungen gelten ab“ nicht zu „2. Halbjahr ab“ passen bzw. zum 2. Halbjahr kein
+    /// eigener Grundplan gilt. true = Abschnitt 2 ab dem 2. Halbjahr, am Stichtag gilt aber noch ein Plan von davor.
+    /// Nur Abschnitt 1 und 2 (Halbjahre) – Schulen mit vier Abschnitten bekommen keine Warnung.
+    /// </summary>
+    private bool HalbjahrPruefen(KalenderDb kal, GrundplanVersion version)
+    {
+        if (FehlzeitenService.HalbjahrAb(kal.Start, kal.Ende, _halbjahrAb) is not DateOnly h) return false;
+        int a = _dto.Abschnitt;
+        if (a == 2 && _giltAb < h)
+            Warnungen.Add($"Abschnitt 2 gehört zum 2. Halbjahr, „Änderungen gelten ab“ ({D(_giltAb)}) liegt aber vor dem " +
+                          $"2. Halbjahr ({D(h)}). Dann gälten Kurs- und Gruppenwechsel des 2. Halbjahres schon im 1. Halbjahr – " +
+                          $"meist ist der {D(h)} richtig.");
+        else if (a == 1 && _giltAb >= h)
+            Warnungen.Add($"Abschnitt 1 gehört zum 1. Halbjahr, „Änderungen gelten ab“ ({D(_giltAb)}) liegt aber im 2. Halbjahr " +
+                          $"(ab {D(h)}). Ist das ein älterer Export? Für das 2. Halbjahr in SchILD den Abschnitt 2 exportieren und " +
+                          "im Feld „Abschnitt“ wählen.");
+        if (a == 2 && _giltAb >= h && version.GueltigAb < h)
+        {
+            Warnungen.Add($"Zum 2. Halbjahr ({D(h)}) ist kein eigener Grundplan veröffentlicht – am {D(_giltAb)} gilt weiter " +
+                          $"„{version.Bezeichnung}“ (ab {D(version.GueltigAb)}). Gibt es zum Halbjahr einen neuen Stundenplan: " +
+                          $"zuerst im Wocheneditor „Grundplan veröffentlichen…“ mit „gilt ab“ {D(h)}, dann die Vorschau neu " +
+                          "berechnen. Bleibt der Plan, ist das in Ordnung.");
+            return true;
+        }
+        return false;
     }
 
     // ----------------------------------------------------------------
@@ -1528,6 +1580,7 @@ public sealed class SchildImportLauf
         sperren = Sperren,
         seedEntfernenMoeglich = SeedEntfernenMoeglich,
         hinweise = Hinweise,
+        warnungen = Warnungen,   // P4a (206)
         zahlen = Zahlen(),
         schueler = Zeilen,
         unbekannteSchluessel = Unbekannt.Select(u => new { schluessel = u.Schluessel, art = u.Art, schueler = u.Schueler }),
@@ -1558,6 +1611,7 @@ public sealed class SchildImportLauf
         neuzuordnung = p.NeuZuordnung,
         kennung = p.SchluesselKennung,
         hinweise = Hinweise,
+        warnungen = Warnungen,   // P4a (206)
         bericht = Bericht(p)
     };
 
@@ -1578,6 +1632,7 @@ public sealed class SchildImportLauf
             b.AppendLine("NEU-ZUORDNUNG über Name + Klasse (Schlüssel verloren)" +
                          (_letzteKennung != null ? $" – bisher Kennung {_letzteKennung}, neu {_dto.Kennung}" : ""));
         foreach (var s in Sperren) b.AppendLine("GESPERRT: " + s.Text);
+        foreach (var w in Warnungen) b.AppendLine("WARNUNG: " + w);   // P4a (206)
         b.AppendLine($"Schüler im Export: {ImExport}");
         if (_dto.Neuzuordnung)
             b.AppendLine($"  neu zugeordnet (Name + Klasse): {NeuZugeordnet} (mögliche Paare: {ZuordnungPaare})");

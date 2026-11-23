@@ -37,6 +37,16 @@
     </button>
   </header>
 
+  <!-- P4a (Entscheidung 221): Testdatum der Entwicklung – die App rechnet mit diesem Tag als heute -->
+  <p id="testdatumBand" class="testdatum-band" role="status" hidden></p>
+
+  <!-- P6a (Entscheidung 228): einmal nach der Anmeldung – erfolglose Versuche seit der letzten Anmeldung,
+       Anmeldung mit Wiederherstellungscode, Admin ohne „Angemeldet bleiben“ -->
+  <div id="nachAnmeldung" class="nach-anmeldung" role="status" hidden>
+    <p id="nachAnmeldungText" class="nach-anmeldung-text"></p>
+    <button id="nachAnmeldungOk" class="textknopf klein" type="button">OK</button>
+  </div>
+
   <!-- Hilfe: Kurzkarte beim ersten Besuch eines Bereichs (Entscheidung 53).
        hilfe.js setzt sie an den Anfang des sichtbaren Bereichs. -->
   <section id="hiKarte" class="hi-karte" aria-labelledby="hiKarteTitel" hidden>
@@ -81,6 +91,22 @@
       <p id="pwVergessenText" class="hinweis pw-vergessen" hidden>Ein neues Startpasswort bekommst du von deiner
         Klassenleitung bzw. Stufenkoordination, Lehrkräfte vom Admin. Per E-Mail geht das nicht.</p>
     </form>
+
+    <!-- P6a (Entscheidung 225): zweiter Schritt bei einem Konto mit zweitem Faktor -->
+    <form id="codeForm" class="karte" novalidate hidden>
+      <h2 class="karte-titel">Bestätigungscode</h2>
+      <p id="codeHinweis" class="hinweis" role="status"></p>
+      <input id="codeName" type="text" name="username" autocomplete="username" hidden />
+      <label class="feld" for="codeEingabe" id="codeLabel">Code aus der App</label>
+      <input id="codeEingabe" class="eingabe zf-code" type="text" inputmode="numeric" autocomplete="one-time-code"
+             autocapitalize="none" autocorrect="off" spellcheck="false" maxlength="7" enterkeyhint="go" />
+      <p id="codeFehler" class="fehler" role="alert" hidden></p>
+      <button id="codeKnopf" class="hauptknopf" type="submit">Bestätigen</button>
+      <button id="codeWechsel" class="textknopf" type="button">Wiederherstellungscode verwenden</button>
+      <button id="codeZurueck" class="textknopf" type="button">Zurück zur Anmeldung</button>
+      <p class="kleingedruckt ohne-einzug">Handy weg? Melde dich mit einem deiner Wiederherstellungscodes an und richte den
+        zweiten Faktor danach neu ein. Ohne Codes setzt ihn der Admin zurück.</p>
+    </form>
   </main>
 
   <!-- Eigenes Passwort festlegen bzw. ändern (Phase 2, Schritt 5). Das Formular wandert
@@ -112,6 +138,86 @@
     </div>
   </main>
 
+  <!-- P6a (Entscheidungen 225–227): zweiter Faktor – Pflicht-Seite nach dem Passwort. Der Assistent wandert bei
+       „Zweiter Faktor…“ (Kontomenü) in den Dialog #zfDialog und danach wieder hierher. -->
+  <main id="faktorPflicht" class="anmeldung" hidden>
+    <div id="zfHeimat" class="karte">
+      <h2 id="zfPflichtTitel" class="karte-titel">Zweiten Faktor einrichten</h2>
+      <p id="zfPflichtText" class="hinweis"></p>
+      <div id="zfAssistent" class="zf-assistent">
+        <div id="zfStand">
+          <p id="zfStandText" class="zf-stand" role="status"></p>
+          <p id="zfStandFehler" class="fehler" role="alert" hidden></p>
+          <div class="knopfreihe">
+            <button id="zfEinrichtenKnopf" class="hauptknopf" type="button">Einrichten …</button>
+            <button id="zfCodesKnopf" class="textknopf" type="button" hidden>Neue Wiederherstellungscodes …</button>
+            <button id="zfAusKnopf" class="textknopf" type="button" hidden>Ausschalten …</button>
+          </div>
+        </div>
+
+        <form id="zfPruefen" class="pw-form" novalidate hidden>
+          <p id="zfPruefenText" class="kleingedruckt ohne-einzug"></p>
+          <input id="zfName" type="text" name="username" autocomplete="username" hidden />
+          <div id="zfPasswortFeld">
+            <label class="feld" for="zfPasswort">Passwort</label>
+            <input id="zfPasswort" type="password" autocomplete="current-password" enterkeyhint="next" />
+          </div>
+          <div id="zfCodeFeld" hidden>
+            <label class="feld" for="zfCode">Code aus der App oder Wiederherstellungscode</label>
+            <input id="zfCode" class="eingabe zf-code" type="text" autocomplete="one-time-code" autocapitalize="characters"
+                   autocorrect="off" spellcheck="false" maxlength="11" enterkeyhint="go" />
+          </div>
+          <p id="zfPruefenFehler" class="fehler" role="alert" hidden></p>
+          <div class="knopfreihe">
+            <button id="zfWeiter" class="hauptknopf" type="submit">Weiter</button>
+            <button id="zfPruefenZurueck" class="textknopf" type="button">Abbrechen</button>
+          </div>
+        </form>
+
+        <form id="zfQr" class="pw-form" novalidate hidden>
+          <ol class="zf-schritte">
+            <li>Öffne auf deinem Handy eine Authenticator-App (z. B. die von Google oder Microsoft, FreeOTP, Aegis,
+              2FAS) und füge ein Konto hinzu.</li>
+            <li>Scanne den QR-Code – oder wähle „Schlüssel eingeben“ und tippe den Schlüssel ab (zeitbasiert).</li>
+            <li>Gib den 6-stelligen Code ein, den die App jetzt zeigt.</li>
+          </ol>
+          <div id="zfQrBild" class="zf-qr"></div>
+          <p class="feld">Schlüssel zum Abtippen</p>
+          <p id="zfSchluessel" class="zf-schluessel"></p>
+          <button id="zfSchluesselKopieren" class="textknopf klein" type="button">Schlüssel kopieren</button>
+          <p id="zfKonto" class="kleingedruckt ohne-einzug"></p>
+          <label class="feld" for="zfNeuCode">Code aus der App</label>
+          <input id="zfNeuCode" class="eingabe zf-code" type="text" inputmode="numeric" autocomplete="one-time-code"
+                 autocorrect="off" spellcheck="false" maxlength="7" enterkeyhint="go" />
+          <p id="zfQrFehler" class="fehler" role="alert" hidden></p>
+          <div class="knopfreihe">
+            <button id="zfBestaetigen" class="hauptknopf" type="submit">Bestätigen</button>
+            <button id="zfQrZurueck" class="textknopf" type="button">Abbrechen</button>
+          </div>
+          <p class="kleingedruckt ohne-einzug">Den QR-Code und den Schlüssel nicht weitergeben und kein Bildschirmfoto davon
+            aufheben – wer sie hat, kann Codes für dein Konto erzeugen.</p>
+        </form>
+
+        <div id="zfCodes" hidden>
+          <p class="hinweis">Fertig – der zweite Faktor ist eingerichtet. Hier sind deine <strong>Wiederherstellungscodes</strong>:
+            Mit jedem kommst du einmal herein, wenn das Handy fehlt. Sie werden <strong>nur jetzt</strong> angezeigt.</p>
+          <ol id="zfCodeListe" class="zf-codeliste"></ol>
+          <div class="knopfreihe">
+            <button id="zfCodesDrucken" class="hauptknopf klein" type="button">Drucken</button>
+            <button id="zfCodesKopieren" class="textknopf" type="button">Kopieren</button>
+          </div>
+          <p class="kleingedruckt ohne-einzug">Sicher aufbewahren – nicht auf dem Handy mit der Authenticator-App. Auf anderen
+            Geräten bist du jetzt abgemeldet.</p>
+          <label class="schalter gross zf-gesichert"><input id="zfGesichert" type="checkbox" />
+            <span>Ich habe die Codes gedruckt bzw. sicher gespeichert.</span></label>
+          <button id="zfFertig" class="hauptknopf" type="button" disabled>Fertig</button>
+        </div>
+
+        <button id="zfAbmelden" class="textknopf" type="button" hidden>Abmelden</button>
+      </div>
+    </div>
+  </main>
+
   <!-- Kontenverwaltung (Phase 2, Schritt 5): Admin alles, Klassenleitung/Stufenkoordination
        nur Passwörter der Schülerkonten ihrer Klasse/Stufe -->
   <main id="verwaltung" class="verwaltung" hidden>
@@ -126,6 +232,7 @@
       <button type="button" role="tab" data-reiter="konten" aria-selected="true">Konten</button>
       <button type="button" role="tab" data-reiter="sammel" aria-selected="false">Sammelanlage</button>
       <button type="button" role="tab" data-reiter="protokoll" aria-selected="false">Protokoll</button>
+      <button type="button" role="tab" data-reiter="zugriffe" aria-selected="false">Zugriffe</button>
       <button type="button" role="tab" data-reiter="downloads" aria-selected="false">Downloads</button>
       <button type="button" role="tab" data-reiter="schild" aria-selected="false">SchILD</button>
     </div>
@@ -156,6 +263,8 @@
             <option value="verwaist">Schüler fehlt</option>
             <option value="wiederaktiv">Laut SchILD aktiv, gesperrt</option>
             <option value="namegeaendert">Name laut SchILD geändert</option>
+            <option value="faktor" data-admin="1">Mit zweitem Faktor</option>
+            <option value="faktorfehlt" data-admin="1">Zweiter Faktor fehlt (Pflicht)</option>
           </select>
         </div>
         <button id="kNeu" class="hauptknopf klein" type="button">Neues Konto</button>
@@ -236,6 +345,79 @@
       <ul id="pListe" class="p-liste" aria-label="Protokoll"></ul>
     </section>
 
+    <!-- P6a (Entscheidung 228): Zugriffe – Anmeldeprotokoll; P6b (232, 233): „Ansichten“ (Leseprotokoll); nur Admin -->
+    <section id="vZugriffe" class="verw-bereich" aria-label="Zugriffe" hidden>
+      <div id="zgTeile" class="modi verw-reiter sch-teile" role="tablist" aria-label="Zugriffe">
+        <button type="button" role="tab" data-teil="anmeldungen" aria-selected="true">Anmeldungen</button>
+        <button type="button" role="tab" data-teil="ansichten" aria-selected="false">Ansichten</button>
+      </div>
+      <div id="zgAnmeldungen">
+        <p class="kleingedruckt ohne-einzug">Anmeldungen: erfolglose Anmeldungen aller Konten, erfolgreiche nur von Admin-Konten
+          und Anmeldungen mit Wiederherstellungscode – ohne Passwörter und ohne den Text unbekannter Benutzernamen, die Adresse
+          nur gekürzt. Konto suchen: Teil des Benutzernamens, „-“ für unbekannte Konten. Einträge werden nach der
+          Aufbewahrungsfrist gelöscht (Einstellungen → Datenschutz).</p>
+        <p id="zgZusammenfassung" class="hinweis zg-zusammenfassung" role="status" hidden></p>
+        <div class="k-filter zg-filter">
+          <label for="zgKonto" class="vh">Konto</label>
+          <input id="zgKonto" class="eingabe" type="search" placeholder="Konto suchen"
+                 autocomplete="off" autocapitalize="none" spellcheck="false" enterkeyhint="search" />
+          <label for="zgErgebnis" class="vh">Ergebnis</label>
+          <select id="zgErgebnis" class="eingabe">
+            <option value="">Alle Ergebnisse</option>
+            <option value="erfolglos">Nur erfolglose</option>
+            <option value="erfolgreich">Nur erfolgreiche</option>
+          </select>
+          <div class="zg-datum">
+            <label for="zgVon" class="feld klein-feld">Von</label>
+            <input id="zgVon" class="eingabe" type="date" />
+          </div>
+          <div class="zg-datum">
+            <label for="zgBis" class="feld klein-feld">Bis</label>
+            <input id="zgBis" class="eingabe" type="date" />
+          </div>
+        </div>
+        <p id="zgInfo" class="such-info" role="status"></p>
+        <ul id="zgListe" class="p-liste" aria-label="Anmeldungen"></ul>
+      </div>
+      <div id="zgAnsichten" hidden>
+        <p class="kleingedruckt ohne-einzug">Ansichten (Leseprotokoll): wer wann welche Schülerdaten angesehen hat –
+          Fehlzeiten, Stundenblatt, Einträge, Schülerplan, Gruppenlisten – und wer Abwesenheitsgründe der Lehrkräfte bzw.
+          „Nicht erfasst“ anderer Lehrkräfte geöffnet hat. Je Tag, Konto, Ansicht und Gegenstand ein Eintrag mit Anzahl und
+          Uhrzeit, ohne Inhalte. Jeder Aufruf dieser Liste steht selbst darin. Einträge werden nach der Aufbewahrungsfrist
+          gelöscht (Einstellungen → Datenschutz).</p>
+        <p id="zaSchalter" class="hinweis warnung-leise" role="status" hidden></p>
+        <div class="k-filter zg-filter za-filter">
+          <div class="za-schueler">
+            <label for="zaSchueler" class="vh">Schüler</label>
+            <input id="zaSchueler" class="eingabe" type="search" placeholder="Schüler suchen"
+                   autocomplete="off" autocapitalize="none" spellcheck="false" enterkeyhint="search" />
+            <ul id="zaTreffer" class="treffer za-treffer" aria-label="Treffer" hidden></ul>
+            <p id="zaGewaehlt" class="za-gewaehlt" hidden>
+              <span id="zaGewaehltName"></span>
+              <button id="zaSchuelerWeg" class="textknopf klein" type="button">Alle Schüler</button>
+            </p>
+          </div>
+          <label for="zaKonto" class="vh">Konto</label>
+          <input id="zaKonto" class="eingabe" type="search" placeholder="Konto"
+                 autocomplete="off" autocapitalize="none" spellcheck="false" enterkeyhint="search" />
+          <label for="zaAnsicht" class="vh">Ansicht</label>
+          <select id="zaAnsicht" class="eingabe">
+            <option value="">Alle Ansichten</option>
+          </select>
+          <div class="zg-datum">
+            <label for="zaVon" class="feld klein-feld">Von</label>
+            <input id="zaVon" class="eingabe" type="date" />
+          </div>
+          <div class="zg-datum">
+            <label for="zaBis" class="feld klein-feld">Bis</label>
+            <input id="zaBis" class="eingabe" type="date" />
+          </div>
+        </div>
+        <p id="zaInfo" class="such-info" role="status"></p>
+        <ul id="zaListe" class="p-liste" aria-label="Ansichten"></ul>
+      </div>
+    </section>
+
     <!-- Phase 5.2c-2 (Entscheidungen 192, 196): Vorschläge aus SchILD und SchILD-Importe – nur Admin -->
     <section id="vSchild" class="verw-bereich" aria-label="SchILD" hidden>
       <div id="schTeile" class="modi verw-reiter sch-teile" role="tablist" aria-label="SchILD">
@@ -274,6 +456,10 @@
           <option value="KursheftPdf">Kursheft (PDF)</option>
           <option value="FehlzeitenCsv">Fehlzeiten (CSV)</option>
           <option value="Archiv">Jahresarchiv (Zip)</option>
+          <option value="SchildRueckweg">Rückweg nach SchILD (abgeholt)</option>
+          <option value="SchildRueckwegDatei">Rückweg nach SchILD (Datei)</option>
+          <option value="SchildRueckwegProbe">Rückweg nach SchILD (Probedatei)</option>
+          <option value="Auskunft">Auskunft (Art. 15)</option>
         </select>
         <label for="dPerson" class="vh">Person</label>
         <input id="dPerson" class="eingabe" type="search" placeholder="Person"
@@ -313,6 +499,22 @@
       <p id="esPInfo" class="such-info" role="status"></p>
       <ul id="esPListe" class="p-liste" aria-label="Änderungen der Einstellungen"></ul>
     </section>
+  </main>
+
+  <!-- P4a (5.3a, Entscheidung 205): Jahresablauf, nur Admin. Karten mit Ampel baut jahresablauf.js. -->
+  <main id="jahresablauf" class="verwaltung jahresablauf" hidden>
+    <div class="verw-kopf">
+      <button id="jaZurueck" class="textknopf" type="button">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Zum Plan
+      </button>
+    </div>
+    <p class="kleingedruckt ohne-einzug">Was zum Halbjahres- und Schuljahreswechsel zu tun ist – mit Ampel: grün erledigt,
+      gelb zu tun, rot überfällig, grau nur ein Hinweis. Hier geschieht nichts von selbst; die Knöpfe führen in den
+      passenden Bereich.</p>
+    <div id="jaKopf"></div>
+    <p id="jaInfo" class="such-info" role="status"></p>
+    <div id="jaKarten" class="ja-karten"></div>
   </main>
 
   <!-- Klassenbuch (Phase 3.1): Stundenblatt, Gruppe zusammenstellen, Meine Gruppen.
@@ -586,6 +788,8 @@
         <p id="fzSWann" class="kb-wann"></p>
         <h2 id="fzSName" class="kb-fach"></h2>
         <p id="fzSInfo" class="kb-wer"></p>
+        <!-- P6b (234): Auskunft nach Art. 15 (nur Admin) -->
+        <div id="fzSAktionen" class="knopfreihe klein fz-s-aktionen" hidden></div>
       </div>
       <div id="fzSumme" class="fz-summe"></div>
       <div id="fzEntsch" class="fz-entsch"></div>
@@ -687,8 +891,10 @@
     <button id="fzKnopf" class="menuepunkt" type="button" hidden>Klassenbuch</button>
     <button id="kontenKnopf" class="menuepunkt" type="button" hidden>Konten verwalten</button>
     <button id="esKnopf" class="menuepunkt" type="button" hidden>Einstellungen</button>
+    <button id="jaKnopf" class="menuepunkt" type="button" hidden>Jahresablauf</button>
     <button id="hilfeMenue" class="menuepunkt" type="button" aria-haspopup="dialog">Hilfe</button>
     <button id="pwAendernKnopf" class="menuepunkt" type="button">Passwort ändern</button>
+    <button id="zfKnopf" class="menuepunkt" type="button" aria-haspopup="dialog" hidden>Zweiter Faktor …</button>
     <button id="abmelden" class="menuepunkt" type="button">Abmelden</button>
     <button id="ueberallAbmelden" class="menuepunkt leise" type="button">Auf allen Geräten abmelden</button>
     <p id="kontoFehler" class="fehler klein" role="alert" hidden></p>
@@ -700,6 +906,13 @@
     <h2 id="pwDialogTitel" class="karte-titel">Passwort ändern</h2>
     <p class="kleingedruckt ohne-einzug">Danach bist du auf allen anderen Geräten abgemeldet.</p>
     <div id="pwDialogPlatz"></div>
+  </dialog>
+
+  <!-- P6a: zweiter Faktor (Kontomenü) – der Assistent kommt aus #zfHeimat -->
+  <dialog id="zfDialog" class="fenster zf-dialog" aria-labelledby="zfDialogTitel">
+    <h2 id="zfDialogTitel" class="karte-titel">Zweiter Faktor</h2>
+    <div id="zfDialogPlatz"></div>
+    <button id="zfZu" class="menuepunkt schliessen" type="button">Schließen</button>
   </dialog>
 
   <!-- Konto: Details und Aktionen -->
@@ -850,6 +1063,8 @@
       <label class="schalter gross"><input type="radio" name="fbBew" value="Unentschuldigt" /> <span>unentschuldigt</span></label>
     </fieldset>
     <p id="fbHinweis" class="kleingedruckt ohne-einzug" hidden></p>
+    <p id="fbOhneGrund" class="kleingedruckt ohne-einzug" hidden>Ein Grund wird nicht erfasst (Einstellung der Schule) –
+      gespeichert wird „ohne Angabe“.</p>
     <p id="fbFehler" class="fehler klein" role="alert" hidden></p>
     <div class="knopfreihe">
       <button id="fbSpeichern" class="hauptknopf" type="button">Speichern</button>
@@ -871,19 +1086,40 @@
         <input id="feBis" class="eingabe" type="date" />
       </div>
     </div>
-    <label class="feld" for="feGrund">Grund</label>
-    <select id="feGrund" class="eingabe">
-      <option value="Krankheit">Krankheit</option>
-      <option value="Arzttermin">Arzttermin</option>
-      <option value="Familiaer">familiär</option>
-      <option value="Sonstiges">sonstiges</option>
-    </select>
+    <!-- P6b (Entscheidung 236): ohne Auswahl, wenn „Grund der Entschuldigung erfassen“ aus ist -->
+    <div id="feGrundBox">
+      <label class="feld" for="feGrund">Grund</label>
+      <select id="feGrund" class="eingabe">
+        <option value="Krankheit">Krankheit</option>
+        <option value="Arzttermin">Arzttermin</option>
+        <option value="Familiaer">familiär</option>
+        <option value="Sonstiges">sonstiges</option>
+      </select>
+    </div>
+    <p id="feOhneGrund" class="kleingedruckt ohne-einzug" hidden>Ein Grund wird nicht erfasst (Einstellung der Schule) –
+      gespeichert wird „ohne Angabe“.</p>
     <p class="kleingedruckt ohne-einzug fe-hinweis">Gilt für alle Fehlstunden und Verspätungen im Zeitraum – auch für
       solche, die erst später eingetragen werden.</p>
     <p id="feFehler" class="fehler klein" role="alert" hidden></p>
     <div class="knopfreihe">
       <button id="feSpeichern" class="hauptknopf" type="button">Eintragen</button>
       <button id="feAbbrechen" class="textknopf" type="button">Abbrechen</button>
+    </div>
+  </dialog>
+
+  <!-- P6b (Entscheidungen 234, 235): Auskunft nach Art. 15 DSGVO – nur Admin -->
+  <dialog id="auDialog" class="fenster" aria-labelledby="auTitel">
+    <h2 id="auTitel" class="karte-titel">Auskunft nach Art. 15 DSGVO</h2>
+    <p id="auWas" class="pd-was"></p>
+    <p id="auText" class="kleingedruckt ohne-einzug"></p>
+    <p class="kleingedruckt ohne-einzug"><strong>Enthält personenbezogene Daten.</strong> Gib das PDF nur der berechtigten
+      Person – bei Minderjährigen ggf. den Eltern. Wer eine Auskunft bekommt und wie die Identität geprüft wird, regelt die
+      Schule. Der Download steht im Download-Protokoll (ohne Namen).</p>
+    <p id="auStatus" class="such-info" role="status"></p>
+    <p id="auFehler" class="fehler klein" role="alert" hidden></p>
+    <div class="knopfreihe">
+      <button id="auErstellen" class="hauptknopf" type="button">PDF erstellen</button>
+      <button id="auAbbrechen" class="textknopf" type="button">Abbrechen</button>
     </div>
   </dialog>
 
@@ -955,6 +1191,48 @@
   </dialog>
 
   <!-- Plan: Thema und Hausaufgabe einer Stunde (nur lesen; Phase 3.3) -->
+  <!-- P4b (5.3a, Entscheidungen 210–213): Fehlstunden für SchILD bereitstellen – Abholcode für den Desktop (nur Admin).
+       Zahlen und Code baut jahresablauf.js; Namen kommen hier nie an. -->
+  <dialog id="rwDialog" class="fenster rw-dialog" aria-labelledby="rwTitel">
+    <h2 id="rwTitel" class="karte-titel">Fehlstunden für SchILD bereitstellen</h2>
+    <p class="kleingedruckt ohne-einzug">Der Desktop holt die Fehlstunden mit einem Abholcode ab (Wocheneditor →
+      „SchILD-Daten…“ → Reiter „Rückweg“) und schreibt daraus die Datei SchuelerFehlstunden.dat für den Import in SchILD.
+      Die App gibt dabei keine Namen heraus, nur Prüfsummen – Namen und Geburtsdaten kommen aus dem SchILD-Export auf dem
+      Verwaltungsrechner.</p>
+    <fieldset class="art-wahl">
+      <legend class="feld">Zeitraum</legend>
+      <div id="rwZeitraeume" class="art-wahl"></div>
+    </fieldset>
+    <div id="rwEigen" class="fe-daten" hidden>
+      <div>
+        <label class="feld" for="rwVon">Von</label>
+        <input id="rwVon" class="eingabe" type="date" />
+      </div>
+      <div>
+        <label class="feld" for="rwBis">Bis</label>
+        <input id="rwBis" class="eingabe" type="date" />
+      </div>
+    </div>
+    <p id="rwInfo" class="such-info" role="status"></p>
+    <div id="rwZahlen" class="rw-zahlen"></div>
+    <div id="rwWarnung" class="cs-offen" role="note" hidden></div>
+    <div id="rwCodeBox" class="rw-code-box" hidden>
+      <p class="feld">Abholcode</p>
+      <p id="rwCode" class="rw-code" aria-live="polite"></p>
+      <p id="rwCodeInfo" class="kleingedruckt ohne-einzug"></p>
+    </div>
+    <p id="rwAktiv" class="kleingedruckt ohne-einzug" hidden></p>
+    <p class="pd-warnung" role="note"><strong>Den Abholcode nur der Person sagen, die den Desktop bedient.</strong> Er gilt
+      15 Minuten und für einen Abruf; der Desktop braucht zusätzlich den Push-Schlüssel. Der Abruf wird im
+      Download-Protokoll vermerkt. Vor der ersten echten Übertragung die SchILD-Datenbank sichern und eine Probedatei prüfen.</p>
+    <p id="rwFehler" class="fehler klein" role="alert" hidden></p>
+    <div class="knopfreihe">
+      <button id="rwErzeugen" class="hauptknopf" type="button" disabled>Abholcode erzeugen</button>
+      <button id="rwVerwerfen" class="textknopf" type="button" hidden>Code ungültig machen</button>
+      <button id="rwSchliessen" class="textknopf" type="button">Schließen</button>
+    </div>
+  </dialog>
+
   <dialog id="inhaltDialog" class="fenster" aria-labelledby="idTitel">
     <p id="idWann" class="kb-wann"></p>
     <h2 id="idTitel" class="karte-titel"></h2>
@@ -985,6 +1263,9 @@
   <script src="hausaufgaben.js"></script>
   <script src="eintraege.js"></script>
   <script src="einstellungen.js"></script>
+  <script src="jahresablauf.js"></script>
+  <script src="zweiterfaktor.js"></script>
+  <script src="zugriffe.js"></script>
   <script src="hilfe.js"></script>
   <script src="app.js"></script>
 </body>

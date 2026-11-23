@@ -99,6 +99,13 @@ public class Benutzer
     public DateTime? AngelegtAm { get; set; }          // UTC; ältere Konten: unbekannt
     public DateTime? LetzteAnmeldung { get; set; }     // UTC
     public DateTime? PasswortGeaendertAm { get; set; } // UTC (auch Zurücksetzen)
+
+    // P6a (Entscheidungen 225–227, Migration „Datenschutz“): zweiter Faktor (TOTP nach RFC 6238).
+    // Geheimnis 160 Bit als Base32 – nach der Einrichtung nie wieder angezeigt. Aktiv = ZweiterFaktorSeit gesetzt.
+    public string? ZweiterFaktorGeheimnis { get; set; }
+    public DateTime? ZweiterFaktorSeit { get; set; }   // UTC; null = kein zweiter Faktor
+    public long? ZweiterFaktorSchritt { get; set; }    // zuletzt benutzter Zeitschritt – jeder Code gilt nur einmal
+    public string? ZweiterFaktorCodes { get; set; }    // Prüfsummen der Wiederherstellungscodes (durch „;“ getrennt)
 }
 
 /// <summary>

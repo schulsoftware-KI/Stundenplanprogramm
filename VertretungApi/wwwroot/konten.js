@@ -17,6 +17,11 @@
 //             gesperrt" (Wiedereintritt) und „Name laut SchILD geändert" mit Vorschlag zum Umbenennen.
 //             P3: Liste „SchILD-Importe“ mit den Zahlen zu Klassenleitung und Lehrkräften (Kleinigkeit a);
 //             „Konto löschen“ rot, „Protokoll dieses Kontos“ normal statt grau (Kleinigkeit b).
+//             P6a: Reiter „Zugriffe“ (Anmeldeprotokoll, zugriffe.js); im Konto der Stand des zweiten Faktors und
+//             „Zweiten Faktor zurücksetzen“ (Handy verloren, nicht für das eigene Konto); Filter „Mit zweitem
+//             Faktor“ und „Zweiter Faktor fehlt (Pflicht)“. Nach dem Festlegen des eigenen Passworts geht es bei
+//             Pflicht zum zweiten Faktor weiter (zweiterfaktor.js).
+//             P6b: im Konto „Auskunft (Art. 15) …“ (Dialog in zugriffe.js); Reiter „Zugriffe“ mit „Ansichten“.
 //      Klassenleitung / Stufenkoordination („Schülerpasswörter"): Schülerkonten
 //             der eigenen Klasse/Stufe sehen, Passwort zurücksetzen, sperren/entsperren.
 //  - Startpasswörter erscheinen nur einmal: als Zugangszettel zum Drucken bzw.
@@ -242,6 +247,7 @@ function zeigePflicht() {
   el("inhalt").hidden = true;
   el("anmeldung").hidden = true;
   el("verwaltung").hidden = true;
+  el("faktorPflicht").hidden = true;   // P6a
   el("pflicht").hidden = false;
   el("aktualisieren").hidden = true;
   el("kontoKnopf").hidden = true;
@@ -302,7 +308,12 @@ async function pwSpeichern(e) {
     anmeldungUebernehmen(d, !!(state.anmeldung && state.anmeldung.dauerhaft));
     pwMerk = "";
     pwFormLeeren();
-    if (pwModus === "pflicht") {
+    if (pwModus === "pflicht" && d.faktorEinrichten) {
+      // P6a (226): erst Passwort, dann zweiter Faktor – das neue Passwort nur im Arbeitsspeicher weiterreichen
+      zfPwMerk = neu;
+      zeigeFaktorPflicht();
+      toast("Dein Passwort ist gespeichert. Jetzt noch der zweite Faktor.");
+    } else if (pwModus === "pflicht") {
       appStarten();
       toast("Dein Passwort ist gespeichert.");
     } else {
@@ -360,6 +371,8 @@ function zeigeVerwaltung() {
   el("grundplan").textContent = "";
 
   el("verwReiter").hidden = !admin;
+  // P6a: Filter zum zweiten Faktor nur für den Admin (Klassenleitung sieht nur Schülerkonten)
+  for (const o of el("kFilter").querySelectorAll("option[data-admin]")) { o.hidden = !admin; o.disabled = !admin; }
   el("kNeu").hidden = !admin;
   el("kRolle").hidden = !admin;
   el("kSuche").placeholder = admin ? "Suchen: Name, Kürzel, Klasse …" : "Suchen: Name …";
@@ -398,6 +411,7 @@ function verwaltungLeeren() {
   for (const id of ["kListe", "pListe", "dListe", "sZeilen", "sErgebnisZeilen", "sGruppen", "druck", "kfTreffer",
     "schListe", "siListe"])
     el(id).replaceChildren();
+  zugriffeLeeren();   // P6a
   for (const id of ["kInfo", "pInfo", "dInfo", "spName", "spPasswort", "spFuer", "sErgebnis", "sZusammenfassung",
     "schInfo", "siInfo"])
     el(id).textContent = "";
@@ -416,7 +430,7 @@ function verwaltungLeeren() {
 }
 
 function alleDialogeZu() {
-  for (const id of ["kDialog", "kfDialog", "spDialog", "pwDialog", "hiDialog"]) dialogZu(el(id));
+  for (const id of ["kDialog", "kfDialog", "spDialog", "pwDialog", "hiDialog", "zfDialog", "auDialog"]) dialogZu(el(id));
   kontoSchliessen();
 }
 
@@ -427,6 +441,7 @@ function reiterWaehlen(reiter) {
   el("vKonten").hidden = reiter !== "konten";
   el("vSammel").hidden = reiter !== "sammel";
   el("vProtokoll").hidden = reiter !== "protokoll";
+  el("vZugriffe").hidden = reiter !== "zugriffe";   // P6a
   el("vDownloads").hidden = reiter !== "downloads";
   el("vSchild").hidden = reiter !== "schild";
   verwaltungAktualisieren();
@@ -436,6 +451,7 @@ function verwaltungAktualisieren() {
   if (verw.reiter === "konten") kontenLaden();
   else if (verw.reiter === "sammel") sammelStart();
   else if (verw.reiter === "downloads") downloadsLaden();
+  else if (verw.reiter === "zugriffe") zugriffeLaden();   // P6a
   else if (verw.reiter === "schild") schildLaden();
   else protokollLaden();
 }
@@ -497,6 +513,7 @@ function kontoMarken(k) {
   // Phase 5.2c-2 (197)
   if (k.wiederAktiv) m.push({ text: "laut SchILD aktiv", art: "start" });
   if (k.nameGeaendert) m.push({ text: "Name laut SchILD geändert", art: "start" });
+  if (k.faktorFehlt) m.push({ text: "2. Faktor fehlt", art: "start" });   // P6a
   return m;
 }
 
@@ -542,6 +559,11 @@ function kontoDetail(k) {
     : k.passwortGeaendertAm ? `geändert ${datumZeit(k.passwortGeaendertAm)}` : "eigenes Passwort"]);
   if (k.gesperrt) zeilen.push(["Status", "gesperrt – Anmeldung nicht möglich"]);
   if (k.gesperrtDurch) zeilen.push(["Gesperrt durch", k.gesperrtDurch]);
+  // P6a (225–227): zweiter Faktor (Personalkonten)
+  if (k.rolle !== "Schueler")
+    zeilen.push(["Zweiter Faktor", k.zweiterFaktor
+      ? `eingerichtet${k.zweiterFaktorSeit ? " " + datumZeit(k.zweiterFaktorSeit) : ""}`
+      : k.faktorFehlt ? "fehlt – für diese Rolle Pflicht (wird bei der nächsten Anmeldung eingerichtet)" : "nicht eingerichtet"]);
   el("kdDaten").replaceChildren(...zeilen.flatMap(([a, b]) => [h("dt", null, a), h("dd", null, b)]));
 
   const aktionen = [];
@@ -571,6 +593,17 @@ function kontoDetail(k) {
         }))));
   }
   if (admin) aktionen.push(knopf("Bearbeiten", null, () => formular("bearbeiten", k)));
+  // P6a (227): Handy verloren – zweiten Faktor zurücksetzen (nicht das eigene Konto: dafür ein zweiter Admin bzw. der
+  // Notfallzugang auf dem Server)
+  if (admin && !k.ich && k.zweiterFaktor) {
+    aktionen.push(knopf("Zweiten Faktor zurücksetzen", null, (e) =>
+      bestaetigen(e.currentTarget, "Zweiten Faktor wirklich zurücksetzen? Nochmal tippen", () =>
+        kontoAktion(e.currentTarget, "POST", `api/konten/${k.id}/zweiter-faktor/zuruecksetzen`, (d) => {
+          toast(`Zweiter Faktor von ${d.benutzername} zurückgesetzt – das Konto ist auf allen Geräten abgemeldet.`);
+          kontoDetail(d);
+          kontenLaden();
+        }))));
+  }
   if (admin && !k.ich) {
     aktionen.push(knopf("Auf allen Geräten abmelden", null, (e) =>
       bestaetigen(e.currentTarget, "Wirklich überall abmelden? Nochmal tippen", () =>
@@ -614,6 +647,14 @@ function kontoDetail(k) {
       verw.protokollKonto = { id: k.id, name: k.benutzername };
       reiterWaehlen("protokoll");
     }));
+    // P6b (234, 235): Auskunft nach Art. 15 – Schülerkonto: über den Schüler, Personalkonto: kompakt
+    if (!(k.rolle === "Schueler" && (k.verwaist || !k.schuelerId)))
+      aktionen.push(knopf("Auskunft (Art. 15) …", null, () => auskunftOeffnen({
+        url: `api/auskunft/konto/${k.id}`,
+        name: k.rolle === "Schueler" ? `${kontoTitel(k)}${k.klasse ? ` (${k.klasse})` : ""} – Schülerkonto ${k.benutzername}`
+          : `Konto ${k.benutzername} (${k.rollenText})`,
+        schueler: k.rolle === "Schueler",
+      })));
   }
   el("kdAktionen").replaceChildren(...aktionen);
   fehlerIn("kdFehler", "");
@@ -1078,6 +1119,11 @@ const DOWNLOAD_ARTEN = {
   KursheftPdf: "Kursheft (PDF)",
   FehlzeitenCsv: "Fehlzeiten (CSV)",
   Archiv: "Jahresarchiv (Zip)",
+  // P4b (210): Rückweg nach SchILD – abgeholt vom Desktop bzw. gemeldete Datei
+  SchildRueckweg: "Rückweg nach SchILD (abgeholt)",
+  SchildRueckwegDatei: "Rückweg nach SchILD (Datei)",
+  SchildRueckwegProbe: "Rückweg nach SchILD (Probedatei)",
+  Auskunft: "Auskunft (Art. 15)",   // P6b (234, 235)
 };
 
 const kurzDatum = (iso) => { const [j, m, t] = String(iso).split("-"); return `${t}.${m}.${j}`; };
@@ -1347,7 +1393,7 @@ function kontenInit() {
     b.addEventListener("click", () => { if (verw.reiter !== b.dataset.reiter) reiterWaehlen(b.dataset.reiter); });
   el("verwReiter").addEventListener("keydown", (e) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
-    const liste = ["konten", "sammel", "protokoll", "downloads", "schild"];
+    const liste = ["konten", "sammel", "protokoll", "zugriffe", "downloads", "schild"];
     const i = (liste.indexOf(verw.reiter) + (e.key === "ArrowRight" ? 1 : liste.length - 1)) % liste.length;
     reiterWaehlen(liste[i]);
     document.querySelector(`#verwReiter [data-reiter="${liste[i]}"]`).focus();

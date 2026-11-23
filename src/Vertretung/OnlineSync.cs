@@ -193,7 +193,11 @@ namespace Stundenplan_V2.Vertretung
                 else
                 {
                     // P1: typische Antworten eines Reverse Proxys bzw. Proxys (403, 407, 502–504)
-                    var m = System.Text.RegularExpressions.Regex.Match(text, @"^Server (\d{3})");
+                    // P6a: dazu 403 „Adresse nicht freigegeben“ und 429 „Zu viele Anfragen“ – mit dem Text der API statt JSON.
+                    var m = System.Text.RegularExpressions.Regex.Match(text, @"^Server (\d{3}): ?(.*)$",
+                        System.Text.RegularExpressions.RegexOptions.Singleline);
+                    if (m.Success && OnlineVerbindung.FehlerText(m.Groups[2].Value) is string apiText)
+                        text = $"Server {m.Groups[1].Value}: {apiText}";
                     string? s = m.Success ? OnlineVerbindung.StatusErklaerung(int.Parse(m.Groups[1].Value,
                         System.Globalization.CultureInfo.InvariantCulture)) : null;
                     if (s != null) text += "\n\n" + s;

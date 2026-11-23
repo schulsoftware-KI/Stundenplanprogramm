@@ -647,7 +647,8 @@ Legt das Konto als Admin an (Standardname `admin`) bzw. gibt einem vorhandenen *
 Startpasswort, entsperrt es und beendet alle Anmeldungen. Konten anderer Rollen werden nicht angefasst.
 Das Startpasswort steht nur auf der Konsole; bei der ersten Anmeldung muss ein eigenes festgelegt werden.
 Kontenprotokoll: Akteur „Konsole“. Gedacht für das erste Konto im Echtbetrieb und für „Admin-Passwort
-vergessen“.
+vergessen“. Seit P6a setzt der Befehl auch den **zweiten Faktor** zurück (Handy des einzigen Admins verloren); im
+Echtbetrieb wird er nach dem eigenen Passwort neu eingerichtet.
 
 ### HTTPS und Reverse Proxy
 
@@ -920,6 +921,11 @@ Knopf **„Folgestand erzeugen…“** unten im Fenster „SchILD-Daten prüfen 
 - **Erwartete Vorschau:** Das Fenster nennt die Zahlen, die die Vorschau zeigen sollte, wenn genau der Ausgangsordner
   importiert ist (alle Abgänge bestätigt) – Kurs-/Gruppenwechsel enthält auch Klassenwechsel, die die Gruppen ändern.
 - **Datenschutz:** Pseudo-Namen nur im Fenster und in `FOLGESTAND.txt`; das Log nennt nur Zahlen.
+- **Abschnitt 2 (P4a, Entscheidung 207):** eigene Art von Folgestand (oben im Fenster, nur aus Abschnitt 1; die übrigen
+  Häkchen gelten dann nicht): dieselben Schüler, Abschnitt 2 in Basis- und Leistungsdaten, `Kurse.dat`, `Klassen.dat` und
+  `KurseLehrkraefte.dat`; 2 Klassenwechsel Sek I, 3 Kurswechsel EF, 2 Abwahlen (Grundkurs) in Q1/Q2, 3 Wechsel zwischen
+  Religion/PP-Gruppen, 2 zwischen anderen parallelen Sek-I-Gruppen (WP), 1 Abgang (Status 9), 1 Neuaufnahme zum
+  2. Halbjahr (Status 2, Aufnahme 1. Februar). `FOLGESTAND.txt` nennt die erwarteten Zahlen.
 
 ## SchILD-Abgleich: „dieselbe Person?“ und Neu-Zuordnung (Phase 5.2c-1)
 
@@ -1006,7 +1012,9 @@ Entscheidungen 138–141 (`claude/Einrichtung_Vorschlag.md`) und 199–203 (`cla
   | Schuljahr | `Schuljahr.Aktuell` | nach dem Datum, ab 1. August das neue (`DefaultSchuljahr`) |
   | | `Schuljahr.ErfassungAb`, `Schuljahr.ThemaAb`, `Schuljahr.HalbjahrAb` | erster Schultag laut Kalender, wie Erfassung, 1. Februar (`Klassenbuch:…`) |
   | Datenschutz | `Datenschutz.EintraegeLoeschenNachTagen` | 0 = aus (`Klassenbuch:EintraegeLoeschenNachTagen`) |
-  | | `Datenschutz.ProtokollTage` | 365 – Konten-, Download- und Einstellungsprotokoll (`Konten:ProtokollTage`) |
+  | | `Datenschutz.GruendeLoeschenNachTagen` (P4a) | 0 = aus – Grund/Bemerkung veröffentlichter Vertretungen |
+  | | `Datenschutz.AbgangKontenLoeschenNachTagen` (P4a) | 0 = aus – gesperrte Konten abgegangener Schüler |
+  | | `Datenschutz.ProtokollTage` | 365 – Konten-, Download-, Einstellungs- und (seit P4a) SchILD-Importprotokoll (`Konten:ProtokollTage`) |
   | | `Datenschutz.BerichteNurAdmin` | aus (`Berichte:NurAdmin`) |
   | Anmeldung | `Anmeldung.SitzungStunden`, `Anmeldung.AngemeldetBleibenTage` | 12 Stunden, 30 Tage – 0 = kein „Angemeldet bleiben“ (`Jwt:…`) |
 - **Übernahme (140):** Beim ersten Start legt `DatenbankStart` die Zeilen an – mit dem Wert aus appsettings, sonst
@@ -1032,6 +1040,203 @@ Entscheidungen 138–141 (`claude/Einrichtung_Vorschlag.md`) und 199–203 (`cla
 - **Desktop (Kleinigkeit c):** `GET /api/grundplan/veroeffentlicht?schuljahr=` (X-Api-Key) liefert Plan-Spalte und „gilt
   ab“ der Grundplan-Versionen; „Online veröffentlichen“, „Zeitraum veröffentlichen…“ und die SchILD-Vorschau warnen, wenn
   der Plan im Wocheneditor nicht zum veröffentlichten Grundplan passt.
+
+## Jahresablauf, Halbjahr und Fristen (P4a, 5.3a)
+
+Entscheidungen 205–209 und 221 (`claude/5.3_Vorschlag.md`). **Keine Schemaänderung** (Einstellungen sind Schlüssel/Wert).
+API: `Helpers/Testdatum.cs`, `Services/Jahresablauf.cs`, `Controllers/JahresablaufController.cs`, `Dtos/JahresablaufDtos.cs`,
+`Services/Aufraeumdienst.cs`, `Services/Schuleinstellungen.cs`, `Controllers/EinstellungenController.cs`,
+`Controllers/SchildController.cs`, `Services/SchildImportService.cs`; PWA: `jahresablauf.js`, `einstellungen.js`, `app.js`,
+`fehlzeiten.js`, `hilfe.js`, `style.css`, `sw.js` (Cache v21); Desktop: `Schild\SchildDialog*.cs`, `SchildFolgestand.cs`,
+`SchildImportClient.cs`.
+
+- **Testdatum (221):** `Entwicklung:Heute` (z. B. `2027-01-18`, Einstellungsdatei oder Umgebungsvariable
+  `Entwicklung__Heute`) verschiebt das „Heute“ der API (`KlassenbuchService.Heute()`): Schuljahr nach dem Datum,
+  Halbjahr, Stundenblatt, Gültigkeit, Fristen nach Datum, Jahresablauf, SchILD-Status. Zeitstempel (Protokolle, Anmeldung,
+  Fristen der Protokolle) laufen mit der echten Uhr. Im Echtbetrieb startet die API mit gesetztem Wert nicht
+  (Startprüfung). `GET /api/auth/optionen` liefert `testdatum`; die App zeigt ein Band und rechnet mit dem Tag als heute.
+  PowerShell (nur Entwicklung): `$env:Entwicklung__Heute = "2027-01-18"` vor `dotnet run`, danach
+  `Remove-Item Env:Entwicklung__Heute`.
+- **Jahresablauf (205):** `GET /api/jahresablauf` (nur Admin, JWT) – Karten mit Ampel (`gruen`, `gelb`, `rot`, `grau`),
+  ohne Namen. Karte „Halbjahreswechsel“ ab 4 Wochen vor „2. Halbjahr ab“ bis zum Ende des Schuljahres: Grundplan ab dem
+  2. Halbjahr, SchILD-Import Abschnitt 2, offene Fehlstunden/Verspätungen und nicht erfasste Stunden im 1. Halbjahr,
+  Rückweg nach SchILD (seit P4b grün erst mit einer gemeldeten vollständigen Datei, siehe unten), Sek-I-Gruppen des Plans am Stichtag
+  ohne Liste, Gruppenlisten mit wegfallendem Schlüssel. Nichts geschieht von selbst; die App springt in die Bereiche.
+- **Halbjahr beim Import (206):** `GET /api/schild/status` liefert das wirksame `halbjahrAb` (Einstellung bzw. 1. Februar –
+  vorher nur die Einstellung; der Vorschlag für den ersten Import von Abschnitt 2 ist jetzt auch mit „Standard“ der
+  Halbjahresbeginn), `heute`, `testdatum` und `abschnittVorschlag`. Vorschau und Import liefern `warnungen` (und
+  „WARNUNG:“ im Bericht): Abschnitt 2 mit „gilt ab“ vor dem 2. Halbjahr, Abschnitt 1 mit „gilt ab“ im 2. Halbjahr,
+  Abschnitt 2 ab dem 2. Halbjahr ohne eigenen Grundplan (dazu bei unbekannten Plan-Schlüsseln: „SchILD liefert schon die
+  Kurse des 2. Halbjahres“). Keine Sperre – der Desktop zeigt sie im Band und fragt vor dem Import nach. Enthält ein
+  Export Abschnitt 1 und 2, wählt der Desktop ab dem Stichtag Abschnitt 2 vor.
+- **Fristen (208, 209):** „Abwesenheitsgründe der Vertretungen löschen nach … Tagen“ (Grund und Bemerkung, die Vertretung
+  bleibt) und „Konten abgegangener Schüler löschen nach … Tagen“ (gesperrte Schülerkonten mit Abgang laut SchILD; je
+  Konto ein Eintrag „Gelöscht“ im Kontenprotokoll; Schüler und Klassenbuchdaten bleiben) – Standard 0 = aus, mit
+  DSB-Frage. Die Protokolle der SchILD-Importe fallen unter „Aufbewahrung der Protokolle“; behalten wird je Schuljahr +
+  Abschnitt + Art das neueste, je Schuljahr + Art das mit dem spätesten Stichtag und je Art das neueste mit
+  Schlüsselkennung (der Import braucht sie). Kürzere Frist: zählen, 409, nach Bestätigung sofort aufräumen; jede
+  Löschung steht mit Zahlen im Protokoll der Einstellungen (Akteur „System (Löschfrist)“).
+
+## Rückweg nach SchILD (P4b, 5.3a)
+
+Entscheidungen 210–213 (`claude/5.3_Vorschlag.md` §6). **Keine Schemaänderung** (Protokoll über `DownloadProtokoll.Art`,
+Abholcodes nur im Arbeitsspeicher). API: `Controllers/RueckwegController.cs`, `Services/SchildRueckweg.cs`,
+`Services/RueckwegCodes.cs`, `Dtos/RueckwegDtos.cs`, `Services/Jahresablauf.cs`; PWA: `jahresablauf.js`, `konten.js`,
+`hilfe.js`, `index.html`, `style.css`, `sw.js` (Cache v22); Desktop: `Schild\SchildRueckweg.cs`,
+`Schild\SchildDialog_Rueckweg.cs`, `SchildDialog.xaml(.cs)`, `SchildImportClient.cs`, `SchildProfil.cs`, `SchildZuordnung.cs`.
+
+- **App (nur Admin, JWT):** `GET /api/schild/rueckweg?von=&bis=` – Zeiträume (1./2. Halbjahr; Standard das laufende, in
+  den ersten 6 Wochen des 2. Halbjahres noch das 1.), Zahlen: übertragen (entschuldigt, beurlaubt = J, unentschuldigt) und
+  nicht übertragen (offen, Verspätungen, schulische Veranstaltung, ohne Prüfsumme, doppelt erfasst), nicht erfasste
+  Stunden, frühere Bereitstellungen, gültiger Code (ohne den Code). `bis` wird auf heute gekürzt.
+  `POST /api/schild/rueckweg/code` `{von, bis}` → Abholcode (8 Zeichen ohne 0/O/1/I/L, 15 Minuten, ein Abruf; ein neuer
+  ersetzt den alten; 5 Fehlversuche → verfallen). `DELETE /api/schild/rueckweg/code` macht ihn ungültig. Ein Neustart der
+  API löscht den Code.
+- **Desktop (`X-Api-Key`):** `POST /api/schild/rueckweg/abruf` `{code, pseudo, kennung, desktop}` – prüft zuerst Art
+  (Entwicklung = nur Pseudodaten, 83) und Schlüsselkennung des letzten Imports (dann bleibt der Code gültig), danach den
+  Code. Antwort: je Fehlstunde nur `extId`, `datum`, `stunde`, `fach` (der Stunde laut Plan; bei Vertretung das Fach des
+  Schülers, bei „verlegt hin“ das der verlegten Stunde), `lehrkraft` (laut Grundplan bzw. der verlegten Stunde), `art`
+  (`entschuldigt` | `unentschuldigt` | `beurlaubt`) – **keine Namen** –, dazu Zahlen, Kalender, `halbjahrAb` und ein
+  `merkzeichen`. Download-Protokoll: Art `SchildRueckweg` (abgeholt), Akteur = wer den Code erzeugt hat.
+  `POST /api/schild/rueckweg/datei` `{merkzeichen, von, bis, jahr, abschnitt, probe, klassen, zeilen, …}` – Meldung „Datei
+  geschrieben“ (2 Stunden, höchstens 10 je Abruf) → Art `SchildRueckwegDatei` bzw. `SchildRueckwegProbe`.
+- **Jahresablauf:** Punkt „Rückweg nach SchILD für das 1. Halbjahr“ ist grün erst mit einer `SchildRueckwegDatei` über das
+  ganze 1. Halbjahr; neue Karte „Rückweg nach SchILD“ mit dem Knopf zum Dialog und den bisherigen Einträgen.
+- **Desktop:** Reiter „Rückweg“ im Fenster „SchILD-Daten…“: Code → „Abrufen“ (vorher Status: Art, Schlüsselkennung; echte
+  Daten nur über HTTPS) → Zuordnung über die Prüfsumme (Schlüssel des Imports, unveränderte Eingabe) zu den Schülern des
+  gewählten Abschnitts → Vorschau mit Namen (nur im Fenster) und Bericht ohne Namen → „Datei schreiben…“ in einen neuen
+  Ordner `SchILD-Rueckweg_<Datum>` (Pseudodaten: `SchILD-Rueckweg-Pseudo_<Datum>` + `PSEUDODATEN.json`; Warnung bei
+  Cloud-Ordnern). Zusammenhängende Stunden (gleicher Tag, gleiches SchILD-Fach, gleiche Bewertung und Lehrkraft) werden
+  eine Zeile von–bis. Fach über die Fächertabelle (mehrdeutig → Leistungsdaten des Schülers), Lehrkraft über die feste
+  Kürzeltabelle (sonst leer). Stunden außerhalb des Abschnitts (1. bzw. 2. Halbjahr) kommen nicht in die Datei. Probedatei:
+  Klassen/Stufen und kürzerer Zeitraum. Übertragene Zeiträume: `schild_rueckweg.json` bzw. `schild_rueckweg_pseudo.json`
+  neben der Plandatei (ohne Personendaten) – Warnung bei Überschneidung. Formatprofil: `Rueckweg` → `Datei`, `Kopf`
+  (13 Spalten, erste „Nachname“ bzw. „Name“), `Zeichensatz` (leer = wie Profil bzw. Export).
+
+## Zugangsschutz (P6a, 5.4)
+
+Entscheidungen 224–231 (`claude/P6_Vorschlag.md` §2–§7). **Migration `Datenschutz`** (alle neuen Spalten und Tabellen
+von P6: `Benutzer.ZweiterFaktor*`, `AnmeldeProtokolle`, `LeseProtokolle` – Letztere füllt erst P6b). API:
+`Helpers/Totp.cs`, `Helpers/Zugriffsschutz.cs`, `Services/ZweiterFaktor.cs`, `Services/Anmeldedienst.cs`,
+`Services/Anmeldeprotokoll.cs`, `Services/Begrenzung.cs`, `Controllers/ZweiterFaktorController.cs`,
+`Controllers/ZugriffeController.cs`, `Model/Datenschutz.cs`, `Dtos/ZugriffDtos.cs`; geändert u. a. `Program.cs`,
+`AuthController.cs`, `KontenController.cs`, `EinstellungenController.cs`, `LoginBremse.cs`, `Betrieb.cs`,
+`ApiSchluessel.cs`; PWA: `zweiterfaktor.js` (mit eigenem QR-Erzeuger), `zugriffe.js`, `app.js`, `konten.js`,
+`einstellungen.js`, `hilfe.js`, `index.html`, `style.css`, `sw.js` (Cache v23); Desktop: `OnlineVerbindung.cs`,
+`OnlineSync.cs`.
+
+### Zweiter Faktor (TOTP)
+
+- **Verfahren (225):** RFC 6238 – HMAC-SHA1, 6 Ziffern, 30 s, ±1 Zeitschritt, jeder Code nur einmal (der zuletzt benutzte
+  Zeitschritt steht am Konto). Geheimnis 160 Bit (Base32) in der Datenbank, nach der Einrichtung nie wieder sichtbar.
+  10 Wiederherstellungscodes (`ABCDE-FGHJK`, ohne I/L/O/0/1), nur einmal sichtbar, gespeichert als SHA-256-Prüfsumme.
+- **Anmeldung:** `POST /api/auth/login` liefert bei einem Konto mit zweitem Faktor statt des Tokens
+  `{ codeNoetig, vorgang, gueltigSekunden }`; dann `POST /api/auth/login/code` `{ vorgang, code }` (Code der App bzw.
+  Wiederherstellungscode). Der Vorgang ist mit AES-GCM versiegelt (Schlüssel aus `Jwt:Key`), gilt 5 Minuten und nur,
+  solange der Sicherheitsstempel des Kontos gleich bleibt. Reihenfolge: Bremse → Passwort → gesperrt → Adresse (Admin) →
+  Code. Falsche Codes zählen in der Login-Bremse (Konto und Adresse); das richtige Passwort setzt den Zähler eines Kontos
+  mit zweitem Faktor erst nach dem richtigen Code zurück.
+- **Eigenes Konto** (`/api/auth/zweiter-faktor`, nur Personal): `GET` Stand · `POST beginnen` `{passwort, code?}` →
+  `{merker, schluessel, uri}` (10 Minuten; bei aktivem Faktor zusätzlich ein Code) · `POST einrichten` `{merker, code}` →
+  `{codes, anmeldung}` (andere Geräte abgemeldet, neues Token) · `POST codes` `{passwort, code}` · `POST ausschalten`
+  `{passwort, code}` (nur ohne Pflicht). Kontenprotokoll ohne Geheimnis und Codes.
+- **Pflicht (226):** Admin im Echtbetrieb immer; Schalter in den Einstellungen (Karte „Anmeldung“): „Zweiter Faktor für
+  Admins Pflicht“ (nur Entwicklung), „… für Klassenleitung und Stufenkoordination“, „… für alle Lehrkräfte“ (Standard
+  aus). Ohne Faktor ist nach dem Passwort nur die Einrichtung erlaubt (Claim `faktorEinrichten`, 403 mit
+  `faktorEinrichten`); erst Passwort festlegen, dann Faktor. Wer den letzten Wiederherstellungscode benutzt, muss neu
+  einrichten bzw. neue Codes erzeugen. Admin-Konten bekommen nie „Angemeldet bleiben“.
+- **Verlust (227):** Admin → Konten → Konto → „Zweiten Faktor zurücksetzen“
+  (`POST /api/konten/{id}/zweiter-faktor/zuruecksetzen`, nicht das eigene Konto). Eigenes Admin-Konto: zweiter Admin oder
+  `admin-anlegen` auf dem Server.
+- **Testen in der Entwicklung:** eine Authenticator-App auf dem Handy (oder am PC z. B. KeePassXC); für die Pflicht der
+  Admins Einstellungen → Anmeldung → „Zweiter Faktor für Admins Pflicht“. Die Uhr des Servers muss stimmen (das Testdatum
+  verschiebt nur „heute“, nicht die Uhr).
+
+### Anmeldeprotokoll und Reiter „Zugriffe“ (228)
+
+Erfolglose Anmeldungen aller Konten (Passwort bzw. Code falsch, unbekanntes Konto, gesperrt, gebremst, Adresse nicht
+erlaubt), erfolgreiche nur von Admin-Konten, jede Anmeldung mit Wiederherstellungscode – ohne Passwörter, unbekannte
+Benutzernamen ohne den eingegebenen Text, Adresse gekürzt (IPv4 /24, IPv6 /48), „Schulnetz“ ja/nein, Gerät grob.
+`GET /api/zugriffe/anmeldungen?konto=&ergebnis=&von=&bis=` (nur Admin; Konten verwalten → Reiter „Zugriffe“). Nach der
+Anmeldung nennt die Antwort (`fehlversuche`) die erfolglosen Versuche seit der letzten Anmeldung. Frist: „Aufbewahrung
+der Protokolle“.
+
+### Schuladressen und Adressbeschränkung (229)
+
+Nur in der Einstellungsdatei (nicht in der App; die Karte „Zugriff“ der Einstellungen zeigt sie zum Lesen):
+```json
+"Zugriff": {
+  "Schuladressen": [ "203.0.113.10/32", "2001:db8:1234::/48" ],
+  "DesktopNurSchule": false,
+  "AdminNurSchule": false
+}
+```
+- `DesktopNurSchule`: alle Endpunkte mit `X-Api-Key` antworten von anderen Adressen mit **403 „Adresse nicht
+  freigegeben“** – vor der Prüfung des Schlüssels und vor dem Lesen des Inhalts (`[DesktopSchnittstelle]`).
+- `AdminNurSchule`: Anmeldung eines Admin-Kontos **und jede Anfrage mit einem Admin-Token** von außerhalb → 403
+  (`adresseNichtErlaubt`); Anmeldeprotokoll „Adresse nicht erlaubt“. Notfall: Konsole.
+- Startprüfung: ungültiger Eintrag bzw. Beschränkung mit leerer Liste → Startfehler; Echtbetrieb mit Beschränkung ohne
+  `Proxy:Aktiv` → Hinweis. `localhost` gilt **nicht** von selbst als Schule – zum Testen `127.0.0.1/32` und `::1/128`
+  eintragen (z. B. `$env:Zugriff__Schuladressen__0 = "127.0.0.1/32"`, `…__1 = "::1/128"`).
+- Auch ohne Beschränkung: Die Login-Bremse sperrt Schuladressen nicht mehr als Ganzes (nur noch je Konto), die
+  Anfragebegrenzung ohne Anmeldung gilt dort nicht.
+
+### Anfragebegrenzung (230)
+
+Nur für `/api`; Werte in der Einstellungsdatei (Standard in Klammern, 0 = aus):
+`Begrenzung:JeKontoJeMinute` (300), `OhneAnmeldungJeMinute` (120, je Adresse; Schuladressen ausgenommen),
+`DesktopJeMinute` (600, je Adresse mit gültigem Schlüssel), `TeuerJeKonto` (2) und `TeuerGesamt` (4) gleichzeitige teure
+Abrufe (PDF, CSV, Archiv, SchILD-Import, Rückweg; `[TeurerAbruf]`), `TeuerWartenSekunden` (10),
+`OhneAnmeldungMaxKB` (64). Antwort **429** mit `Retry-After` und „Zu viele Anfragen – bitte in n Sekunden erneut
+versuchen.“ (App und Desktop zeigen den Text); im Log eine Warnung je Konto bzw. Adresse und 10 Minuten.
+
+### Sicherheits-Header (231)
+
+Dazu: `Permissions-Policy` (Kamera, Mikrofon, Standort, Zahlung, USB u. a. aus), `Cross-Origin-Opener-Policy` und
+`Cross-Origin-Resource-Policy: same-origin`, `X-Permitted-Cross-Domain-Policies: none`; Kestrel ohne `Server`-Kopf;
+HSTS (Echtbetrieb) 365 Tage mit `includeSubDomains`, ohne `preload`. Die CSP bleibt streng. Prüfen:
+`curl.exe -I http://localhost:5080/` bzw. `…/api/auth/optionen`.
+
+## Datenschutzfunktionen (P6b, 5.4)
+
+Entscheidungen 232–238 (`claude/P6_Vorschlag.md` §8–§11). Keine Migration – die Tabelle `LeseProtokolle` kommt mit
+`Datenschutz` (P6a).
+
+### Leseprotokoll (232, 233)
+
+- **Schalter** „Leseprotokoll“ (Einstellungen → Datenschutz, **Standard aus**, DSB- und Personalratsfrage). Aus = nichts
+  wird aufgezeichnet; gelesen wird er aus dem Zwischenspeicher der Einstellungen (`Services/Leseprotokoll.cs`).
+- **Aufgezeichnet** (nur lesende Abrufe): `fehlzeiten/schueler/{id}`, `…/klasse/{k}`, `…/offen/{k}`, `…/unterricht`,
+  `…/nicht-erfasst` (nicht „ich“), `klassenbuch/stunde` und `…/stunde/historie`, `klassenbuch/gruppe`,
+  `eintraege/stunde`, `…/schueler/{id}`, `…/klasse/{k}`, `…/unterricht`, `…/{id}/historie`, `woche/schueler/{id}`,
+  `schueler/{id}`, `lerngruppen/{id}/schueler`, `plan/tag`, `plan/lehrer/{k}` (Admin, andere Lehrkraft) und
+  `zugriffe/ansichten` selbst. **Nicht:** eigene Daten, Pläne von Klassen/Lehrkräften/Gruppen, Hausaufgaben, Themen,
+  Downloads (eigenes Protokoll).
+- **Zusammengefasst:** je Tag (Ortszeit), Konto, Ansicht, Schüler und Gegenstand eine Zeile mit `Anzahl`, `ErsteZeit`,
+  `LetzteZeit`. Gegenstand ohne Namen („Schüler-Id 12 (05A)“, „Klasse 05A“, „Stunde 18.11.2026, 3. · M · UNr 20 · L1“);
+  `Gruppe` hält bei Listenansichten die Lerngruppen (Bezeichnungen wie im Stundenblatt) für die Auskunft. Geschrieben wird
+  in einem eigenen DbContext, nacheinander; ein Fehler bricht die Ansicht nie ab (Warnung höchstens alle 5 Minuten).
+- **Einsicht:** `GET /api/zugriffe/ansichten?schueler=&konto=&ansicht=&von=&bis=&limit=` (Admin) – PWA: Konten verwalten
+  → „Zugriffe“ → „Ansichten“. Frist „Aufbewahrung der Protokolle“ (nach dem Tag des Eintrags), kein Löschen von Hand.
+
+### Auskunft nach Art. 15 (234, 235)
+
+- `GET /api/auskunft/schueler/{id}` bzw. `GET /api/auskunft/konto/{id}` (Admin, teurer Abruf) → PDF (QuestPDF,
+  `Services/Auskunft.cs` + `Services/AuskunftPdf.cs`). Schülerkonto → Schüler-Auskunft.
+- **Schüler:** Angaben nach Art. 15 Abs. 1 (Speicherdauer aus den Fristen), Stammdaten, Zugehörigkeiten, Konto mit Konten-
+  und Anmeldeprotokoll (handelnde Person als Rolle), Fehlzeiten (jede Stunde, Entschuldigungen, Summen je Halbjahr),
+  Schülereinträge, Änderungsverlauf, Leseprotokoll ohne Namen (Einzelansichten; Listenansichten seiner Lerngruppen als
+  Zahl je Monat und Rolle), Rückweg nach SchILD. **Konto:** Konto, Name laut SchILD, Protokolle, Abwesenheitsgründe,
+  Ansichten, Tätigkeiten im Klassenbuch und Downloads als Zahlen je Monat.
+- Download-Protokoll Art `Auskunft`, Was „Schüler-Id n (Klasse)“ bzw. „Konto-Id n (Rolle)“ – ohne Namen.
+
+### Grund der Entschuldigung (236)
+
+- Schalter „Grund der Entschuldigung erfassen“ (Einstellungen → Datenschutz, **Standard an**). Aus → `FehlGrund.OhneAngabe`
+  (Wert 4, keine Migration) beim Entschuldigen und Bewerten; `GET /api/fehlzeiten/rechte` meldet `grundErfassen`.
+- `GET /api/einstellungen/gruende` zählt, `POST /api/einstellungen/gruende-entfernen` `{ anzahl }` setzt alle Gründe
+  (Fehlstunden, Entschuldigungen, Änderungsverlauf) auf „ohne Angabe“ – nur bei ausgeschaltetem Schalter, 409 bei einer
+  anderen Zahl; Eintrag im Einstellungsprotokoll.
 
 ## Vertretungen aus Untis (U-1b und U-2, Desktop)
 

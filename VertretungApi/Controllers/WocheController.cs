@@ -23,16 +23,23 @@ namespace VertretungApi.Controllers;
 /// datum fehlt = heute; es wird immer ab dem Montag dieser Woche geliefert. wochen: 1–6.
 /// PlanLesen (Phase 2, Schritt 4) = nur Personal; mit "Woche:OhneLogin": true für alle.
 /// Schüler sehen ausschließlich ihren eigenen Plan über /ich.
+/// P6b (232): Der Plan eines Schülers (/schueler/{id}, zeigt z. B. Religionskurse) steht im Leseprotokoll; Pläne von
+/// Lehrkräften, Klassen und Gruppen und der eigene Plan nicht.
 /// </summary>
 [ApiController]
 [Route("api/woche")]
 public class WocheController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly Leseprotokoll _lese;
 
-    public WocheController(AppDbContext db) => _db = db;
+    public WocheController(AppDbContext db, Leseprotokoll lese)
+    {
+        _db = db;
+        _lese = lese;
+    }
 
-    private static DateOnly Heute() => DateOnly.FromDateTime(DateTime.Now);
+    private static DateOnly Heute() => KlassenbuchService.Heute();   // P4a: mit Testdatum
 
     /// <summary>Was sich in der PWA auswählen lässt (aus dem Grundplan, der am Datum gilt).</summary>
     [Authorize(Policy = Rollen.PlanLesen)]
@@ -65,7 +72,10 @@ public class WocheController : ControllerBase
     {
         var s = await _db.Schueler.FindAsync(id);
         if (s == null) return NotFound(new { fehler = "Schüler nicht gefunden." });
-        return Ok(await SchuelerPlan(s, datum ?? Heute(), wochen, await PersonalLeserAsync()));
+        var plan = await SchuelerPlan(s, datum ?? Heute(), wochen, await PersonalLeserAsync());
+        await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.PlanSchueler,
+            LeseAnsichten.SchuelerGegenstand(id, null), SchuelerId: id, IstPseudo: s.IstPseudo));
+        return Ok(plan);
     }
 
     /// <summary>

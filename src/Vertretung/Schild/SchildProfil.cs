@@ -26,17 +26,38 @@ namespace Stundenplan_V2.Vertretung
         public Dictionary<string, List<string>> Spalten { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// P4b (211): Datei für den Rückweg nach SchILD (SchuelerFehlstunden.dat). Kopf = 13 Spaltenüberschriften in dieser
+    /// Reihenfolge (Beispielkopf der amtlichen Beschreibung; die erste heißt in der Tabelle „Name“ – im Profil änderbar).
+    /// Zeichensatz leer = wie „Zeichensatz“ des Profils, bei „auto“ wie der gelesene Export (ANSI bzw. UTF-8 mit BOM).
+    /// </summary>
+    public sealed class SchildRueckwegProfil
+    {
+        public static readonly string[] StandardKopf =
+        {
+            "Nachname", "Vorname", "Geburtsdatum", "Klasse", "Jahr", "Abschnitt", "Datum", "Fach", "von_Std.", "bis_Std.",
+            "Fehlstd.", "Entschuldigt", "Lehrkraft"
+        };
+
+        public string Datei { get; set; } = "SchuelerFehlstunden.dat";
+        public List<string> Kopf { get; set; } = StandardKopf.ToList();
+        public string Zeichensatz { get; set; } = "";
+    }
+
     public sealed class SchildProfil
     {
         public const string DateiName = "schild_profil.json";
 
         public string Beschreibung { get; set; } =
             "Formatprofil für die SchILD-NRW-3-Textschnittstelle (Stundenplanprogramm, Phase 5.2a). " +
-            "Zeichensatz: auto | utf-8 | windows-1252. Spalten: je Feld die akzeptierten Spaltenüberschriften.";
+            "Zeichensatz: auto | utf-8 | windows-1252. Spalten: je Feld die akzeptierten Spaltenüberschriften. " +
+            "Rueckweg (P4b): Dateiname, Kopfzeile (13 Spalten) und Zeichensatz der Datei SchuelerFehlstunden.dat.";
         public int Version { get; set; } = 1;
         public string Trennzeichen { get; set; } = "|";
         public string Zeichensatz { get; set; } = "auto";
         public Dictionary<string, SchildDateiProfil> Dateien { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        /// <summary>P4b: Datei für den Rückweg nach SchILD (wird geschrieben, nicht gelesen).</summary>
+        public SchildRueckwegProfil Rueckweg { get; set; } = new();
 
         private static readonly JsonSerializerOptions JsonOpt = new()
         {
@@ -122,6 +143,14 @@ namespace Stundenplan_V2.Vertretung
                 if (eigen == null) throw new InvalidDataException("leere Datei");
                 if (!string.IsNullOrEmpty(eigen.Trennzeichen)) std.Trennzeichen = eigen.Trennzeichen;
                 if (!string.IsNullOrWhiteSpace(eigen.Zeichensatz)) std.Zeichensatz = eigen.Zeichensatz.Trim();
+                if (eigen.Rueckweg != null)
+                {
+                    if (!string.IsNullOrWhiteSpace(eigen.Rueckweg.Datei)) std.Rueckweg.Datei = eigen.Rueckweg.Datei.Trim();
+                    if (eigen.Rueckweg.Kopf != null && eigen.Rueckweg.Kopf.Count == SchildRueckwegProfil.StandardKopf.Length
+                        && eigen.Rueckweg.Kopf.All(k => !string.IsNullOrWhiteSpace(k)))
+                        std.Rueckweg.Kopf = eigen.Rueckweg.Kopf.Select(k => k.Trim()).ToList();
+                    if (!string.IsNullOrWhiteSpace(eigen.Rueckweg.Zeichensatz)) std.Rueckweg.Zeichensatz = eigen.Rueckweg.Zeichensatz.Trim();
+                }
                 foreach (var kv in eigen.Dateien ?? new())
                 {
                     if (!std.Dateien.TryGetValue(kv.Key, out var ziel) || kv.Value == null) continue;

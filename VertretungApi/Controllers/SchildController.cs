@@ -21,6 +21,10 @@ namespace VertretungApi.Controllers;
 //    GET  api/schild/protokolle      – seit 5.2c-2 (Entscheidung 196): Importprotokoll für die App, nur Admin mit
 //                                      Anmeldung (JWT) – nicht über den X-Api-Key; ohne Namen.
 //
+//  P4a (5.3a, Entscheidung 206): Der Status nennt das „Heute“ der API (Testdatum), das wirksame „2. Halbjahr ab“
+//  (Einstellung bzw. 1. Februar) und den passenden Abschnitt; die Vorschau warnt (ohne Sperre), wenn Abschnitt und
+//  „Änderungen gelten ab“ nicht zum 2. Halbjahr passen bzw. zum 2. Halbjahr kein neuer Grundplan veröffentlicht ist.
+//
 //  Abgleich und Schreiben: Services/SchildImportService.cs. Das Log nennt nur Zahlen.
 // =====================================================================
 
@@ -47,6 +51,7 @@ public class SchildController : ControllerBase
     private bool Produktiv => Betrieb.Produktiv(_env);
 
     /// <summary>Was der Desktop vor der Vorschau wissen muss (ohne Personendaten).</summary>
+    [DesktopSchnittstelle]   // P6a (229)
     [HttpGet("status")]
     public async Task<IActionResult> Status([FromQuery] string? schuljahr, [FromQuery] int? abschnitt)
     {
@@ -82,7 +87,10 @@ public class SchildController : ControllerBase
             .OrderByDescending(p => p.Zeit).ThenByDescending(p => p.Id)
             .Select(p => p.SchluesselKennung).FirstOrDefaultAsync();
 
-        DateOnly? halbjahrAb = werte.HalbjahrAb;
+        // P4a (206): wirksames „2. Halbjahr ab“ – die Einstellung bzw. der 1. Februar (vorher nur die Einstellung; mit
+        // „Standard“ schlug der erste Import von Abschnitt 2 dann den Schuljahresbeginn vor).
+        DateOnly? halbjahrAb = kal != null ? FehlzeitenService.HalbjahrAb(kal.Start, kal.Ende, werte.HalbjahrAb) : werte.HalbjahrAb;
+        int abschnittVorschlag = halbjahrAb is DateOnly hv && heute >= hv ? 2 : 1;
 
         // Entscheidung 79: beim ersten Import eines Abschnitts dessen Beginn, sonst heute – nie vor dem letzten Import.
         DateOnly? vorschlag = null;
@@ -90,7 +98,7 @@ public class SchildController : ControllerBase
         {
             bool erster = importiert == 0 || !protokolle.Any(p => p.Abschnitt == ab);
             DateOnly v = erster
-                ? (ab >= 2 && halbjahrAb is DateOnly h && h >= kal.Start && h <= kal.Ende ? h : kal.Start)
+                ? (ab >= 2 && halbjahrAb is DateOnly h ? h : kal.Start)
                 : heute < kal.Start ? kal.Start : heute > kal.Ende ? kal.Ende : heute;
             if (importiert > 0 && spaetester != null && v < spaetester.GiltAb) v = spaetester.GiltAb;
             vorschlag = v;
@@ -106,6 +114,10 @@ public class SchildController : ControllerBase
             schuljahre,
             kalender = kal == null ? null : (object)new { start = kal.Start, ende = kal.Ende },
             halbjahrAb,
+            // P4a (206, 221): „Heute“ der API (Testdatum) und der Abschnitt, der heute gilt (Vorwahl im Desktop)
+            heute,
+            testdatum = Testdatum.Wert != null,
+            abschnittVorschlag,
             grundplaene = plaene,
             schueler = new { echt, seed, pseudoImportiert, importiert },
             seedEntfernenMoeglich = !Produktiv && seed > 0,
@@ -129,6 +141,8 @@ public class SchildController : ControllerBase
     /// Import (probelauf = false): dieselbe Nutzlast + vorschau (Prüfsumme) + abgaenge (bestätigte Ids). Sperre → 409,
     /// veraltete Vorschau → 409 mit neuer Vorschau.
     /// </summary>
+    [DesktopSchnittstelle]   // P6a (229)
+    [TeurerAbruf]            // P6a (230)
     [HttpPost("import")]
     public async Task<IActionResult> Import([FromBody] SchildImportDto dto)
     {
@@ -141,17 +155,19 @@ public class SchildController : ControllerBase
             return BadRequest(new { fehler = "Die Nutzlast ist unvollständig oder fehlerhaft.", details = fehler });
 
         var heute = KlassenbuchService.Heute();
+        var halbjahr = (await _einst.LesenAsync(_db)).HalbjahrAb;   // P4a (206): Einstellung „2. Halbjahr ab“
         if (dto.Probelauf)
         {
-            var vorschau = await SchildImportService.BerechnenAsync(_db, dto, Produktiv, heute);
+            var vorschau = await SchildImportService.BerechnenAsync(_db, dto, Produktiv, heute, halbjahr);
             _log.LogInformation("SchILD-Import: Vorschau {Schuljahr}, Abschnitt {Abschnitt}, gilt ab {GiltAb} – {Anzahl} Schüler, " +
-                                "Paare {Paare}, Neu-Zuordnung {Neuzuordnung}, gesperrt {Gesperrt}", dto.Schuljahr, dto.Abschnitt,
-                dto.GiltAb, vorschau.ImExport, vorschau.DieselbePerson + vorschau.ZuordnungPaare, dto.Neuzuordnung, vorschau.Gesperrt);
+                                "Paare {Paare}, Neu-Zuordnung {Neuzuordnung}, gesperrt {Gesperrt}, Warnungen {Warnungen}", dto.Schuljahr,
+                dto.Abschnitt, dto.GiltAb, vorschau.ImExport, vorschau.DieselbePerson + vorschau.ZuordnungPaare, dto.Neuzuordnung,
+                vorschau.Gesperrt, vorschau.Warnungen.Count);
             return Ok(vorschau.Antwort(probelauf: true));
         }
 
         await using var tx = await _db.Database.BeginTransactionAsync();
-        var lauf = await SchildImportService.BerechnenAsync(_db, dto, Produktiv, heute);
+        var lauf = await SchildImportService.BerechnenAsync(_db, dto, Produktiv, heute, halbjahr);
         if (lauf.Gesperrt)
             return Conflict(lauf.Antwort(probelauf: true));
         if (!string.Equals(dto.Vorschau, lauf.VorschauPruefsumme, StringComparison.Ordinal))
@@ -193,6 +209,7 @@ public class SchildController : ControllerBase
     /// samt ihren Klassenbuchdaten, wie ein neuer Seed. Testkonten s05A/sQ1 werden gelöst (danach seed-konten).
     /// </summary>
     [NurEntwicklung]
+    [DesktopSchnittstelle]   // P6a (229)
     [HttpPost("seed-entfernen")]
     public async Task<IActionResult> SeedEntfernen()
     {

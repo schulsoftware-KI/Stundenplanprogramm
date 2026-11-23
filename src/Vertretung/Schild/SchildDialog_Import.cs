@@ -253,7 +253,10 @@ namespace Stundenplan_V2.Vertretung
             }
             else if (_imVorschau != null)
             {
-                ImBand((_imNeuzuordnung ? "NEU-ZUORDNUNG über Name + Klasse (Schlüssel verloren). " : "") +
+                // P4a (206): Warnungen zum Halbjahr (Abschnitt, Stichtag, Grundplan) – keine Sperre, Rückfrage beim Import
+                string warnung = _imVorschau.Warnungen.Count > 0
+                    ? "ACHTUNG (Halbjahr):\n• " + string.Join("\n• ", _imVorschau.Warnungen) + "\n\n" : "";
+                ImBand(warnung + (_imNeuzuordnung ? "NEU-ZUORDNUNG über Name + Klasse (Schlüssel verloren). " : "") +
                        "Vorschau bereit – nichts ist gespeichert. Zeilen prüfen, Abgänge bestätigen" +
                        (_imZeilen.Any(x => x.IstPaar) ? ", Paare prüfen" : "") + ", dann „Importieren…“.", FarbeGelb);
                 TxtImportKopf.Text = _imNeuzuordnung ? "Import (Neu-Zuordnung)" : "Import (Vorschau)";
@@ -933,6 +936,8 @@ namespace Stundenplan_V2.Vertretung
                 (v.Grundplan != null && _planInfo != null &&
                  !string.Equals(v.Grundplan.Trim(), _planInfo.Bezeichnung.Trim(), StringComparison.OrdinalIgnoreCase)
                     ? $"ACHTUNG: Im Wocheneditor ist der Plan „{_planInfo.Bezeichnung}“ gewählt – nicht der Grundplan.\n" : "") +
+                // P4a (206): Warnungen zum Halbjahr – mit „Ja“ wird trotzdem importiert
+                string.Concat(v.Warnungen.Select(w => "ACHTUNG: " + w + "\n")) +
                 $"\nneu: {zz.Neu} · Name/Geburtsdatum geändert: {zz.NameGeaendert} · Klassenwechsel: {zz.Klassenwechsel} · " +
                 $"Kurs-/Gruppenwechsel: {zz.Kurswechsel} · Status/Jahrgang: {zz.StatusGeaendert}\n" +
                 $"Abgänge bestätigt: {bestaetigt.Count} von {kandidaten} (Schülerkonten, die gesperrt werden: {konten})\n" +
@@ -954,7 +959,8 @@ namespace Stundenplan_V2.Vertretung
                 (pseudo ? "" : "\nACHTUNG: echte Schülerdaten. Die Klassen- und Kurslisten ändern sich ab dem Stichtag; " +
                                "rückgängig machen lässt sich der Import nur über eine Rücksicherung der Datenbank.\n");
             if (MessageBox.Show(this, frage, "SchILD-Import", MessageBoxButton.YesNo,
-                    pseudo ? MessageBoxImage.Question : MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
+                    pseudo && v.Warnungen.Count == 0 ? MessageBoxImage.Question : MessageBoxImage.Warning,
+                    MessageBoxResult.No) != MessageBoxResult.Yes)
                 return;
             // 5.2c-1 (Frage E): Neu-Zuordnung mit echten Daten – zweite Rückfrage.
             if (neuzuordnung && !pseudo &&

@@ -11,6 +11,8 @@ namespace Stundenplan_V2.Vertretung
     /// Phase 5.2b-2b-2 (Entscheidung 171): Knopf „Folgestand erzeugen…“ im Fenster „SchILD-Daten prüfen und importieren“.
     /// Nur bei einem gültigen Pseudo-Ordner nach einem Prüflauf ohne Fehler mit Zuordnung – die Änderungen rechnet
     /// <see cref="SchildFolgestand"/>. Das Log nennt nur Zahlen; Pseudo-Namen stehen nur im Fenster und in FOLGESTAND.txt.
+    /// P4a (Entscheidung 207): oben die eigene Art „Abschnitt 2 (Halbjahreswechsel)“ – nur aus Abschnitt 1; die übrigen
+    /// Häkchen gelten dann nicht (sie werden ausgegraut).
     /// </summary>
     public partial class SchildDialog
     {
@@ -36,7 +38,8 @@ namespace Stundenplan_V2.Vertretung
             BtnFolge.IsEnabled = !_laeuft && grund == null;
             BtnFolge.ToolTip = grund ??
                 "Erzeugt aus diesem Pseudo-Export einen neuen Ordner „…_Folge1“ mit typischen Änderungen (Abgänge, Klassen- und " +
-                "Kurswechsel, Namensänderung, Neuaufnahmen …) – zum Testen von Vorschau und Import.";
+                "Kurswechsel, Namensänderung, Neuaufnahmen …) – zum Testen von Vorschau und Import. Seit P4a auch als " +
+                "„Abschnitt 2“ für den Halbjahreswechsel.";
         }
 
         private async void BtnFolge_Click(object sender, RoutedEventArgs e)
@@ -53,7 +56,7 @@ namespace Stundenplan_V2.Vertretung
             var erg = _ergebnis!;
             var plan = _planInfo!;
             string ziel = SchildFolgestand.Zielordner(ex.Ordner, out int nummer);
-            var opt = FrageFolgeOptionen(ziel, nummer);
+            var opt = FrageFolgeOptionen(ziel, nummer, erg.Abschnitt);
             if (opt == null) return;
 
             _laeuft = true;
@@ -89,7 +92,8 @@ namespace Stundenplan_V2.Vertretung
         }
 
         /// <summary>Kleiner Dialog: welche Änderungen, Startwert (null = Abbruch).</summary>
-        private SchildFolgestandOptionen? FrageFolgeOptionen(string ziel, int nummer)
+        /// <param name="abschnitt">Abschnitt des Prüflaufs – „Abschnitt 2“ gibt es nur aus Abschnitt 1 (P4a).</param>
+        private SchildFolgestandOptionen? FrageFolgeOptionen(string ziel, int nummer, int abschnitt)
         {
             var win = new Window
             {
@@ -116,8 +120,6 @@ namespace Stundenplan_V2.Vertretung
                 Text = ziel, IsReadOnly = true, Background = new SolidColorBrush(Color.FromRgb(0xF4, 0xF4, 0xF4)),
                 Margin = new Thickness(0, 0, 0, 10)
             });
-            panel.Children.Add(new TextBlock { Text = "Änderungen:", Margin = new Thickness(0, 0, 0, 4) });
-
             CheckBox Wahl(string text, bool an)
             {
                 // Text mit Umbruch – sonst werden lange Texte rechts abgeschnitten (Nachbesserung 20.11.2026)
@@ -129,6 +131,21 @@ namespace Stundenplan_V2.Vertretung
                 panel.Children.Add(cb);
                 return cb;
             }
+            // P4a (207): eigene Art „Abschnitt 2“ – zuerst, damit klar ist, dass die übrigen Häkchen dann nicht gelten
+            var chkAbschnitt2 = Wahl("Abschnitt 2 (Halbjahreswechsel): dieselben Schüler mit Abschnitt 2 in allen Dateien; 2 " +
+                                     "Klassenwechsel Sek I, 3 Kurswechsel EF, 2 Abwahlen (Grundkurs) in Q1/Q2, 3 Wechsel " +
+                                     "Religion/PP, 2 Wechsel WP bzw. anderer paralleler Sek-I-Gruppen, 1 Abgang, 1 Neuaufnahme " +
+                                     "zum 2. Halbjahr. Die Häkchen darunter gelten dann nicht.", false);
+            chkAbschnitt2.FontWeight = FontWeights.SemiBold;
+            chkAbschnitt2.Margin = new Thickness(0, 0, 0, 10);
+            if (abschnitt != 1)
+            {
+                chkAbschnitt2.IsEnabled = false;
+                chkAbschnitt2.ToolTip = $"Nur aus einem Export mit Abschnitt 1 (im Prüflauf gewählt: Abschnitt {abschnitt}).";
+            }
+            panel.Children.Add(new TextBlock { Text = "Änderungen:", Margin = new Thickness(0, 0, 0, 4) });
+            var andere = new List<CheckBox>();
+
             var chkAbgang = Wahl("3 Abgänge (Status 9) – der erste ist der erste Schüler der ersten Klasse (in der Entwicklung meist mit dem " +
                                  "Testkonto „s05A“ verknüpft)", true);
             var chkKlasse = Wahl("2 Klassenwechsel Sek I", true);
@@ -167,6 +184,15 @@ namespace Stundenplan_V2.Vertretung
             var chkLehrkraft = Wahl("1 Lehrkraft heißt anders (anderer Nachname in Lehrkraefte.dat) – möglichst „L1“ (Testkonten L1 " +
                                     "und kl05A)", false);
             chkLehrkraft.Margin = new Thickness(0, 0, 0, 10);
+            andere.AddRange(new[] { chkAbgang, chkKlasse, chkKurs, chkGruppe, chkName, chkGeb, chkNeu, chkFehlt, chkKlasseFehlt,
+                                    chkOhneId, chkVorname, chkNameKlasse, chkGleich, chkLeitung, chkLehrkraft });
+            void Abschnitt2Anpassen()
+            {
+                bool a2 = chkAbschnitt2.IsChecked == true;
+                foreach (var cb in andere) cb.IsEnabled = !a2;
+            }
+            chkAbschnitt2.Checked += (_, __) => Abschnitt2Anpassen();
+            chkAbschnitt2.Unchecked += (_, __) => Abschnitt2Anpassen();
 
             var startZeile = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 2) };
             startZeile.Children.Add(new TextBlock { Text = "Startwert für den Zufall:", VerticalAlignment = VerticalAlignment.Center,
@@ -219,9 +245,10 @@ namespace Stundenplan_V2.Vertretung
                     NameUndKlasse = chkNameKlasse.IsChecked == true,
                     Namensgleiche = chkGleich.IsChecked == true,
                     KlassenleitungWechselt = chkLeitung.IsChecked == true,
-                    LehrkraftHeisstAnders = chkLehrkraft.IsChecked == true
+                    LehrkraftHeisstAnders = chkLehrkraft.IsChecked == true,
+                    Abschnitt2 = chkAbschnitt2.IsChecked == true && abschnitt == 1   // P4a (207)
                 };
-                if (!(o.Abgaenge || o.Klassenwechsel || o.Kurswechsel || o.Gruppenwechsel || o.Namensaenderung || o.Geburtsdatum
+                if (!o.Abschnitt2 && !(o.Abgaenge || o.Klassenwechsel || o.Kurswechsel || o.Gruppenwechsel || o.Namensaenderung || o.Geburtsdatum
                       || o.Neuaufnahmen || o.FehltOhneAbgang || o.KlasseFehlt || o.Vorname || o.NameUndKlasse || o.Namensgleiche
                       || o.OhneSchildId || o.KlassenleitungWechselt || o.LehrkraftHeisstAnders))
                 {

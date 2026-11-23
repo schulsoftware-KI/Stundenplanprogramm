@@ -18,6 +18,8 @@ namespace Stundenplan_V2.Vertretung
     //    GET  api/schild/status          – Betriebsart, Kalender, Schülerzahlen, letzter Import, Vorschlag
     //    POST api/schild/import          – Probelauf (Vorschau) bzw. Import
     //    POST api/schild/seed-entfernen  – nur Entwicklung
+    //    POST api/schild/rueckweg/abruf  – P4b: Fehlstunden mit Abholcode (nur Prüfsummen, keine Namen)
+    //    POST api/schild/rueckweg/datei  – P4b: Meldung „Datei geschrieben“ (ohne Namen)
     //
     //  Fehler kommen als SchildServerFehler mit verständlichem Text (auch für
     //  Proxy, Firewall, DNS und Zertifikat – OnlineVerbindung). Der API-Key
@@ -36,7 +38,13 @@ namespace Stundenplan_V2.Vertretung
         public int Abschnitt { get; set; }
         public List<string> Schuljahre { get; set; } = new();
         public SchildZeitraumDto? Kalender { get; set; }
+        /// <summary>Seit P4a das wirksame „2. Halbjahr ab“ (Einstellung bzw. 1. Februar), vorher nur die Einstellung.</summary>
         public DateOnly? HalbjahrAb { get; set; }
+        /// <summary>P4a (221): „Heute“ der API – mit Testdatum der Entwicklung (null = API vor P4a).</summary>
+        public DateOnly? Heute { get; set; }
+        public bool Testdatum { get; set; }
+        /// <summary>P4a (206): Abschnitt, der heute gilt (2 ab „2. Halbjahr ab“) – Vorwahl im Feld „Abschnitt“.</summary>
+        public int? AbschnittVorschlag { get; set; }
         public List<SchildGrundplanDto> Grundplaene { get; set; } = new();
         public SchildSchuelerZahlenDto Schueler { get; set; } = new();
         public bool SeedEntfernenMoeglich { get; set; }
@@ -186,6 +194,8 @@ namespace Stundenplan_V2.Vertretung
         public List<SchildSperreDto> Sperren { get; set; } = new();
         public bool SeedEntfernenMoeglich { get; set; }
         public List<string> Hinweise { get; set; } = new();
+        /// <summary>P4a (206): Warnungen zum Halbjahr – vor dem Import nachfragen (keine Sperre).</summary>
+        public List<string> Warnungen { get; set; } = new();
         public SchildZahlenDto Zahlen { get; set; } = new();
         public List<SchildVorschauZeileDto> Schueler { get; set; } = new();
         public List<SchildUnbekanntDto> UnbekannteSchluessel { get; set; } = new();
@@ -214,6 +224,7 @@ namespace Stundenplan_V2.Vertretung
         public bool Neuzuordnung { get; set; }
         public string? Kennung { get; set; }
         public List<string> Hinweise { get; set; } = new();
+        public List<string> Warnungen { get; set; } = new();   // P4a (206)
         public string Bericht { get; set; } = "";
     }
 
@@ -304,6 +315,27 @@ namespace Stundenplan_V2.Vertretung
             var (code, body) = await SendeAsync(HttpMethod.Post, "/api/schild/seed-entfernen", null, LangeZeit);
             if (code != 200) throw Fehler(code, body, "Seed-Schüler entfernen");
             return Lies<SchildSeedEntfernenDto>(body, "Seed-Schüler entfernen");
+        }
+
+        /// <summary>P4b (210): Abruf mit Abholcode. 403 = Code falsch/abgelaufen, 409 = Art bzw. Schlüssel passt nicht.</summary>
+        public async Task<SchildRueckwegAbruf> RueckwegAbrufAsync(string code, bool pseudo, string? kennung)
+        {
+            var anfrage = new { code, pseudo, kennung, desktop = Environment.UserName };
+            var (status, body) = await SendeAsync(HttpMethod.Post, "/api/schild/rueckweg/abruf", anfrage, LangeZeit);
+            if (status != 200)
+            {
+                if (status is 403 or 409)
+                    throw new SchildServerFehler(FehlerAusAntwort(body) ?? "Der Abruf wurde abgelehnt.", status);
+                throw Fehler(status, body, "Abruf");
+            }
+            return Lies<SchildRueckwegAbruf>(body, "Abruf");
+        }
+
+        /// <summary>P4b (212): meldet die geschriebene Datei (Zahlen, Zeitraum, Klassen – keine Namen).</summary>
+        public async Task RueckwegMeldenAsync(SchildRueckwegMeldung meldung)
+        {
+            var (status, body) = await SendeAsync(HttpMethod.Post, "/api/schild/rueckweg/datei", meldung, KurzeZeit);
+            if (status != 200) throw Fehler(status, body, "Meldung der Datei");
         }
 
         // ---------------------------------------------------------------

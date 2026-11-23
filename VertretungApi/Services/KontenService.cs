@@ -22,6 +22,12 @@ public static class KontenService
         public const string Entsperrt = "Entsperrt";
         public const string Abgemeldet = "Überall abgemeldet";
         public const string Geloescht = "Gelöscht";
+        // P6a (225–227): zweiter Faktor – ohne Geheimnis und ohne Codes
+        public const string FaktorEingerichtet = "Zweiter Faktor eingerichtet";
+        public const string FaktorNeu = "Zweiter Faktor neu eingerichtet";
+        public const string FaktorCodes = "Wiederherstellungscodes neu erzeugt";
+        public const string FaktorAus = "Zweiter Faktor ausgeschaltet";
+        public const string FaktorZurueckgesetzt = "Zweiter Faktor zurückgesetzt";
     }
 
     /// <summary>Protokolleintrag vormerken (gespeichert wird mit dem nächsten SaveChanges).</summary>

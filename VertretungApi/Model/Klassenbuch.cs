@@ -184,8 +184,12 @@ public enum AnwesenheitStatus { Anwesend = 0, Fehlt = 1, Verspaetet = 2, Beurlau
 /// <summary>Bewertung einer Fehlstunde bzw. Verspätung (Phase 3.2).</summary>
 public enum FehlBewertung { Offen = 0, Entschuldigt = 1, Unentschuldigt = 2 }
 
-/// <summary>Grund einer Entschuldigung – nur als Kategorie, kein Freitext (Phase 3.2).</summary>
-public enum FehlGrund { Krankheit = 0, Arzttermin = 1, Familiaer = 2, Sonstiges = 3 }
+/// <summary>
+/// Grund einer Entschuldigung – nur als Kategorie, kein Freitext (Phase 3.2). P6b (Entscheidung 236): „ohne Angabe“, wenn
+/// der Schalter „Grund der Entschuldigung erfassen“ aus ist bzw. ein Grund mit „Vorhandene Gründe entfernen…“ gelöscht
+/// wurde (gespeichert als Zahl – keine Migration).
+/// </summary>
+public enum FehlGrund { Krankheit = 0, Arzttermin = 1, Familiaer = 2, Sonstiges = 3, OhneAngabe = 4 }
 
 /// <summary>Abweichung von „anwesend" in einer Lektion (Phase 3.1, Bewertung Phase 3.2).</summary>
 public class Anwesenheit
@@ -312,7 +316,7 @@ public class DownloadProtokoll
     public int Id { get; set; }
     public DateTime Zeit { get; set; } = DateTime.UtcNow;   // UTC
     public string Akteur { get; set; } = "";                // Benutzername
-    public string Art { get; set; } = "";                   // KlassenbuchPdf | KursheftPdf (4.3: Csv, Archiv)
+    public string Art { get; set; } = "";                   // KlassenbuchPdf | KursheftPdf (4.3: Csv, Archiv; P4b: SchildRueckweg, …Datei, …Probe)
     public string Was { get; set; } = "";                   // z. B. "Klasse 05A" bzw. "M · Q1 (UNr 20, L1)"
     public DateOnly Von { get; set; }
     public DateOnly Bis { get; set; }

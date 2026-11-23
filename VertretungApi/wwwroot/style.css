@@ -1763,3 +1763,158 @@ main.klassenbuch > .hi-karte, main.fehlzeiten > .hi-karte { margin-top: 2px; }
 .es-karte .knopfreihe .hauptknopf, .es-karte .knopfreihe .textknopf { min-height: 44px; }
 .hauptknopf.warnung { background: var(--rot); }
 .menuepunkt.gefahr { color: var(--rot); }
+
+/* =====================================================================
+   P4a (5.3a): Testdatum-Band (Entscheidung 221) und Bereich „Jahresablauf“ (205) – Karten mit Ampel
+   (Punkt + Wort, nie nur die Farbe)
+   ===================================================================== */
+.testdatum-band {
+  margin: 0;
+  padding: 6px 16px;
+  font-size: 0.86rem;
+  font-weight: 650;
+  color: var(--tinte);
+  background: repeating-linear-gradient(135deg, var(--raum-t) 0 14px, var(--verlegung-t) 14px 28px);
+  border-bottom: 2px solid var(--verlegung);
+  overflow-wrap: anywhere;
+}
+.ja-stand { margin: 8px 0 0 0; font-size: 0.9rem; font-weight: 650; color: var(--leise); overflow-wrap: anywhere; }
+.ja-karten { display: grid; gap: 12px; margin-top: 10px; }
+.ja-karte { padding: 18px 16px 16px 16px; border-left-width: 6px; }
+.ja-karte.a-gruen { border-left-color: var(--vertretung); }
+.ja-karte.a-gelb { border-left-color: var(--verlegung); }
+.ja-karte.a-rot { border-left-color: var(--entfall); }
+.ja-karte.a-grau { border-left-color: var(--frei); }
+.ja-kartenkopf { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; }
+.ja-kartenkopf .karte-titel { margin: 0; }
+.ja-text { margin: 8px 0 0 0; overflow-wrap: anywhere; }
+.ja-ampel {
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  font-size: 0.8rem; font-weight: 700; white-space: nowrap; color: var(--leise);
+}
+.ja-punktfarbe { width: 12px; height: 12px; border-radius: 50%; background: var(--frei); flex: none; }
+.ja-ampel.a-gruen { color: var(--vertretung); }
+.ja-ampel.a-gruen .ja-punktfarbe { background: var(--vertretung); }
+.ja-ampel.a-gelb { color: var(--verlegung); }
+.ja-ampel.a-gelb .ja-punktfarbe { background: var(--verlegung); }
+.ja-ampel.a-rot { color: var(--entfall); }
+.ja-ampel.a-rot .ja-punktfarbe { background: var(--entfall); }
+.ja-punkte { list-style: none; margin: 10px 0 0 0; padding: 0; display: grid; gap: 0; }
+.ja-punkt { padding: 10px 0 10px 12px; border-top: 1px solid var(--linie); border-left: 3px solid var(--frei); }
+.ja-punkt.a-gruen { border-left-color: var(--vertretung); }
+.ja-punkt.a-gelb { border-left-color: var(--verlegung); }
+.ja-punkt.a-rot { border-left-color: var(--entfall); }
+.ja-punkt-kopf { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 10px; }
+.ja-punkt-titel { overflow-wrap: anywhere; }
+.ja-punkt-text { margin: 4px 0 0 0; font-size: 0.92rem; overflow-wrap: anywhere; }
+.ja-liste {
+  margin: 6px 0 0 0; padding: 6px 10px 6px 26px; font-size: 0.86rem; color: var(--leise);
+  background: var(--seite); border-radius: 8px; max-height: 14rem; overflow-y: auto; overflow-wrap: anywhere;
+}
+.ja-weitere { list-style: none; margin-left: -14px; font-style: italic; }
+.ja-ziele { display: flex; flex-wrap: wrap; gap: 0 12px; margin-top: 2px; }
+.ja-ziel { min-height: 44px; }
+
+/* P4b (210): Dialog „Fehlstunden für SchILD bereitstellen“ – Zahlen, Warnungen, Abholcode */
+.rw-dialog .art-wahl .schalter { min-height: 44px; }
+.rw-dialog #rwZeitraeume { margin: 0; }
+.rw-dialog #rwEigen { margin-top: 6px; }
+#rwInfo { margin: 8px 0 0 0; }
+#rwInfo:empty { display: none; }
+.rw-zahlen { margin-top: 6px; display: grid; gap: 4px; }
+.rw-zeile { margin: 0; font-size: 0.9rem; line-height: 1.4; overflow-wrap: anywhere; }
+#rwWarnung p { margin: 0; }
+#rwWarnung p + p { margin-top: 6px; }
+.rw-frueher { margin: 4px 0 0 0; padding-left: 18px; }
+.rw-code-box {
+  margin-top: 10px; padding: 10px 12px; border: 2px solid var(--vertretung); border-radius: 10px; background: var(--seite);
+}
+.rw-code-box .feld { margin: 0; }
+.rw-code {
+  margin: 4px 0; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 1.9rem; font-weight: 750;
+  letter-spacing: 0.12em; color: var(--tinte); overflow-wrap: anywhere; user-select: all;
+}
+#rwAktiv { margin: 8px 0 0 0; }
+.rw-dialog .knopfreihe .hauptknopf, .rw-dialog .knopfreihe .textknopf { min-height: 44px; }
+
+/* =====================================================================
+   P6a (Entscheidungen 225–231): zweiter Faktor, Code-Schritt der Anmeldung, Hinweis nach der Anmeldung,
+   Reiter „Zugriffe“, Karte „Zugriff“ der Einstellungen. Der QR-Code ist ein SVG mit eigenem weißen Grund –
+   auch im dunklen Modus schwarz auf weiß, damit ihn jede Kamera liest.
+   ===================================================================== */
+.nach-anmeldung {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px;
+  margin: 0; padding: 8px 16px;
+  background: var(--verlegung-t); border-bottom: 2px solid var(--verlegung); color: var(--tinte);
+}
+.nach-anmeldung[hidden] { display: none; }
+.nach-anmeldung-text { margin: 0; font-size: 0.92rem; font-weight: 600; overflow-wrap: anywhere; flex: 1 1 260px; }
+.nach-anmeldung .textknopf { min-height: 44px; }
+
+.karte input.zf-code, input.zf-code {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+  font-size: 1.35rem; letter-spacing: 0.14em; text-align: center;
+}
+#codeForm #codeWechsel, #codeForm #codeZurueck { margin-top: 8px; justify-self: center; min-height: 44px; }
+#codeForm .kleingedruckt { margin-top: 10px; }
+
+.zf-assistent { display: grid; }
+.zf-stand { margin: 8px 0 0 0; overflow-wrap: anywhere; }
+.zf-assistent .knopfreihe .textknopf, .zf-assistent .knopfreihe .hauptknopf { min-height: 44px; }
+.zf-assistent #zfAbmelden { margin-top: 10px; justify-self: center; min-height: 44px; }
+.zf-schritte { margin: 8px 0 4px 0; padding-left: 22px; font-size: 0.92rem; line-height: 1.45; }
+.zf-schritte li + li { margin-top: 4px; }
+.zf-qr { display: flex; justify-content: center; margin: 10px 0 4px 0; }
+.zf-qr svg {
+  display: block; width: min(260px, 72vw); height: auto;
+  border-radius: 6px; box-shadow: 0 0 0 1px var(--linie);
+}
+.zf-schluessel {
+  margin: 0; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 1.1rem; font-weight: 700;
+  letter-spacing: 0.06em; word-spacing: 0.25em; overflow-wrap: anywhere; user-select: all;
+}
+#zfSchluesselKopieren { justify-self: start; min-height: 44px; }
+.zf-codeliste {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5em, 1fr)); gap: 6px 16px;
+  margin: 10px 0 0 0; padding: 10px 12px 10px 34px; background: var(--seite); border-radius: 10px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 1.05rem; font-weight: 700; user-select: all;
+}
+.zf-gesichert { margin-top: 14px; }
+.zf-dialog { max-width: 480px; }
+.hauptknopf.gefahr { background: var(--rot); color: var(--auf-farbe); }
+
+.zg-filter { grid-template-columns: 1fr 1fr; align-items: end; }
+.zg-datum { display: grid; }
+.feld.klein-feld { margin: 0 0 2px 2px; font-size: 0.8rem; font-weight: 600; color: var(--leise); }
+.zg-zusammenfassung { margin: 0 0 10px 0; }
+.zg-zusammenfassung.warnung-leise { border-left-color: var(--verlegung); background: var(--verlegung-t); }
+.p-eintrag.zg-fehl { border-left: 4px solid var(--entfall); }
+.p-eintrag.zg-ok { border-left: 4px solid var(--vertretung); }
+@media (min-width: 760px) {
+  .zg-filter { grid-template-columns: 2fr 1.4fr 1fr 1fr; }
+}
+
+.es-zugriff-daten { margin-top: 10px; }
+.es-zugriff-daten dd { overflow-wrap: anywhere; }
+
+/* P6b (232, 233): Zugriffe → Ansichten (Leseprotokoll) */
+.za-filter .za-schueler { grid-column: 1 / -1; min-width: 0; }
+.za-treffer { margin-top: 6px; max-height: 240px; }
+.za-gewaehlt { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; min-height: 44px;
+  font-weight: 600; overflow-wrap: anywhere; }
+.p-eintrag.za-eintrag { border-left: 4px solid var(--linie); }
+#zaSchalter { margin: 0 0 10px 0; }
+@media (min-width: 760px) {
+  .za-filter { grid-template-columns: 1.8fr 1.1fr 1.9fr 1.1fr 1.1fr; }
+  .za-filter .za-schueler { grid-column: auto; }
+}
+/* P6b (234): Auskunft im Schülerdetail; (236): vorhandene Gründe entfernen */
+.fz-s-aktionen { margin-top: 6px; }
+.es-gruende { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--linie); }
+.es-gruende-knopf.warnung { color: var(--rot); font-weight: 700; }
+
+@media print {
+  .zf-zettel .zf-codeliste {
+    background: none; padding: 2mm 0 0 8mm; color: #000; font-size: 13pt; grid-template-columns: 1fr 1fr;
+  }
+}

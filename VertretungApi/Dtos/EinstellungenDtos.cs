@@ -41,10 +41,28 @@ public sealed record EinstellungenDto(
     List<EinstellungsGruppeDto> Gruppen,
     List<EinstellungDto> Einstellungen,
     EinstellungKalenderDto? Kalender,
-    List<string> Hinweise);
+    List<string> Hinweise,
+    ZugriffInfoDto? Zugriff = null);     // P6a: nur zum Lesen (Einstellungsdatei)
+
+/// <summary>P6a (229, 230): Schuladressen, Adressbeschränkung und Anfragebegrenzung aus der Einstellungsdatei.</summary>
+public sealed record ZugriffInfoDto(
+    List<string> Schuladressen,         // Netze, z. B. „203.0.113.10/32“
+    bool DesktopNurSchule,
+    bool AdminNurSchule,
+    bool ProxyAktiv,
+    bool Echtbetrieb,
+    string DieseAdresse,                // Adresse dieser Anfrage, gekürzt
+    bool? DieseAdresseSchule,           // null = keine Schuladressen eingetragen
+    BegrenzungInfoDto Begrenzung);
+
+public sealed record BegrenzungInfoDto(int JeKonto, int OhneAnmeldung, int Desktop, int TeuerJeKonto, int TeuerGesamt,
+    int OhneAnmeldungMaxKB);
 
 /// <summary>Was eine kürzere Frist löschen würde (Rückfrage, Entscheidung 141).</summary>
 public sealed record EinstellungsLoeschungDto(string Schluessel, string Titel, int Anzahl, string Text);
 
 public sealed record EinstellungsProtokollDto(
     int Id, DateTime Zeit, string Akteur, string Schluessel, string Titel, string? Alt, string? Neu, string? Details);
+
+/// <summary>P6b (236): „Vorhandene Gründe entfernen…“ – Anzahl aus der Rückfrage (wird vor dem Entfernen neu gezählt).</summary>
+public sealed record GruendeEntfernenDto(int Anzahl);

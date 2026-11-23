@@ -34,6 +34,7 @@ public class GrundplanController : ControllerBase
         _cfg = cfg;
     }
 
+    [DesktopSchnittstelle]   // P6a (229)
     [HttpPost("push")]
     public async Task<IActionResult> Push([FromBody] GrundplanPushDto dto)
     {
@@ -140,6 +141,7 @@ public class GrundplanController : ControllerBase
     /// „gilt ab“) für den Desktop – mit dem X-Api-Key, ohne Personendaten. Der Wocheneditor warnt damit, wenn der
     /// gewählte Plan nicht zum veröffentlichten Grundplan passt.
     /// </summary>
+    [DesktopSchnittstelle]   // P6a (229)
     [HttpGet("veroeffentlicht")]
     public async Task<IActionResult> Veroeffentlicht([FromQuery] string? schuljahr)
     {

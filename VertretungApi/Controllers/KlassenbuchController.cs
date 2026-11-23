@@ -24,6 +24,8 @@ namespace VertretungApi.Controllers;
 ///   GET  api/klassenbuch/themen?unr=&amp;lehrer=&amp;von=&amp;bis=        Themenliste eines Unterrichts (Lehrkraft selbst, Admin)
 ///   PUT  api/klassenbuch/sichtbarkeit                           Hausaufgaben für Schüler sichtbar? (KbSichtbarkeitDto)
 /// Rechte siehe Services/KlassenbuchService.cs und Services/UnterrichtInhaltService.cs.
+/// P6b (232): Leseprotokoll für Stundenblatt, seinen Verlauf und die Gruppenliste (nur lesende Abrufe); (236) beim Speichern
+/// bekommen Stunden in einem Entschuldigungs-Zeitraum bei ausgeschaltetem „Grund … erfassen“ „ohne Angabe“.
 /// </summary>
 [ApiController]
 [Route("api/klassenbuch")]
@@ -31,8 +33,20 @@ namespace VertretungApi.Controllers;
 public class KlassenbuchController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly Leseprotokoll _lese;
+    private readonly Schuleinstellungen _einst;
 
-    public KlassenbuchController(AppDbContext db) => _db = db;
+    public KlassenbuchController(AppDbContext db, Leseprotokoll lese, Schuleinstellungen einst)
+    {
+        _db = db;
+        _lese = lese;
+        _einst = einst;
+    }
+
+    /// <summary>P6b (232): Stundenblatt bzw. sein Verlauf – Gegenstand ist die Stunde, Gruppe ihre Lerngruppen.</summary>
+    private Task StundeAufzeichnenAsync(string ansicht, TagKontext tag, PlanStunde st)
+        => _lese.AufzeichnenAsync(User, new LeseZugriff(ansicht, LeseAnsichten.StundeGegenstand(tag.Datum, st),
+            Gruppe: LeseAnsichten.GruppenDerStunde(st)));
 
     [HttpGet("stunde")]
     public async Task<IActionResult> Stunde(
@@ -40,7 +54,9 @@ public class KlassenbuchController : ControllerBase
     {
         var (u, tag, st, fehler) = await LadeAsync(datum, stunde, unr, lehrer);
         if (fehler != null) return fehler;
-        return Ok(await KlassenbuchService.StundenblattAsync(_db, u!, tag!, st!));
+        var blatt = await KlassenbuchService.StundenblattAsync(_db, u!, tag!, st!);
+        await StundeAufzeichnenAsync(LeseAnsichten.Stundenblatt, tag!, st!);
+        return Ok(blatt);
     }
 
     [HttpPut("stunde")]
@@ -49,7 +65,7 @@ public class KlassenbuchController : ControllerBase
         var (u, tag, st, fehler) = await LadeAsync(dto.Datum, dto.Stunde, dto.GrundUNr, dto.GrundLehrer);
         if (fehler != null) return fehler;
 
-        var e = await KlassenbuchService.SpeichernAsync(_db, u!, tag!, st!, dto);
+        var e = await KlassenbuchService.SpeichernAsync(_db, u!, tag!, st!, dto, await _einst.GrundErfassenAsync(_db));   // P6b (236)
         if (e.Status != 200) return StatusCode(e.Status, new { fehler = e.Fehler, konflikt = e.Konflikt });
         return Ok(await KlassenbuchService.StundenblattAsync(_db, u!, tag!, st!, e.Meldung));
     }
@@ -60,7 +76,9 @@ public class KlassenbuchController : ControllerBase
     {
         var (u, tag, st, fehler) = await LadeAsync(datum, stunde, unr, lehrer);
         if (fehler != null) return fehler;
-        return Ok(await KlassenbuchService.HistorieAsync(_db, u!, tag!, st!));
+        var verlauf = await KlassenbuchService.HistorieAsync(_db, u!, tag!, st!);
+        await StundeAufzeichnenAsync(LeseAnsichten.StundenblattVerlauf, tag!, st!);
+        return Ok(verlauf);
     }
 
     [HttpGet("gruppen")]
@@ -82,7 +100,11 @@ public class KlassenbuchController : ControllerBase
         if (g == null) return NotFound(new { fehler = "Diese Gruppe steht nicht im aktuellen Stundenplan." });
         if (!KlassenbuchService.DarfGruppeSehen(u, g))
             return StatusCode(403, new { fehler = "Diese Gruppe dürfen nur ihre Lehrkräfte, die Klassenleitung bzw. Stufenkoordination und die Verwaltung sehen." });
-        return Ok(await KlassenbuchService.GruppeAsync(_db, u, g));
+        var d = await KlassenbuchService.GruppeAsync(_db, u, g);
+        // P6b (232): Gruppenliste samt Auswahl (Schüler der Klassen) – Gruppe = Schlüssel und Klassen.
+        await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.Gruppenliste, $"Gruppe {g.Schluessel} · {g.Fach}",
+            Gruppe: LeseAnsichten.Liste(g.Klassen.Append(g.Schluessel))));
+        return Ok(d);
     }
 
     [HttpPut("gruppe")]

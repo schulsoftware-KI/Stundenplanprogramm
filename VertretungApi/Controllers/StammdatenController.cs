@@ -21,12 +21,14 @@ public class StammdatenController : ControllerBase
     private readonly AppDbContext _db;
     private readonly IConfiguration _cfg;
     private readonly Schuleinstellungen _einst;
+    private readonly Leseprotokoll _lese;
 
-    public StammdatenController(AppDbContext db, IConfiguration cfg, Schuleinstellungen einst)
+    public StammdatenController(AppDbContext db, IConfiguration cfg, Schuleinstellungen einst, Leseprotokoll lese)
     {
         _db = db;
         _cfg = cfg;
         _einst = einst;
+        _lese = lese;
     }
 
     /// <summary>
@@ -40,6 +42,7 @@ public class StammdatenController : ControllerBase
     // Phase 5.1: nur in der Entwicklung (im Echtbetrieb 404) und nur, solange keine echten
     // Schüler in der Datenbank stehen.
     [NurEntwicklung]
+    [DesktopSchnittstelle]   // P6a (229)
     [HttpPost("seed/pseudodaten")]
     public IActionResult Seed([FromQuery] string? schuljahr, [FromQuery] int? seed, [FromQuery] string? quelle,
         [FromQuery] int? wechsel, [FromQuery] DateOnly? stichtag)
@@ -129,7 +132,7 @@ public class StammdatenController : ControllerBase
         return Ok(liste);
     }
 
-    /// <summary>Schülerliste einer Lerngruppe. Nur Personal.</summary>
+    /// <summary>Schülerliste einer Lerngruppe. Nur Personal. P6b (232): im Leseprotokoll (Teilnehmer).</summary>
     [Authorize(Roles = "Admin,Lehrer,Klassenlehrer,Stufenkoordination")]
     [HttpGet("lerngruppen/{id:int}/schueler")]
     public async Task<IActionResult> LerngruppenSchueler(int id)
@@ -145,6 +148,8 @@ public class StammdatenController : ControllerBase
             .Select(s => new { s.Id, s.Nachname, s.Vorname, s.Stufe })
             .ToListAsync();
 
+        await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.Teilnehmer, $"Lerngruppe-Id {lg.Id} ({lg.Bezeichnung})",
+            LerngruppeId: lg.Id, Gruppe: LeseAnsichten.Liste(new[] { lg.Bezeichnung }), IstPseudo: lg.IstPseudo));
         return Ok(new { lg.Id, lg.Bezeichnung, Typ = lg.Typ.ToString(), Anzahl = liste.Count, Schueler = liste });
     }
 
@@ -192,7 +197,7 @@ public class StammdatenController : ControllerBase
         return Ok(liste);
     }
 
-    /// <summary>Ein Schüler mit seinen Lerngruppen (Klasse + Kurse). Nur Personal.</summary>
+    /// <summary>Ein Schüler mit seinen Lerngruppen (Klasse + Kurse). Nur Personal. P6b (232): im Leseprotokoll.</summary>
     [Authorize(Roles = "Admin,Lehrer,Klassenlehrer,Stufenkoordination")]
     [HttpGet("schueler/{id:int}")]
     public async Task<IActionResult> SchuelerEinzeln(int id)
@@ -208,6 +213,8 @@ public class StammdatenController : ControllerBase
             .Select(l => new { l.Id, Typ = l.Typ.ToString(), l.Bezeichnung, l.Fach, l.LehrerKuerzel })
             .ToListAsync();
 
+        await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.Schuelerdaten, LeseAnsichten.SchuelerGegenstand(id, null),
+            SchuelerId: id, IstPseudo: s.IstPseudo));
         return Ok(new { s.Id, s.Nachname, s.Vorname, s.Stufe, Lerngruppen = gruppen });
     }
 }

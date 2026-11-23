@@ -12,7 +12,8 @@
          Kursbezeichnung und „gemeinsam mit …“; 5.2b-2b: Reiter „Import“ (SchildDialog_Import.cs) – sendet nur
          dort und nur Prüfsummen statt Geburtsdatum und SchILD-ID; 5.2b-2b-2: „Folgestand erzeugen…“
          (SchildDialog_Folgestand.cs); 5.2c-1: Paare „dieselbe Person?“ und „Schlüssel verloren – neu zuordnen…“;
-         5.2c-2: Gruppen Namensgleicher und „Vorschlag übernehmen…“. -->
+         5.2c-2: Gruppen Namensgleicher und „Vorschlag übernehmen…“; P4b: Reiter „Rückweg“ (SchildDialog_Rueckweg.cs) –
+         Fehlstunden mit Abholcode abholen und SchuelerFehlstunden.dat schreiben. -->
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -304,6 +305,97 @@
                                 ToolTip="Je Gruppe Namensgleicher die Paare mit passendem Eintritt bzw. den meisten gemeinsamen Kursen anhaken (nur eindeutige Vorschläge) – danach „Vorschau berechnen“."/>
                         <TextBlock x:Name="TxtImAuswahl" VerticalAlignment="Center" Foreground="DimGray" TextWrapping="Wrap"/>
                     </DockPanel>
+                </Grid>
+            </TabItem>
+            <!-- P4b (5.3a, Entscheidungen 210–213): Rückweg nach SchILD -->
+            <TabItem>
+                <TabItem.Header>
+                    <TextBlock x:Name="TxtRwKopf" Text="Rückweg"/>
+                </TabItem.Header>
+                <Grid Margin="0,4,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Border Grid.Row="0" x:Name="BrdRwHinweis" Background="#EEEEEE" Padding="8,4" Margin="0,0,0,6" CornerRadius="3">
+                        <TextBlock x:Name="TxtRwHinweis" TextWrapping="Wrap" Text="Zuerst einen Ordner wählen und den Prüflauf starten."/>
+                    </Border>
+                    <WrapPanel Grid.Row="1" Margin="0,0,0,6">
+                        <TextBlock Text="Abholcode aus der App:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBox x:Name="TxtRwCode" Width="120" MaxLength="12" CharacterCasing="Upper" VerticalContentAlignment="Center"
+                                 FontFamily="Consolas" FontSize="15" Margin="0,0,6,0" TextChanged="TxtRwCode_TextChanged"
+                                 ToolTip="App → Jahresablauf → „Rückweg nach SchILD“ → „Fehlstunden für SchILD bereitstellen…“ → „Abholcode erzeugen“. 8 Zeichen, 15 Minuten gültig, ein Abruf."/>
+                        <Button x:Name="BtnRwAbrufen" Content="Abrufen" Padding="14,3" Margin="0,0,12,0" IsEnabled="False"
+                                VerticalAlignment="Center" Click="BtnRwAbrufen_Click"/>
+                        <TextBlock x:Name="TxtRwAbruf" VerticalAlignment="Center" Foreground="DimGray" TextWrapping="Wrap" MaxWidth="640"
+                                   Text="Noch nichts abgeholt."/>
+                    </WrapPanel>
+                    <Grid Grid.Row="2" Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                            <TextBlock Text="Probedatei – nur diese" Foreground="DimGray"/>
+                            <TextBlock Text="Klassen/Stufen (keine = alle):" Foreground="DimGray"/>
+                        </StackPanel>
+                        <ListBox Grid.Column="1" x:Name="LbRwKlassen" SelectionMode="Multiple" Height="52" Margin="0,0,8,0"
+                                 SelectionChanged="LbRwKlassen_SelectionChanged"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListBox.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel/>
+                                </ItemsPanelTemplate>
+                            </ListBox.ItemsPanel>
+                        </ListBox>
+                        <WrapPanel Grid.Column="2" VerticalAlignment="Center">
+                            <TextBlock Text="Zeitraum:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <DatePicker x:Name="DpRwVon" Width="120" VerticalAlignment="Center" SelectedDateChanged="DpRw_SelectedDateChanged"/>
+                            <TextBlock Text="–" VerticalAlignment="Center" Margin="4,0"/>
+                            <DatePicker x:Name="DpRwBis" Width="120" VerticalAlignment="Center" Margin="0,0,6,0"
+                                        SelectedDateChanged="DpRw_SelectedDateChanged"/>
+                            <Button x:Name="BtnRwAlle" Content="Alles" Padding="8,3" VerticalAlignment="Center" Click="BtnRwAlle_Click"
+                                    ToolTip="Alle Klassen und der ganze abgeholte Zeitraum (keine Probedatei)."/>
+                        </WrapPanel>
+                    </Grid>
+                    <WrapPanel Grid.Row="3" Margin="0,0,0,6">
+                        <Button x:Name="BtnRwSchreiben" Content="Datei schreiben…" Padding="14,3" Margin="0,0,6,0" IsEnabled="False"
+                                Click="BtnRwSchreiben_Click"
+                                ToolTip="Schreibt SchuelerFehlstunden.dat in einen neuen Ordner „SchILD-Rueckweg_&lt;Datum&gt;“ – nicht in OneDrive, Teams oder einen anderen Cloud-Ordner."/>
+                        <Button x:Name="BtnRwBericht" Content="Bericht kopieren" Padding="10,3" Margin="0,0,12,0" IsEnabled="False"
+                                Click="BtnRwBericht_Click" ToolTip="Kopiert den Bericht – ohne Schülernamen."/>
+                        <TextBlock x:Name="TxtRwAnzahl" VerticalAlignment="Center" Foreground="DimGray"/>
+                    </WrapPanel>
+                    <Grid Grid.Row="4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="360" MinWidth="220"/>
+                            <ColumnDefinition Width="6"/>
+                            <ColumnDefinition Width="*" MinWidth="300"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox Grid.Column="0" x:Name="TxtRwBericht" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True"
+                                 VerticalScrollBarVisibility="Auto" Background="#FAFAFA" Padding="4"/>
+                        <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent"/>
+                        <DataGrid Grid.Column="2" x:Name="DgRueckweg" AutoGenerateColumns="False" IsReadOnly="True"
+                                  HeadersVisibility="Column" CanUserAddRows="False" CanUserDeleteRows="False"
+                                  GridLinesVisibility="Horizontal" SelectionMode="Single" EnableRowVirtualization="True">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Schüler" Binding="{Binding Name}" Width="2*" MinWidth="140"/>
+                                <DataGridTextColumn Header="Klasse" Binding="{Binding Klasse}" Width="55"/>
+                                <DataGridTextColumn Header="Datum" Binding="{Binding DatumText}" Width="82" SortMemberPath="Datum"/>
+                                <DataGridTextColumn Header="Std." Binding="{Binding StundenText}" Width="52" SortMemberPath="VonStd"/>
+                                <DataGridTextColumn Header="Fehlstd." Binding="{Binding Anzahl}" Width="58"/>
+                                <DataGridTextColumn Header="Entsch." Binding="{Binding JN}" Width="90"/>
+                                <DataGridTextColumn Header="Fach" Binding="{Binding Fach}" Width="58"/>
+                                <DataGridTextColumn Header="Lehrkraft" Binding="{Binding Lehrkraft}" Width="*" MinWidth="64"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Grid>
+                    <TextBlock Grid.Row="5" x:Name="TxtRwMerk" Margin="0,6,0,0" Foreground="DimGray" TextWrapping="Wrap"/>
                 </Grid>
             </TabItem>
             <TabItem Header="Welche Dateien?">

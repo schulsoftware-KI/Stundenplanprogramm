@@ -17,7 +17,8 @@ namespace Stundenplan_V2.Vertretung
     /// (schild_zuordnung.json, ohne Personendaten; Reiter „Zuordnung“ in SchildDialog_Zuordnung.cs).
     /// Gesendet wird nur im Reiter „Import“ (5.2b-2b, SchildDialog_Import.cs) – statt Geburtsdatum und SchILD-ID nur
     /// HMAC-Prüfsummen mit dem Schlüssel dieses Windows-Benutzers. „Folgestand erzeugen…“ (5.2b-2b-2,
-    /// SchildDialog_Folgestand.cs) schreibt aus einem Pseudo-Ordner einen neuen Ordner mit Änderungen.
+    /// SchildDialog_Folgestand.cs) schreibt aus einem Pseudo-Ordner einen neuen Ordner mit Änderungen. P4b: Reiter „Rückweg“
+    /// (SchildDialog_Rueckweg.cs) holt Fehlstunden mit Abholcode (nur Prüfsummen) und schreibt SchuelerFehlstunden.dat.
     /// Die gelesenen Daten liegen nur im Arbeitsspeicher und werden beim Schließen freigegeben.
     /// </summary>
     public partial class SchildDialog : Window
@@ -77,7 +78,11 @@ namespace Stundenplan_V2.Vertretung
             "Pseudo-Export einen neuen Ordner „…_Folge1“ (dann „_Folge2“ …) mit typischen Änderungen bis zum nächsten Export: " +
             "Abgänge, Klassen-, Kurs- und Gruppenwechsel, Namensänderung, korrigiertes Geburtsdatum, Neuaufnahmen, ein fehlender " +
             "Schüler und wahlweise eine ganz fehlende Klasse. Das Fenster nennt die Änderungen und die Zahlen, die die Vorschau " +
-            "zeigen sollte; dieselbe Liste steht in FOLGESTAND.txt im neuen Ordner. Echte Exporte werden nie verändert.";
+            "zeigen sollte; dieselbe Liste steht in FOLGESTAND.txt im neuen Ordner. Echte Exporte werden nie verändert.\n\n" +
+            "Rückweg nach SchILD (Reiter „Rückweg“, seit P4b): Fehlstunden aus der App mit einem Abholcode holen (die App liefert nur " +
+            "Prüfsummen, keine Namen), den Schülern dieses Ordners zuordnen und SchuelerFehlstunden.dat in einen neuen Ordner " +
+            "„SchILD-Rueckweg_<Datum>“ schreiben – Import in SchILD von Hand. Dafür den aktuellen Export wählen (gleicher Stand wie " +
+            "beim letzten Import). Kopfzeile, Dateiname und Zeichensatz stehen im Formatprofil unter „Rueckweg“.";
 
         public SchildDialog(string planOrdner, string schuljahr,
                             Func<(GrundplanPushDto? Plan, string? Hinweis)> planHolen, Action<string>? log = null)
@@ -89,8 +94,10 @@ namespace Stundenplan_V2.Vertretung
             _log = log;
             TxtDateienHilfe.Text = DateienHilfe;
             TxtImBericht.Text = ImportHilfe;
+            TxtRwBericht.Text = RwHilfe;   // P4b
             LadeProfil();
             ImAnzeigen();
+            RwAnzeigen();
         }
 
         // =====================================================
@@ -208,7 +215,7 @@ namespace Stundenplan_V2.Vertretung
             var abschnitte = SchildPruefung.Abschnitte(_export);
             _abschnittSetzen = true;
             CbAbschnitt.ItemsSource = abschnitte;
-            CbAbschnitt.SelectedIndex = abschnitte.Count > 0 ? 0 : -1;
+            CbAbschnitt.SelectedIndex = AbschnittVorwahl(abschnitte);   // P4a (206)
             _abschnittSetzen = false;
             ZeigeErgebnis();
 
@@ -216,6 +223,24 @@ namespace Stundenplan_V2.Vertretung
                 _log?.Invoke($"SchILD-Prüflauf ({(_export.IstPseudo ? "Pseudodaten" : "echte Daten")}, " +
                              $"{_ergebnis.Jahr}/{_ergebnis.Abschnitt}): {_ergebnis.Anzahl(SchildProblemArt.Fehler)} Fehler, " +
                              $"{_ergebnis.Anzahl(SchildProblemArt.Warnung)} Warnungen.");
+        }
+
+        /// <summary>
+        /// P4a (Entscheidung 206): Enthält der Export Abschnitt 1 und 2 desselben Jahres, wird ab dem 2. Halbjahr Abschnitt 2
+        /// vorgewählt, davor Abschnitt 1 – sonst wie bisher der häufigste. Stichtag und „heute“ kommen aus dem zuletzt
+        /// abgefragten Status der API (mit Testdatum), sonst gilt der 1. Februar und das Datum dieses Rechners.
+        /// </summary>
+        private int AbschnittVorwahl(List<SchildAbschnitt> abschnitte)
+        {
+            if (abschnitte.Count == 0) return -1;
+            int jahr = abschnitte[0].Jahr;
+            int i1 = abschnitte.FindIndex(a => a.Jahr == jahr && a.Abschnitt == 1);
+            int i2 = abschnitte.FindIndex(a => a.Jahr == jahr && a.Abschnitt == 2);
+            if (i1 < 0 || i2 < 0) return 0;
+            var st = _imStatus;
+            DateOnly stichtag = st?.HalbjahrAb is DateOnly h && h.Year == jahr + 1 ? h : new DateOnly(jahr + 1, 2, 1);
+            DateOnly heute = st?.Heute ?? DateOnly.FromDateTime(DateTime.Today);
+            return heute >= stichtag ? i2 : i1;
         }
 
         private void CbAbschnitt_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -245,6 +270,8 @@ namespace Stundenplan_V2.Vertretung
             BtnBericht.IsEnabled = true;
             ZeigeZuordnung();
             ImVorschauVerwerfen(null);   // 5.2b-2b: neue Auswertung → Nutzlast ändert sich
+            RwKlassenFuellen();          // P4b: Klassen/Stufen des Abschnitts, Zuordnung zu den Schülern neu
+            RwBerechnen();
         }
 
         private void Filter_Changed(object sender, RoutedEventArgs e) => FiltereProbleme();
@@ -513,6 +540,7 @@ namespace Stundenplan_V2.Vertretung
             if (!an) { BtnZuFestlegen.IsEnabled = false; BtnZuEntfernen.IsEnabled = false; TxtZuMuster.IsEnabled = false; BtnZuMuster.IsEnabled = false; }
             else AktualisiereMusterVorschau();
             ImAnzeigen();   // 5.2b-2b
+            RwAnzeigen();   // P4b
         }
 
         private void BtnSchliessen_Click(object sender, RoutedEventArgs e) => Close();
@@ -536,6 +564,7 @@ namespace Stundenplan_V2.Vertretung
             DgZuordnung.ItemsSource = null;
             CbAbschnitt.ItemsSource = null;
             ImSchliessen();   // 5.2b-2b: Vorschau (mit Namen) und Schlüssel freigeben
+            RwSchliessen();   // P4b: abgeholte Fehlstunden und Vorschau (mit Namen) freigeben
             _ergebnis = null;
             _export = null;
             base.OnClosed(e);

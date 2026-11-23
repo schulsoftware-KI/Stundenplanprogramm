@@ -22,6 +22,20 @@ namespace VertretungApi.Services;
 //  Standardwerte ohne schulspezifische Konstanten (138): Schuljahr nach dem Datum (ab 1. August das
 //  neue), „Erfassung ab“ = erster Schultag laut Kalender, „Thema ab“ = „Erfassung ab“, 2. Halbjahr =
 //  1. Februar (wie bisher in FehlzeitenService.HalbjahrAb).
+//
+//  P4a (5.3a, Entscheidungen 208, 209): zwei neue Fristen in der Karte „Datenschutz“ – Abwesenheitsgründe der
+//  Vertretungen und Konten abgegangener Schüler (Standard 0 = nichts wird gelöscht, 70). Die Protokolle der
+//  SchILD-Importe fallen jetzt unter „Aufbewahrung der Protokolle“ (202). Die neuen Zeilen legt Uebernehmen()
+//  beim ersten Start mit P4a an („2 neue Einstellung(en) angelegt“, alle mit Standard).
+//
+//  P6a (Entscheidungen 226, 228): drei Schalter in der Karte „Anmeldung“ – Pflicht zum zweiten Faktor für Admins (nur
+//  Entwicklung; im Echtbetrieb immer an), für Klassenleitung/Stufenkoordination und für alle Lehrkräfte (Standard aus).
+//  „Aufbewahrung der Protokolle“ gilt jetzt auch für das Anmeldeprotokoll. Gelesen werden die Schalter bei jeder
+//  Anfrage aus dem Zwischenspeicher (FaktorPflichtAsync) – ohne Kalenderabfrage.
+//
+//  P6b (Entscheidungen 233, 236): zwei Schalter in der Karte „Datenschutz“ – „Leseprotokoll“ (Standard aus, 70) und
+//  „Grund der Entschuldigung erfassen“ (Standard an = wie bisher). Das Leseprotokoll fragt ihn bei jeder Ansicht aus dem
+//  Zwischenspeicher ab (LeseprotokollAn) – ohne Kalender. „Aufbewahrung der Protokolle“ gilt auch für das Leseprotokoll.
 // =====================================================================
 
 public enum EinstellungsTyp { Text, Schuljahr, Datum, Zahl, Schalter }
@@ -51,10 +65,17 @@ public static class EinstellungsKatalog
     public const string ThemaAb = "Schuljahr.ThemaAb";
     public const string HalbjahrAb = "Schuljahr.HalbjahrAb";
     public const string EintraegeLoeschen = "Datenschutz.EintraegeLoeschenNachTagen";
+    public const string GruendeLoeschen = "Datenschutz.GruendeLoeschenNachTagen";             // P4a (208)
+    public const string AbgangKontenLoeschen = "Datenschutz.AbgangKontenLoeschenNachTagen";   // P4a (208)
     public const string ProtokollTage = "Datenschutz.ProtokollTage";
     public const string BerichteNurAdmin = "Datenschutz.BerichteNurAdmin";
+    public const string Leseprotokoll = "Datenschutz.Leseprotokoll";                     // P6b (233)
+    public const string GrundErfassen = "Datenschutz.GrundErfassen";                     // P6b (236)
     public const string SitzungStunden = "Anmeldung.SitzungStunden";
     public const string AngemeldetBleibenTage = "Anmeldung.AngemeldetBleibenTage";
+    public const string FaktorPflichtAdmin = "Anmeldung.FaktorPflichtAdmin";             // P6a (226)
+    public const string FaktorPflichtLeitung = "Anmeldung.FaktorPflichtLeitung";         // P6a (226)
+    public const string FaktorPflichtLehrkraefte = "Anmeldung.FaktorPflichtLehrkraefte"; // P6a (226)
 
     public const int MaxAbgestimmtMit = 120;
 
@@ -69,8 +90,9 @@ public static class EinstellungsKatalog
             "Vor dem Echtbetrieb mit der bzw. dem Datenschutzbeauftragten abstimmen und „abgestimmt am / mit“ eintragen. " +
             "Eine kürzere Frist löscht ältere Daten sofort – vorher steht da, wie viele."),
         new EinstellungsGruppe("anmeldung", "Anmeldung",
-            "Gilt für neue Anmeldungen; bestehende laufen bis zu ihrem Ende. Vor dem Echtbetrieb mit der bzw. dem " +
-            "Datenschutzbeauftragten abstimmen."),
+            "Dauer und „Angemeldet bleiben“ gelten für neue Anmeldungen; bestehende laufen bis zu ihrem Ende. Die Pflicht " +
+            "zum zweiten Faktor gilt ab dem nächsten Abruf. Vor dem Echtbetrieb mit der bzw. dem Datenschutzbeauftragten " +
+            "abstimmen."),
     };
 
     public static readonly IReadOnlyList<EinstellungsDef> Alle = new[]
@@ -106,17 +128,59 @@ public static class EinstellungsKatalog
             "0 (aus)", DateiSchluessel: "Klassenbuch:EintraegeLoeschenNachTagen", StandardWert: "0",
             DsbFrage: "Wie lange werden Klassenbucheinträge aufbewahrt (Löschkonzept, VO-DV I)?",
             Min: 0, Max: 3650, Einheit: "Tage", NullText: "aus", Loescht: true),
+        // P4a (Entscheidung 208): Gründe der Vertretungen (Lehrkräfte, VO-DV II) und Konten abgegangener Schüler
+        new EinstellungsDef(GruendeLoeschen, "datenschutz", "Abwesenheitsgründe der Vertretungen löschen nach",
+            EinstellungsTyp.Zahl,
+            "Grund und Bemerkung zur Abwesenheit der Lehrkräfte (z. B. „krank“, „Fortbildung“) in veröffentlichten " +
+            "Vertretungen werden gelöscht, wenn der Tag länger als so viele Tage zurückliegt. Die Vertretung selbst " +
+            "bleibt. Die Vertretungsdatei im Desktop behält ihre Gründe – wird ein alter Tag neu veröffentlicht, stehen " +
+            "sie wieder in der App. 0 = nicht löschen.",
+            "0 (aus)", StandardWert: "0",
+            DsbFrage: "Wie lange dürfen die Gründe für die Abwesenheit von Lehrkräften in den Vertretungen gespeichert " +
+                      "bleiben (VO-DV II)?",
+            Min: 0, Max: 3650, Einheit: "Tage", NullText: "aus", Loescht: true),
+        new EinstellungsDef(AbgangKontenLoeschen, "datenschutz", "Konten abgegangener Schüler löschen nach",
+            EinstellungsTyp.Zahl,
+            "Das gesperrte Konto einer Schülerin bzw. eines Schülers mit Abgang laut SchILD wird gelöscht, wenn der " +
+            "Abgang länger als so viele Tage zurückliegt. Der Schülerdatensatz und die Klassenbuchdaten bleiben. Ein " +
+            "wieder entsperrtes Konto bleibt. 0 = nicht löschen.",
+            "0 (aus)", StandardWert: "0",
+            DsbFrage: "Wie lange bleiben die Konten abgegangener Schülerinnen und Schüler bestehen?",
+            Min: 0, Max: 3650, Einheit: "Tage", NullText: "aus", Loescht: true),
         new EinstellungsDef(ProtokollTage, "datenschutz", "Aufbewahrung der Protokolle", EinstellungsTyp.Zahl,
-            "So lange bleiben das Kontenprotokoll, das Download-Protokoll und das Protokoll dieser Einstellungen; " +
-            "ältere Einträge werden gelöscht. 0 = nicht löschen (nicht empfohlen).",
+            "So lange bleiben das Kontenprotokoll, das Anmeldeprotokoll, das Leseprotokoll, das Download-Protokoll, das " +
+            "Protokoll dieser Einstellungen und die Protokolle der SchILD-Importe; ältere Einträge werden gelöscht. Vom SchILD-Import bleibt je Schuljahr und " +
+            "Abschnitt der letzte (der nächste Import braucht Stichtag und Schlüsselkennung). 0 = nicht löschen (nicht " +
+            "empfohlen).",
             "365 Tage", DateiSchluessel: "Konten:ProtokollTage", StandardWert: "365",
-            DsbFrage: "Wie lange werden die Protokolle der Konten, Downloads und Einstellungen aufbewahrt?",
+            DsbFrage: "Wie lange werden die Protokolle der Konten, Anmeldungen, Ansichten (Leseprotokoll), Downloads, " +
+                      "Einstellungen und SchILD-Importe aufbewahrt?",
             Min: 0, Max: 3650, Einheit: "Tage", NullText: "nicht löschen", Loescht: true),
         new EinstellungsDef(BerichteNurAdmin, "datenschutz", "Downloads nur für die Verwaltung", EinstellungsTyp.Schalter,
             "An: PDFs und CSV-Dateien mit Schülerdaten (Klassenbuch, Kursheft, Fehlzeiten, Jahresarchiv) lädt nur die " +
             "Verwaltung herunter. Aus: auch Klassenleitung, Stufenkoordination und Lehrkräfte für ihre Klassen und Kurse.",
             "aus", DateiSchluessel: "Berichte:NurAdmin", StandardWert: "false",
             DsbFrage: "Dürfen Lehrkräfte Dateien mit Schülerdaten herunterladen – auch auf private Geräte?"),
+        // P6b (Entscheidung 233): Leseprotokoll – Standard aus (70)
+        new EinstellungsDef(Leseprotokoll, "datenschutz", "Leseprotokoll", EinstellungsTyp.Schalter,
+            "An: Die App zeichnet auf, wer wann welche Schülerdaten angesehen hat (Fehlzeiten, Stundenblatt, Einträge, " +
+            "Schülerplan, Gruppenlisten) und wer die Abwesenheitsgründe der Lehrkräfte bzw. „Nicht erfasst“ anderer " +
+            "Lehrkräfte geöffnet hat – je Tag, Konto, Ansicht und Gegenstand ein Eintrag mit Anzahl und Uhrzeit, ohne " +
+            "Inhalte. Eigene Daten, Pläne von Klassen und Lehrkräften, Hausaufgaben und Themen nicht. Einsicht: Konten " +
+            "verwalten → „Zugriffe“ → „Ansichten“ (nur Admin). Das Protokoll lässt erkennen, wann welche Lehrkraft was " +
+            "angesehen hat – vorher mit dem Personalrat klären (Dienstvereinbarung).",
+            "aus", StandardWert: "false",
+            DsbFrage: "Soll ein Leseprotokoll geführt werden (wer hat wann welche Schülerdaten angesehen)? Es zeigt auch, " +
+                      "wann welche Lehrkraft gearbeitet hat – auch Frage an den Personalrat (Dienstvereinbarung)."),
+        // P6b (Entscheidung 236): Grund der Entschuldigung – Standard an (wie bisher)
+        new EinstellungsDef(GrundErfassen, "datenschutz", "Grund der Entschuldigung erfassen", EinstellungsTyp.Schalter,
+            "An: Beim Entschuldigen wählt man einen Grund (Krankheit, Arzttermin, familiär, sonstiges). Aus: keine Auswahl " +
+            "mehr – gespeichert wird „ohne Angabe“. Schon gespeicherte Gründe bleiben, bis du sie mit „Vorhandene Gründe " +
+            "entfernen…“ löschst (erscheint, wenn der Schalter aus ist). Krankheit und Arzttermin sind Gesundheitsdaten " +
+            "(Art. 9 DSGVO).",
+            "an", StandardWert: "true",
+            DsbFrage: "Darf beim Entschuldigen der Grund gespeichert werden – Krankheit und Arzttermin sind " +
+                      "Gesundheitsdaten (Art. 9 DSGVO)?"),
 
         new EinstellungsDef(SitzungStunden, "anmeldung", "Dauer einer Anmeldung", EinstellungsTyp.Zahl,
             "So lange gilt eine Anmeldung ohne „Angemeldet bleiben“ höchstens; sie endet auch, wenn der Browser " +
@@ -130,6 +194,29 @@ public static class EinstellungsKatalog
             "30 Tage", DateiSchluessel: "Jwt:TageAngemeldetBleiben", StandardWert: "30",
             DsbFrage: "Ist „Angemeldet bleiben“ auf eigenen Geräten erlaubt – und wie lange?",
             Min: 0, Max: 90, Einheit: "Tage", NullText: "aus"),
+
+        // P6a (Entscheidung 226): Pflicht zum zweiten Faktor. Freiwillig geht er für jedes Personalkonto (Kontomenü).
+        new EinstellungsDef(FaktorPflichtAdmin, "anmeldung", "Zweiter Faktor für Admins Pflicht", EinstellungsTyp.Schalter,
+            "Nur für die Entwicklung (damit die Testkonten ohne Handy gehen): Im Echtbetrieb ist der zweite Faktor für " +
+            "Admin-Konten immer Pflicht – unabhängig von diesem Schalter. An: Ein Admin-Konto ohne zweiten Faktor kann nach " +
+            "dem Passwort nur noch den zweiten Faktor einrichten.",
+            "aus (im Echtbetrieb immer an)", StandardWert: "false"),
+        new EinstellungsDef(FaktorPflichtLeitung, "anmeldung", "Zweiter Faktor Pflicht für Klassenleitung und Stufenkoordination",
+            EinstellungsTyp.Schalter,
+            "An: Konten der Klassenleitung und Stufenkoordination ohne zweiten Faktor können nach dem Passwort nur noch den " +
+            "zweiten Faktor einrichten (ab dem nächsten Abruf). Dafür braucht es eine Authenticator-App – meist auf dem " +
+            "privaten Handy.",
+            "aus", StandardWert: "false",
+            DsbFrage: "Müssen Klassenleitung und Stufenkoordination einen zweiten Faktor nutzen – meist mit dem privaten " +
+                      "Handy (auch Frage an den Personalrat)?"),
+        new EinstellungsDef(FaktorPflichtLehrkraefte, "anmeldung", "Zweiter Faktor Pflicht für alle Lehrkräfte",
+            EinstellungsTyp.Schalter,
+            "An: alle Konten der Lehrkräfte (auch Klassenleitung und Stufenkoordination) ohne zweiten Faktor können nach dem " +
+            "Passwort nur noch den zweiten Faktor einrichten (ab dem nächsten Abruf). Schülerkonten bekommen keinen zweiten " +
+            "Faktor.",
+            "aus", StandardWert: "false",
+            DsbFrage: "Müssen alle Lehrkräfte einen zweiten Faktor nutzen – meist mit dem privaten Handy (auch Frage an den " +
+                      "Personalrat)?"),
     };
 
     private static readonly Dictionary<string, EinstellungsDef> NachSchluessel =
@@ -250,7 +337,11 @@ public sealed record SchulWerte(
     int ProtokollTage,
     bool BerichteNurAdmin,
     int SitzungStunden,
-    int AngemeldetBleibenTage)
+    int AngemeldetBleibenTage,
+    int GruendeLoeschenNachTagen = 0,       // P4a (208): 0 = nicht löschen
+    int AbgangKontenLoeschenNachTagen = 0,  // P4a (208): 0 = nicht löschen
+    bool Leseprotokoll = false,             // P6b (233): Standard aus
+    bool GrundErfassen = true)              // P6b (236): Standard an
 {
     public const string StandardAppName = "Stundenplan";
 
@@ -354,6 +445,23 @@ public sealed class Schuleinstellungen
         return EinstellungsKatalog.Normalisieren(d, _cfg[d.DateiSchluessel], out _);
     }
 
+    /// <summary>P6a (226): die Schalter der Pflicht zum zweiten Faktor – nur aus dem Zwischenspeicher, ohne Kalender.</summary>
+    public async Task<FaktorPflichten> FaktorPflichtAsync(AppDbContext db, CancellationToken ct = default)
+        => FaktorPflichtAus(await ZeilenAsync(db, ct));
+
+    /// <summary>P6b (233): Leseprotokoll an? Nur aus dem Zwischenspeicher, ohne Kalender (bei jeder Ansicht).</summary>
+    public async Task<bool> LeseprotokollAnAsync(AppDbContext db, CancellationToken ct = default)
+        => EinstellungsKatalog.AlsSchalter(Roh(await ZeilenAsync(db, ct), EinstellungsKatalog.Leseprotokoll), false);
+
+    /// <summary>P6b (236): Grund der Entschuldigung erfassen? Nur aus dem Zwischenspeicher, ohne Kalender.</summary>
+    public async Task<bool> GrundErfassenAsync(AppDbContext db, CancellationToken ct = default)
+        => EinstellungsKatalog.AlsSchalter(Roh(await ZeilenAsync(db, ct), EinstellungsKatalog.GrundErfassen), true);
+
+    public FaktorPflichten FaktorPflichtAus(IReadOnlyDictionary<string, Einstellung> zeilen)
+        => new(EinstellungsKatalog.AlsSchalter(Roh(zeilen, EinstellungsKatalog.FaktorPflichtAdmin), false),
+               EinstellungsKatalog.AlsSchalter(Roh(zeilen, EinstellungsKatalog.FaktorPflichtLeitung), false),
+               EinstellungsKatalog.AlsSchalter(Roh(zeilen, EinstellungsKatalog.FaktorPflichtLehrkraefte), false));
+
     public async Task<SchulWerte> LesenAsync(AppDbContext db, CancellationToken ct = default)
     {
         var zeilen = await ZeilenAsync(db, ct);
@@ -416,7 +524,11 @@ public sealed class Schuleinstellungen
             ProtokollTage: Z(EinstellungsKatalog.ProtokollTage),
             BerichteNurAdmin: EinstellungsKatalog.AlsSchalter(R(EinstellungsKatalog.BerichteNurAdmin), false),
             SitzungStunden: Z(EinstellungsKatalog.SitzungStunden),
-            AngemeldetBleibenTage: Z(EinstellungsKatalog.AngemeldetBleibenTage));
+            AngemeldetBleibenTage: Z(EinstellungsKatalog.AngemeldetBleibenTage),
+            GruendeLoeschenNachTagen: Z(EinstellungsKatalog.GruendeLoeschen),
+            AbgangKontenLoeschenNachTagen: Z(EinstellungsKatalog.AbgangKontenLoeschen),
+            Leseprotokoll: EinstellungsKatalog.AlsSchalter(R(EinstellungsKatalog.Leseprotokoll), false),
+            GrundErfassen: EinstellungsKatalog.AlsSchalter(R(EinstellungsKatalog.GrundErfassen), true));
     }
 
     // -----------------------------------------------------------------

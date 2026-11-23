@@ -49,6 +49,18 @@ public static class Rollen
     public static bool ErlaubtBeiPasswortPflicht(PathString pfad)
         => PflichtPfade.Any(p => pfad.Equals(p, StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>
+    /// P6a (226): Wird in Program.cs je Anfrage gesetzt, wenn das Konto erst den zweiten Faktor einrichten muss –
+    /// Wert „einrichten“ (Pflicht, noch keiner) bzw. „neu“ (keine Wiederherstellungscodes mehr). Dann sind nur die
+    /// Pfade in <see cref="ErlaubtBeiFaktorPflicht"/> erlaubt. Kommt erst nach der Passwort-Pflicht.
+    /// </summary>
+    public const string FaktorPflichtClaim = "faktorEinrichten";
+
+    private const string FaktorPfad = "/api/auth/zweiter-faktor";
+
+    public static bool ErlaubtBeiFaktorPflicht(PathString pfad)
+        => ErlaubtBeiPasswortPflicht(pfad) || pfad.StartsWithSegments(FaktorPfad, StringComparison.OrdinalIgnoreCase);
+
     private static readonly string[] PersonalListe = Personal.Split(',');
 
     public static bool IstPersonal(ClaimsPrincipal u) => PersonalListe.Any(u.IsInRole);

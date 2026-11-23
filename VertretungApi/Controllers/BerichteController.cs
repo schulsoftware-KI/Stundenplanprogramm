@@ -54,6 +54,7 @@ public class BerichteController : ControllerBase
         return Ok(await BerichtService.UnterrichteAsync(_db, klasse));
     }
 
+    [TeurerAbruf]            // P6a (230)
     [HttpGet("klassenbuch")]
     public async Task<IActionResult> Klassenbuch(
         [FromQuery] string? klasse, [FromQuery] DateOnly? von, [FromQuery] DateOnly? bis, [FromQuery] bool schuelerEintraege = false)
@@ -70,6 +71,7 @@ public class BerichteController : ControllerBase
         return await PdfAntwortAsync(u, bericht, "KlassenbuchPdf", bericht.Kopf.Titel);
     }
 
+    [TeurerAbruf]            // P6a (230)
     [HttpGet("kursheft")]
     public async Task<IActionResult> Kursheft(
         [FromQuery] int unr, [FromQuery] string? lehrer, [FromQuery] DateOnly? von, [FromQuery] DateOnly? bis,
@@ -169,6 +171,7 @@ public class BerichteController : ControllerBase
         return Ok(await ExportService.PruefenAsync(_db, gruppen!, v, bisEff, ne.Anzahl, erfassungAb));
     }
 
+    [TeurerAbruf]            // P6a (230)
     [HttpGet("fehlzeiten-csv")]
     public async Task<IActionResult> FehlzeitenCsv(
         [FromQuery] string? klasse, [FromQuery] DateOnly? von, [FromQuery] DateOnly? bis, [FromQuery] bool alle = false)
@@ -208,6 +211,7 @@ public class BerichteController : ControllerBase
     /// einem Durchgang erzeugt (Zwischendatei im Temp-Ordner, nach dem Senden gelöscht); bricht die
     /// Verbindung ab, wird die Erzeugung zwischen zwei Heften beendet.
     /// </summary>
+    [TeurerAbruf]            // P6a (230)
     [HttpGet("archiv")]
     public async Task<IActionResult> Archiv(
         [FromQuery] DateOnly? von, [FromQuery] DateOnly? bis, [FromQuery] bool schuelerEintraege = false)

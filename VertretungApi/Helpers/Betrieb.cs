@@ -56,6 +56,43 @@ public static class Betrieb
                 hinweise.Add("Proxy:Aktiv ist an, aber Proxy:BekannteProxys ist leer – nur ein Proxy auf demselben Rechner (localhost) wird anerkannt.");
         }
 
+        // P6a (Entscheidung 229): Schuladressen und Adressbeschränkung – auch in der Entwicklung, ein falscher Wert
+        // sperrte sonst still aus (bzw. ließe still alle herein).
+        var netze = Zugriffsschutz.Lesen(cfg, out var falscheNetze);
+        foreach (var n in falscheNetze)
+            fehler.Add($"Zugriff:Schuladressen enthält „{n}“ – das ist keine IP-Adresse bzw. kein Netz " +
+                       "(Beispiele: 203.0.113.10, 203.0.113.0/24, 2001:db8:1234::/48).");
+        bool desktopNurSchule = Zugriffsschutz.Schalter(cfg, "Zugriff:DesktopNurSchule", out var u1);
+        bool adminNurSchule = Zugriffsschutz.Schalter(cfg, "Zugriff:AdminNurSchule", out var u2);
+        if (u1) fehler.Add("Zugriff:DesktopNurSchule muss true oder false sein.");
+        if (u2) fehler.Add("Zugriff:AdminNurSchule muss true oder false sein.");
+        if ((desktopNurSchule || adminNurSchule) && netze.Count == 0 && falscheNetze.Count == 0)
+            fehler.Add("Zugriff:DesktopNurSchule bzw. Zugriff:AdminNurSchule ist an, aber Zugriff:Schuladressen ist leer – dann " +
+                       "käme niemand mehr herein. Die Adressen der Schule eintragen oder die Beschränkung ausschalten.");
+        foreach (var n in netze.Where(x => x.Praefix < (x.Laenge == 32 ? 8 : 16)))
+            hinweise.Add($"Zugriff:Schuladressen enthält das sehr große Netz {n} – alle Adressen darin gelten als Schule.");
+        if (produktiv && (desktopNurSchule || adminNurSchule) && !cfg.GetValue("Proxy:Aktiv", false))
+            hinweise.Add("Zugriff: Eine Adressbeschränkung ist an, aber Proxy:Aktiv ist aus. Läuft die API hinter einem Reverse " +
+                         "Proxy, kommen alle Anfragen von dessen Adresse – dann Proxy:Aktiv und Proxy:BekannteProxys setzen.");
+
+        // P6a (Entscheidung 230): Werte der Anfragebegrenzung.
+        var begrenzung = VertretungApi.Services.BegrenzungsWerte.Lesen(cfg, fehler);
+        if (produktiv && (begrenzung.JeKontoJeMinute == 0 || begrenzung.OhneAnmeldungJeMinute == 0 || begrenzung.DesktopJeMinute == 0))
+            hinweise.Add("Begrenzung: Mindestens eine Anfragebegrenzung ist ausgeschaltet (0) – im Echtbetrieb nicht empfohlen.");
+
+        // P4a (Entscheidung 221): Testdatum nur in der Entwicklung – im Echtbetrieb startet der Server damit nicht.
+        if (!string.IsNullOrWhiteSpace(cfg[Testdatum.Schluessel]))
+        {
+            if (produktiv)
+                fehler.Add($"{Testdatum.Schluessel} (Testdatum) ist im Echtbetrieb nicht erlaubt – den Eintrag bzw. die " +
+                           "Umgebungsvariable Entwicklung__Heute entfernen.");
+            else
+            {
+                Testdatum.Lesen(cfg, out var testFehler);
+                if (testFehler != null) fehler.Add(testFehler);
+            }
+        }
+
         if (!produktiv) return new Ergebnis(fehler, hinweise);
 
         // --- Schlüssel ---

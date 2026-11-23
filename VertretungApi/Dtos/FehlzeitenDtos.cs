@@ -4,7 +4,8 @@ namespace VertretungApi.Dtos;
 //  Fehlzeiten (Phase 3.2): Summen, Schülerdetail, Listen je Klasse/Stufe
 //  bzw. Unterricht, Entschuldigungen, nicht erfasste Stunden.
 //  Bewertung: Offen | Entschuldigt | Unentschuldigt.
-//  Grund:     Krankheit | Arzttermin | Familiaer | Sonstiges.
+//  Grund:     Krankheit | Arzttermin | Familiaer | Sonstiges | OhneAngabe (P6b, Schalter „Grund der Entschuldigung
+//             erfassen“ aus bzw. Gründe entfernt).
 //
 //  Phase 4.1 (Auswertungen, Entscheidungen 40–43): Zeiträume (Halbjahre,
 //  Schuljahr), „Soll" = erfasste Stunden, in denen der Schüler laut Liste
@@ -94,7 +95,8 @@ public record FzRechteDto(
     bool Admin,
     IReadOnlyList<string> Klassen,         // wählbare Klassen/Stufen (Zuständigkeit bzw. Admin: alle)
     DateOnly ErfassungAb,
-    bool Berichte);                        // Phase 4.2: darf PDFs herunterladen (Einstellung „Downloads nur für die Verwaltung“)
+    bool Berichte,                         // Phase 4.2: darf PDFs herunterladen (Einstellung „Downloads nur für die Verwaltung“)
+    bool GrundErfassen = true);            // P6b (236): Auswahl „Grund“ beim Entschuldigen zeigen
 
 /// <summary>Nicht erfasste Stunden (offen ab dem Folgetag); Phase 3.3: auch Stunden ohne Thema.</summary>
 public record FzNichtErfasstDto(

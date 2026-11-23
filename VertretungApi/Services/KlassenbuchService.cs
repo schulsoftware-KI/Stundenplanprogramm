@@ -92,7 +92,8 @@ public static class KlassenbuchService
 
     internal sealed record Teilnehmer(int Id, string Vorname, string Nachname, string? Klasse, bool IstPseudo);
 
-    public static DateOnly Heute() => DateOnly.FromDateTime(DateTime.Now);
+    /// <summary>„Heute“ der API – seit P4a mit Testdatum (Entwicklung:Heute, Entscheidung 221).</summary>
+    public static DateOnly Heute() => Helpers.Testdatum.Heute();
 
     // =================================================================
     //  Rechte
@@ -254,8 +255,10 @@ public static class KlassenbuchService
     /// Die Version muss zum geladenen Stundenblatt passen – sonst hat inzwischen jemand anderes
     /// gespeichert (409, Konflikt).
     /// </summary>
+    /// <param name="grundErfassen">P6b (236): Schalter „Grund der Entschuldigung erfassen“ – aus: Stunden, die ein
+    /// Entschuldigungs-Zeitraum abdeckt, bekommen „ohne Angabe“ statt des Grundes des Zeitraums.</param>
     public static async Task<KbErgebnis> SpeichernAsync(
-        AppDbContext db, KbNutzer u, TagKontext tag, PlanStunde st, KbSpeichernDto dto)
+        AppDbContext db, KbNutzer u, TagKontext tag, PlanStunde st, KbSpeichernDto dto, bool grundErfassen = true)
     {
         if (tag.Datum > Heute())
             return new KbErgebnis(400, "Das Stundenblatt kann erst ab dem Tag der Stunde ausgefüllt werden.");
@@ -304,7 +307,7 @@ public static class KlassenbuchService
             }
         }
 
-        var (ergebnis, _, _) = await SpeichereLektionAsync(db, u, tag, st, liste, neu, inhalt, dto.Version, null);
+        var (ergebnis, _, _) = await SpeichereLektionAsync(db, u, tag, st, liste, neu, inhalt, dto.Version, null, grundErfassen);
         if (ergebnis.Status != 200 || !dto.FolgestundeUebernehmen) return ergebnis;
 
         // ---- Doppelstunde: Anwesenheit und Thema in die folgende Stunde übernehmen ----
@@ -344,7 +347,7 @@ public static class KlassenbuchService
 
         // Ohne Versionsprüfung: Eine schon erfasste 2. Stunde bzw. ein vorhandenes Thema wird nie überschrieben.
         var (f, fAnw, fThema) = await SpeichereLektionAsync(
-            db, u, tag, folge, fListe, fNeu, fInhalt, null, $"übernommen aus der {st.Stunde}. Stunde");
+            db, u, tag, folge, fListe, fNeu, fInhalt, null, $"übernommen aus der {st.Stunde}. Stunde", grundErfassen);
         string meldung;
         if (f.Status != 200)
             meldung = $"Gespeichert. Die {folge.Stunde}. Stunde konnte nicht übernommen werden. {f.Fehler}";
@@ -372,7 +375,7 @@ public static class KlassenbuchService
     private static async Task<(KbErgebnis Ergebnis, bool Anwesenheit, bool Inhalt)> SpeichereLektionAsync(
         AppDbContext db, KbNutzer u, TagKontext tag, PlanStunde st, List<Teilnehmer> liste,
         Dictionary<int, (AnwesenheitStatus Status, int? Minuten)>? neu,
-        UnterrichtInhaltService.InhaltNeu? inhalt, int? version, string? herkunft)
+        UnterrichtInhaltService.InhaltNeu? inhalt, int? version, string? herkunft, bool grundErfassen)
     {
         await using var tx = await db.Database.BeginTransactionAsync();
         try
@@ -497,7 +500,7 @@ public static class KlassenbuchService
                         a.GeaendertVon = u.Name;
                         a.GeaendertAm = jetzt;
                         if (a.Bewertung == FehlBewertung.Offen && a.EntschuldigungId == null)
-                            ZeitraumAnwenden(a, abdeckend);
+                            ZeitraumAnwenden(a, abdeckend, grundErfassen);
                     }
                     else
                     {
@@ -510,7 +513,7 @@ public static class KlassenbuchService
                             GeaendertVon = u.Name,
                             GeaendertAm = jetzt
                         };
-                        ZeitraumAnwenden(neueA, abdeckend);
+                        ZeitraumAnwenden(neueA, abdeckend, grundErfassen);
                         db.Anwesenheiten.Add(neueA);
                     }
                 }
@@ -618,12 +621,12 @@ public static class KlassenbuchService
     }
 
     /// <summary>Fehlstunde/Verspätung, die ein Entschuldigungs-Zeitraum abdeckt: als entschuldigt markieren.</summary>
-    private static void ZeitraumAnwenden(Anwesenheit a, Dictionary<int, Entschuldigung> abdeckend)
+    private static void ZeitraumAnwenden(Anwesenheit a, Dictionary<int, Entschuldigung> abdeckend, bool grundErfassen)
     {
         if (a.Status is not (AnwesenheitStatus.Fehlt or AnwesenheitStatus.Verspaetet)) return;
         if (!abdeckend.TryGetValue(a.SchuelerId, out var e)) return;
         a.Bewertung = FehlBewertung.Entschuldigt;
-        a.Grund = e.Grund;
+        a.Grund = grundErfassen ? e.Grund : FehlGrund.OhneAngabe;   // P6b (236)
         a.EntschuldigungId = e.Id;
         a.BewertetVon = e.ErfasstVon;
         a.BewertetAm = DateTime.UtcNow;

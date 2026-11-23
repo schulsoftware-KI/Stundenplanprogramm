@@ -46,6 +46,14 @@ namespace Stundenplan_V2.Vertretung
     //   - „Lehrkraft heißt anders“: ein Nachname in Lehrkraefte.dat ändert sich –
     //     möglichst bei Plan-Kürzel „L1“ (Testkonten L1 und kl05A)
     //
+    //  Seit P4a (5.3a, Entscheidung 207): „Abschnitt 2 (Halbjahreswechsel)“ – eine
+    //  eigene Art von Folgestand (die übrigen Häkchen gelten dann nicht): gleiche
+    //  Schüler, Abschnitt 2 in Basis- und Leistungsdaten, Kurse.dat, Klassen.dat und
+    //  KurseLehrkraefte.dat; 2 Klassenwechsel Sek I, 3 Kurswechsel EF, 2 Abwahlen
+    //  (Grundkurs) in Q1/Q2, 3 Wechsel zwischen Religion/PP-Gruppen und 2 zwischen
+    //  anderen parallelen Sek-I-Gruppen (WP), 1 Abgang (Status 9) und 1 Neuaufnahme
+    //  zum 2. Halbjahr (Status 2, Aufnahme 1. Februar). Nur aus Abschnitt 1.
+    //
     //  Damit die Zuordnung SchILD ↔ Plan gleich bleibt: nur feste Zuordnungen
     //  (eindeutig bzw. von Hand, nicht „gemeinsam“), jede Liste behält genug
     //  Teilnehmer (auch aus derselben Klasse), und neue Zeilen in den
@@ -79,6 +87,8 @@ namespace Stundenplan_V2.Vertretung
         // 5.2c-2 (Standard aus): Klassen.dat bzw. Lehrkraefte.dat – ändern keine Schüler
         public bool KlassenleitungWechselt { get; set; }
         public bool LehrkraftHeisstAnders { get; set; }
+        // P4a (207): Folgestand „Abschnitt 2“ – eigene Art, die übrigen Häkchen gelten dann nicht
+        public bool Abschnitt2 { get; set; }
     }
 
     public sealed class SchildFolgestandErgebnis
@@ -121,10 +131,17 @@ namespace Stundenplan_V2.Vertretung
         public string? KlassenleitungText { get; set; }
         /// <summary>Plan-Kürzel der Lehrkraft mit anderem Nachnamen.</summary>
         public string? LehrkraftText { get; set; }
+        /// <summary>P4a (207): Folgestand „Abschnitt 2“ (Halbjahreswechsel).</summary>
+        public bool Abschnitt2 { get; set; }
 
         public string ErwartungText()
         {
             var sb = new StringBuilder();
+            if (Abschnitt2)
+                sb.AppendLine("Abschnitt 2 (Halbjahreswechsel): im Prüflauf „Abschnitt 2“ wählen; „Änderungen gelten ab“ = erster Tag " +
+                              "des 2. Halbjahres (Vorschlag der API beim ersten Import von Abschnitt 2). Gilt dann noch der Grundplan " +
+                              "von vorher, warnt die Vorschau („kein eigener Grundplan“) – zum Test denselben Plan mit „gilt ab“ = " +
+                              "2. Halbjahr noch einmal veröffentlichen.");
             sb.AppendLine($"Erwartet in der Vorschau, wenn genau „{Ausgangsordner}“ importiert ist (alle Abgänge bestätigt):");
             sb.AppendLine($"Schüler im Export {ImExport} · " +
                           (Paare > 0 ? $"dieselbe Person? {Paare} (vorausgewählt {PaareVorausgewaehlt}) · zusammengeführt " +
@@ -161,7 +178,8 @@ namespace Stundenplan_V2.Vertretung
         public string Text()
         {
             var sb = new StringBuilder();
-            sb.AppendLine($"Folgestand {Nummer} aus „{Ausgangsordner}“ (nur Pseudodaten – keine echten Personen):");
+            sb.AppendLine($"Folgestand {Nummer} aus „{Ausgangsordner}“" + (Abschnitt2 ? " – Abschnitt 2 (Halbjahreswechsel)" : "") +
+                          " (nur Pseudodaten – keine echten Personen):");
             sb.AppendLine(Ordner);
             sb.AppendLine();
             sb.AppendLine("Änderungen:");
@@ -185,6 +203,9 @@ namespace Stundenplan_V2.Vertretung
 
         private static readonly Regex FolgeName = new(@"^(?<b>.+)_Folge(?<n>\d+)$", RegexOptions.Compiled);
         private static readonly HashSet<string> Oberstufe = new(StringComparer.OrdinalIgnoreCase) { "EF", "Q1", "Q2" };
+        /// <summary>P4a (207): Religion und Ersatzfächer (wie SchildGenerator.ReligionPhilo).</summary>
+        private static readonly HashSet<string> Religion = new(StringComparer.OrdinalIgnoreCase)
+            { "ER", "KR", "PP", "IR", "JR", "OR", "HR", "PL" };
 
         /// <summary>Nächster freier Ordner neben dem Ausgangsordner: „…_Folge1“, „…_Folge2“ …</summary>
         public static string Zielordner(string quelle, out int nummer)
@@ -376,6 +397,7 @@ namespace Stundenplan_V2.Vertretung
             private readonly Roh _ba, _le;
             private readonly Roh? _lp;
             private Roh? _kl, _lk;   // 5.2c-2: Klassen.dat bzw. Lehrkraefte.dat – nur gelesen und geschrieben, wenn geändert
+            private readonly List<Roh> _weitere = new();   // P4a (207): Kurse.dat usw. mit Abschnitt 2
             private readonly int bN, bV, bG, bGe, bS, bAuf, bJ, bA, bJg, bKl, bEin;
             private readonly int lN, lV, lG, lJ, lA, lFach, lLehrer, lArt, lKurs;
             private readonly int pN, pV, pG, pId, pBen;
@@ -676,6 +698,13 @@ namespace Stundenplan_V2.Vertretung
                 Einlesen();
                 if (_personen.Count == 0)
                     throw new InvalidOperationException($"In {_ba.Name} stehen keine Schüler im Abschnitt {_jahr}/{_abschnitt}.");
+                // P4a (207): Folgestand „Abschnitt 2“ – eigene Art (die übrigen Häkchen gelten nicht)
+                if (_opt.Abschnitt2)
+                {
+                    RechneAbschnitt2();
+                    Erwartung();
+                    return;
+                }
                 bool mitId = _lp != null && _personen.Any(p => p.Id > 0);
 
                 // Reihenfolge fest (Startwert) – die Abgänge zuerst, damit der erste Schüler der ersten Klasse frei ist.
@@ -712,8 +741,12 @@ namespace Stundenplan_V2.Vertretung
                 if (_opt.KlassenleitungWechselt) KlassenleitungWechselt();
                 if (_opt.LehrkraftHeisstAnders) LehrkraftHeisstAnders();
                 if (_opt.OhneSchildId && E.Paare > 0) E.Uebersicht.Add($"{E.Paare} Änderungen ohne SchILD-ID");
+                Erwartung();
+            }
 
-                // ---- Erwartung (Ausgangsordner importiert, alle Abgänge bestätigt) ----
+            /// <summary>Erwartete Zahlen der Vorschau (Ausgangsordner importiert, alle Abgänge bestätigt).</summary>
+            private void Erwartung()
+            {
                 int imDb = _personen.Count(p => p.Status is 0 or 2 or 3 or 6);
                 int fehltEntfernt = _entfernt.Count(k => _nach[k].Status is 0 or 2 or 3 or 6);
                 E.AbgangLautSchild = _abgaenge.Count;
@@ -868,7 +901,18 @@ namespace Stundenplan_V2.Vertretung
 
             private void Gruppenwechsel()
             {
-                var zeilen = _zu.Zeilen.Where(u => u.Art != SchildZuordnungArt.Oberstufe && UeberLeistung(u) && Fest(u) && u.Plan != null)
+                if (EinGruppenwechsel(_ => true, "Gruppenwechsel")) E.Uebersicht.Add("1 Gruppenwechsel Sek I");
+                else E.NichtMoeglich.Add("Gruppenwechsel Sek I: keine zwei parallelen Gruppen mit fester Zuordnung in derselben Klasse gefunden.");
+            }
+
+            /// <summary>
+            /// Ein Wechsel zwischen zwei parallelen Sek-I-Gruppen derselben Klasse (beide mit fester Zuordnung, beide
+            /// <paramref name="passt"/>). Seit P4a einzeln aufrufbar – mit „alle“ wie bisher (gleiche Zufallsfolge).
+            /// </summary>
+            private bool EinGruppenwechsel(Func<SchildZuordnungZeile, bool> passt, string art)
+            {
+                var zeilen = _zu.Zeilen.Where(u => u.Art != SchildZuordnungArt.Oberstufe && UeberLeistung(u) && Fest(u) && u.Plan != null
+                                                   && passt(u))
                                        .ToList();
                 var klassen = Gemischt(_personen.Where(p => !p.Oberstufe && p.Klasse.Length > 0).Select(p => p.Klasse)
                                                 .Distinct().OrderBy(k => k, StringComparer.Ordinal));
@@ -903,14 +947,13 @@ namespace Stundenplan_V2.Vertretung
                             _geaendert.Add(s.Key);
                             _klassenBeteiligt.Add(c);
                             E.Kurswechsel++;
-                            E.Aenderungen.Add($"Gruppenwechsel: {s.Anzeige} ({c}) {uA.Plan} → {uB.Plan} (SchILD: {Bez(uA)} → {Bez(uB)}; " +
+                            E.Aenderungen.Add($"{art}: {s.Anzeige} ({c}) {uA.Plan} → {uB.Plan} (SchILD: {Bez(uA)} → {Bez(uB)}; " +
                                               $"Zeile wie {r.Anzeige})");
-                            E.Uebersicht.Add("1 Gruppenwechsel Sek I");
-                            return;
+                            return true;
                         }
                     }
                 }
-                E.NichtMoeglich.Add("Gruppenwechsel Sek I: keine zwei parallelen Gruppen mit fester Zuordnung in derselben Klasse gefunden.");
+                return false;
             }
 
             private void Namensaenderung()
@@ -972,7 +1015,8 @@ namespace Stundenplan_V2.Vertretung
             }
 
             /// <param name="gleicherName">5.2c-1: Name und Vorname von <paramref name="r"/> übernehmen (Namensgleiche).</param>
-            private bool Neuaufnahme(Person r, DateOnly aufnahme, bool gleicherName = false)
+            /// <param name="status">P4a: „2“ = Neuaufnahme zum 2. Halbjahr (schon aktiv), sonst „0“.</param>
+            private bool Neuaufnahme(Person r, DateOnly aufnahme, bool gleicherName = false, string status = "0")
             {
                 for (int versuch = 0; versuch < 200; versuch++)
                 {
@@ -987,7 +1031,7 @@ namespace Stundenplan_V2.Vertretung
                     long id = ++_maxId;
                     int einschulung = geb.Year + 6 + (geb.Month >= 7 ? 1 : 0);
                     _ba.Einfuegen(r.Basis, Mit(_ba.Zeilen[r.Basis], _ba.Kopf.Length,
-                        (bN, nn), (bV, vn), (bG, D(geb)), (bGe, w ? "w" : "m"), (bS, "0"), (bAuf, D(aufnahme)),
+                        (bN, nn), (bV, vn), (bG, D(geb)), (bGe, w ? "w" : "m"), (bS, status), (bAuf, D(aufnahme)),
                         (bEin, einschulung.ToString(CultureInfo.InvariantCulture))));
                     var zeilen = Leistungen(r.Key);
                     int nach = zeilen.Max();
@@ -1002,7 +1046,7 @@ namespace Stundenplan_V2.Vertretung
                     _benutzt.Add(r.Key);
                     _klassenBeteiligt.Add(r.Klasse);
                     E.Neu++;
-                    E.Aenderungen.Add($"Neuaufnahme (Status 0, Aufnahme {D(aufnahme)}): {vn} {nn} ({r.Stufe}) – Kurse/Gruppen wie " +
+                    E.Aenderungen.Add($"Neuaufnahme (Status {status}, Aufnahme {D(aufnahme)}): {vn} {nn} ({r.Stufe}) – Kurse/Gruppen wie " +
                                       $"{r.Anzeige}" + (gleicherName
                                           ? $" – Namensgleiche: derselbe Name wie {r.Anzeige} in derselben Klasse, Geburtsdatum " +
                                             $"{D(geb)} statt {D(r.Geb)}"
@@ -1146,6 +1190,133 @@ namespace Stundenplan_V2.Vertretung
             }
 
             // ---------------------------------------------------------------
+            //  P4a (207): Folgestand „Abschnitt 2“ (Halbjahreswechsel)
+            // ---------------------------------------------------------------
+
+            private void RechneAbschnitt2()
+            {
+                if (_abschnitt != 1)
+                    throw new InvalidOperationException("Einen Folgestand „Abschnitt 2“ gibt es nur aus Abschnitt 1 (gewählt ist " +
+                                                        $"Abschnitt {_abschnitt}).");
+                E.Abschnitt2 = true;
+                E.Uebersicht.Add("Abschnitt 2 (Halbjahreswechsel)");
+
+                // Reihenfolge fest (Startwert)
+                Klassenwechsel();
+                var oZeilen = _zu.Zeilen.Where(u => u.Art == SchildZuordnungArt.Oberstufe && Fest(u) && u.Plan != null
+                                                    && SchildZuordnung.KursartNorm(u.Kursart) == "GK").ToList();
+                int ef = 0;
+                for (int i = 0; i < 3; i++)
+                    if (EinKurswechsel("EF", oZeilen)) ef++;
+                if (ef < 3) E.NichtMoeglich.Add($"Kurswechsel EF: nur {ef} von 3 möglich.");
+                if (ef > 0) E.Uebersicht.Add($"{ef} Kurswechsel EF");
+                Abwahlen(oZeilen);
+
+                int rel = 0, wp = 0;
+                for (int i = 0; i < 3; i++)
+                    if (EinGruppenwechsel(u => Religion.Contains(u.Fach), "Gruppenwechsel Religion/PP")) rel++;
+                for (int i = 0; i < 2; i++)
+                    if (EinGruppenwechsel(u => !Religion.Contains(u.Fach), "Gruppenwechsel WP")) wp++;
+                if (rel < 3) E.NichtMoeglich.Add($"Wechsel Religion/PP: nur {rel} von 3 möglich (parallele Gruppen mit fester Zuordnung).");
+                if (rel > 0) E.Uebersicht.Add($"{rel} Wechsel Religion/PP");
+                if (wp < 2) E.NichtMoeglich.Add($"Wechsel WP bzw. andere parallele Sek-I-Gruppen: nur {wp} von 2 möglich.");
+                if (wp > 0) E.Uebersicht.Add($"{wp} Wechsel WP");
+
+                var abgang = Zufall(_personen.Where(p => Frei(p) && Entbehrlich(p)).ToList());
+                if (abgang != null)
+                {
+                    Abgang(abgang, "");
+                    E.Uebersicht.Add("1 Abgang (Status 9)");
+                }
+                else E.NichtMoeglich.Add("Abgang: kein passender Schüler.");
+
+                var aufnahme = new DateOnly(_jahr + 1, 2, 1);
+                var vorlage = Zufall(_personen.Where(p => !p.Oberstufe && p.Klasse.Length > 0 && p.Status == 2 && p.Id > 0
+                                                          && !_benutzt.Contains(p.Key) && Leistungen(p.Key).Count > 0).ToList());
+                if (vorlage != null && Neuaufnahme(vorlage, aufnahme, status: "2"))
+                    E.Uebersicht.Add($"1 Neuaufnahme zum 2. Halbjahr (Status 2, Aufnahme {D(aufnahme)})");
+                else E.NichtMoeglich.Add("Neuaufnahme zum 2. Halbjahr: kein passender Schüler.");
+
+                // Zuletzt: Abschnitt 2 in allen Dateien mit Jahr/Abschnitt (auch in den neuen Zeilen)
+                int nBa = AbschnittUmstellen(_ba), nLe = AbschnittUmstellen(_le);
+                var std = SchildProfil.Standard();
+                int nWeitere = 0;
+                foreach (var art in new[] { SchildDateiArt.Kurse, SchildDateiArt.Klassen, SchildDateiArt.KurseLehrkraefte })
+                {
+                    string name = std.Fuer(art).Datei;
+                    if (!_marker.Dateien.ContainsKey(name)) continue;
+                    var r = Lies(_ex.Ordner, name);
+                    int n = AbschnittUmstellen(r);
+                    if (n == 0) continue;
+                    _weitere.Add(r);
+                    nWeitere += n;
+                }
+                E.Aenderungen.Insert(0, $"Abschnitt 1 → 2 in {nBa} Zeilen der Basisdaten, {nLe} der Leistungsdaten und {nWeitere} " +
+                                        "Zeilen von Kurse.dat, Klassen.dat bzw. KurseLehrkraefte.dat");
+            }
+
+            /// <summary>Q1/Q2: zwei Schüler wählen je einen Grundkurs ab (die Zeile der Leistungsdaten fällt weg).</summary>
+            private void Abwahlen(List<SchildZuordnungZeile> oZeilen)
+            {
+                int n = 0;
+                foreach (var st in new[] { "Q1", "Q2", "Q1", "Q2" })
+                {
+                    if (n >= 2) break;
+                    if (EineAbwahl(st, oZeilen)) n++;
+                }
+                if (n < 2) E.NichtMoeglich.Add($"Abwahlen Q1/Q2: nur {n} von 2 möglich.");
+                if (n > 0) E.Uebersicht.Add($"{n} Abwahl(en) Grundkurs Q1/Q2");
+            }
+
+            private bool EineAbwahl(string stufe, List<SchildZuordnungZeile> oZeilen)
+            {
+                foreach (var s in Gemischt(_personen.Where(p => Frei(p) && p.Oberstufe && p.Stufe == stufe)).Take(80))
+                {
+                    // Die Kurswahl bleibt voll genug (mindestens 8 Zeilen).
+                    if (Leistungen(s.Key).Count(j => !_le.Loesch.Contains(j)) <= 8) continue;
+                    foreach (var u in Gemischt(ZeilenVon(s.Key).Where(x => oZeilen.Contains(x))))
+                    {
+                        if (!Entbehrlich(s, u)) continue;
+                        int? i = ZeileFuer(s, u);
+                        if (i == null) continue;
+                        _le.Entferne(i.Value);
+                        Verlaesst(s, u);
+                        _benutzt.Add(s.Key);
+                        _geaendert.Add(s.Key);
+                        E.Kurswechsel++;
+                        E.Aenderungen.Add($"Abwahl {stufe}: {s.Anzeige} wählt den Grundkurs „{u.KursBez}“ ab (Plan {u.Plan})");
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            /// <summary>Abschnitt der Zeilen des Ausgangsabschnitts auf 2 setzen (auch eingefügte Zeilen). Rückgabe: Anzahl.</summary>
+            private int AbschnittUmstellen(Roh r)
+            {
+                int iJ = r.Sp("Jahr"), iA = r.Sp("Abschnitt");
+                if (iA < 0) return 0;
+                const string neu = "2";
+                int n = 0;
+                for (int i = 0; i < r.Zeilen.Count; i++)
+                {
+                    if (r.Loesch.Contains(i)) continue;
+                    var z = r.Zeilen[i];
+                    if (Roh.W(z, iA).Length == 0 || !ImAbschnitt(z, iJ, iA)) continue;
+                    r.Setze(i, iA, neu);
+                    n++;
+                }
+                foreach (var liste in r.Danach.Values)
+                    for (int j = 0; j < liste.Count; j++)
+                    {
+                        if (Roh.W(liste[j], iA).Length == 0 || !ImAbschnitt(liste[j], iJ, iA)) continue;
+                        liste[j] = Mit(liste[j], r.Kopf.Length, (iA, neu));
+                        n++;
+                    }
+                return n;
+            }
+
+            // ---------------------------------------------------------------
             //  5.2c-2: Klassenleitung und Namen der Lehrkräfte
             // ---------------------------------------------------------------
 
@@ -1246,7 +1417,7 @@ namespace Stundenplan_V2.Vertretung
             {
                 Directory.CreateDirectory(ziel);
                 var geschrieben = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var r in new[] { _ba, _le, _lp, _kl, _lk })
+                foreach (var r in new[] { _ba, _le, _lp, _kl, _lk }.Concat(_weitere))
                 {
                     if (r == null) continue;
                     SchildFolgestand.Schreibe(ziel, r);
@@ -1263,7 +1434,7 @@ namespace Stundenplan_V2.Vertretung
                     ErzeugtAm = DateTime.Now.ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture),
                     Plan = _marker.Plan,
                     Schuljahr = _marker.Schuljahr,
-                    Abschnitt = _marker.Abschnitt,
+                    Abschnitt = _opt.Abschnitt2 ? 2 : _marker.Abschnitt,   // P4a (207)
                     Startwert = _marker.Startwert,
                     Zeichensatz = _marker.Zeichensatz,
                     Sek1Variante = _marker.Sek1Variante,

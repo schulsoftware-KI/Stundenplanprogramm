@@ -22,6 +22,52 @@ namespace VertretungApi.Data.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("VertretungApi.Model.AnmeldeProtokoll", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Adresse")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("Erfolgreich")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Ergebnis")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Geraet")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Konto")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int?>("KontoId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Rolle")
+                        .HasColumnType("text");
+
+                    b.Property<bool?>("Schulnetz")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("Zeit")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("KontoId");
+
+                    b.HasIndex("Zeit");
+
+                    b.ToTable("AnmeldeProtokolle", (string)null);
+                });
+
             modelBuilder.Entity("VertretungApi.Model.Anwesenheit", b =>
                 {
                     b.Property<int>("Id")
@@ -124,6 +170,18 @@ namespace VertretungApi.Data.Migrations
 
                     b.Property<string>("Zustaendig")
                         .HasColumnType("text");
+
+                    b.Property<string>("ZweiterFaktorCodes")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ZweiterFaktorGeheimnis")
+                        .HasColumnType("text");
+
+                    b.Property<long?>("ZweiterFaktorSchritt")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("ZweiterFaktorSeit")
+                        .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
 
@@ -785,6 +843,68 @@ namespace VertretungApi.Data.Migrations
                     b.HasIndex("Schuljahr", "Bezeichnung");
 
                     b.ToTable("Lerngruppen");
+                });
+
+            modelBuilder.Entity("VertretungApi.Model.LeseProtokoll", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Akteur")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Ansicht")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Anzahl")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("ErsteZeit")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Gegenstand")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Gruppe")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("IstPseudo")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("KontoId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("LerngruppeId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("LetzteZeit")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Rolle")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int?>("SchuelerId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateOnly>("Tag")
+                        .HasColumnType("date");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("KontoId");
+
+                    b.HasIndex("SchuelerId");
+
+                    b.HasIndex("Tag", "KontoId", "Ansicht", "SchuelerId", "Gegenstand");
+
+                    b.ToTable("LeseProtokolle", (string)null);
                 });
 
             modelBuilder.Entity("VertretungApi.Model.SchildImportProtokoll", b =>

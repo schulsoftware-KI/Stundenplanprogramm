@@ -28,6 +28,8 @@ public class AppDbContext : DbContext
     public DbSet<Lehrkraft> Lehrkraefte => Set<Lehrkraft>();                     // Phase 5.2c
     public DbSet<Einstellung> Einstellungen => Set<Einstellung>();                // P3 (E-1)
     public DbSet<EinstellungsProtokoll> EinstellungsProtokolle => Set<EinstellungsProtokoll>(); // P3 (E-1)
+    public DbSet<AnmeldeProtokoll> AnmeldeProtokolle => Set<AnmeldeProtokoll>();  // P6a (228)
+    public DbSet<LeseProtokoll> LeseProtokolle => Set<LeseProtokoll>();          // P6b (232), Tabelle seit P6a
 
     // Grundplan + Kalender (Phase 2, Schritt 1)
     public DbSet<GrundplanVersion> GrundplanVersionen => Set<GrundplanVersion>();
@@ -87,6 +89,16 @@ public class AppDbContext : DbContext
         b.Entity<Einstellung>().Property(e => e.Schluessel).HasMaxLength(100);
         b.Entity<EinstellungsProtokoll>().ToTable("EinstellungsProtokolle");
         b.Entity<EinstellungsProtokoll>().HasIndex(p => p.Zeit);
+
+        // P6 – 5.4 (Migration „Datenschutz“, Entscheidung 224): Anmeldeprotokoll (P6a) und Leseprotokoll (P6b).
+        // Die Spalten des zweiten Faktors am Benutzer brauchen keine Konfiguration (alle nullable).
+        b.Entity<AnmeldeProtokoll>().ToTable("AnmeldeProtokolle");
+        b.Entity<AnmeldeProtokoll>().HasIndex(p => p.Zeit);
+        b.Entity<AnmeldeProtokoll>().HasIndex(p => p.KontoId);
+        b.Entity<LeseProtokoll>().ToTable("LeseProtokolle");
+        b.Entity<LeseProtokoll>().HasIndex(p => new { p.Tag, p.KontoId, p.Ansicht, p.SchuelerId, p.Gegenstand });
+        b.Entity<LeseProtokoll>().HasIndex(p => p.SchuelerId);
+        b.Entity<LeseProtokoll>().HasIndex(p => p.KontoId);
 
         // Phase 3.1: neue Tabelle. Die alte Phase-1A-Tabelle "Lektionen" (eine Lerngruppe je
         // Lektion, nie benutzt) bleibt in bestehenden Entwicklungs-DBs ungenutzt liegen.

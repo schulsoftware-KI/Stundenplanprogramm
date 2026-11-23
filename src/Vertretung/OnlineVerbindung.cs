@@ -20,6 +20,11 @@ namespace Stundenplan_V2.Vertretung
     //
     //  Genutzt von OnlineSync (Vertretungen, Untis), GrundplanSync und dem
     //  SchILD-Import. Meldungen nennen nur die Server-Adresse, nie den Schlüssel.
+    //
+    //  P6a (Entscheidungen 229, 230): Die API kann die Desktop-Schnittstellen auf die
+    //  Adressen der Schule beschränken (403 „Adresse nicht freigegeben“) und bremst zu
+    //  viele Anfragen (429 mit Wartezeit). Beides wird hier verständlich erklärt; der
+    //  Text der API („fehler“) erscheint statt der rohen JSON-Antwort.
     // =====================================================================
     public static class OnlineVerbindung
     {
@@ -118,18 +123,50 @@ namespace Stundenplan_V2.Vertretung
             return null;
         }
 
+        public const string TextAdresse =
+            "Zugriff verweigert (HTTP 403). Meldet die API „Adresse nicht freigegeben“, sind die Desktop-Schnittstellen nur " +
+            "aus dem Schulnetz erlaubt (Einstellung „Zugriff:DesktopNurSchule“ des Servers) – und dieser Rechner sendet über " +
+            "eine andere Adresse (z. B. von zu Hause, über ein Mobilfunknetz oder ein VPN). Im Schulnetz erneut versuchen bzw. " +
+            "die Betreuung des Servers bitten, die Adresse der Schule in „Zugriff:Schuladressen“ einzutragen. Sonst blockiert " +
+            "ein Proxy der Schule die Adresse.";
+
+        public const string TextZuViele =
+            "Zu viele Anfragen (HTTP 429) – die API bremst diesen Rechner kurz (Anfragebegrenzung). Einen Moment warten und " +
+            "erneut versuchen; beim Veröffentlichen eines langen Zeitraums ggf. in Teilen. Tritt es oft auf, die Betreuung des " +
+            "Servers bitten, „Begrenzung:DesktopJeMinute“ zu erhöhen.";
+
         /// <summary>Erklärung zu einem HTTP-Fehlercode, der meist nicht von der API selbst kommt – sonst null.</summary>
         public static string? StatusErklaerung(int status) => status switch
         {
-            403 => "Zugriff verweigert (HTTP 403). Ist für die Desktop-Schnittstellen eine Adressbeschränkung eingestellt " +
-                   "(nur die Adresse der Schule) – und sendet dieser Rechner über eine andere Adresse? Sonst blockiert ein " +
-                   "Proxy der Schule die Adresse.",
+            403 => TextAdresse,
             407 => TextProxyAnmeldung,
+            429 => TextZuViele,
             502 or 503 or 504 => $"Der Server ist erreichbar, aber die API dahinter antwortet nicht (HTTP {status}) – der " +
                                  "Dienst ist gestoppt oder startet gerade. Später erneut versuchen bzw. die Betreuung des " +
                                  "Servers informieren.",
             _ => null
         };
+
+        /// <summary>
+        /// P6a: Text „fehler“ aus einer JSON-Antwort der API (z. B. „Adresse nicht freigegeben …“, „Zu viele Anfragen – bitte
+        /// in 12 Sekunden erneut versuchen.“) – sonst null.
+        /// </summary>
+        public static string? FehlerText(string? antwort)
+        {
+            if (string.IsNullOrWhiteSpace(antwort)) return null;
+            var t = antwort.TrimStart();
+            if (!t.StartsWith("{", StringComparison.Ordinal)) return null;
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(t);
+                if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                    && doc.RootElement.TryGetProperty("fehler", out var f)
+                    && f.ValueKind == System.Text.Json.JsonValueKind.String)
+                    return f.GetString();
+            }
+            catch (System.Text.Json.JsonException) { }
+            return null;
+        }
 
         /// <summary>true, wenn die Adresse auf diesen Rechner zeigt (localhost, 127.x, ::1).</summary>
         public static bool IstLokal(Uri uri)

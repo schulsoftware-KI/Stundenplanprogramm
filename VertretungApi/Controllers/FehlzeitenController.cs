@@ -27,6 +27,9 @@ namespace VertretungApi.Controllers;
 ///   GET    api/fehlzeiten/zeitraeume                          1./2. Halbjahr, Schuljahr (alle Angemeldeten)
 ///   GET    api/fehlzeiten/offen/{klasse}                      offene Fälle im Schuljahr (KL/SK zuständig, Admin)
 /// Zeitraum ohne von/bis: das laufende Schuljahr. Rechte siehe Services/FehlzeitenService.cs.
+/// P6b (232, 236): Leseprotokoll der Ansichten (Schüler, Klasse/Stufe, offene Fälle, Unterricht, „Nicht erfasst“ anderer
+/// Lehrkräfte – nicht „ich“ und nicht „Meine Fehlzeiten“); Schalter „Grund der Entschuldigung erfassen“ (aus → „ohne
+/// Angabe“) beim Entschuldigen und Bewerten, „rechte“ meldet ihn der App.
 /// </summary>
 [ApiController]
 [Route("api/fehlzeiten")]
@@ -34,11 +37,13 @@ public class FehlzeitenController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly Schuleinstellungen _einst;
+    private readonly Leseprotokoll _lese;
 
-    public FehlzeitenController(AppDbContext db, Schuleinstellungen einst)
+    public FehlzeitenController(AppDbContext db, Schuleinstellungen einst, Leseprotokoll lese)
     {
         _db = db;
         _einst = einst;
+        _lese = lese;
     }
 
     // P3 (E-1): „Anwesenheit erfasst ab“, „Thema erfasst ab“ und „2. Halbjahr ab“ kommen aus den Schuleinstellungen
@@ -59,7 +64,7 @@ public class FehlzeitenController : ControllerBase
         var u = await NutzerAsync();
         if (u == null) return Unauthorized();
         var w = await WerteAsync();
-        return Ok(await FehlzeitenService.RechteAsync(_db, u, w.ErfassungAb, w.BerichteNurAdmin));
+        return Ok(await FehlzeitenService.RechteAsync(_db, u, w.ErfassungAb, w.BerichteNurAdmin, w.GrundErfassen));
     }
 
     [Authorize(Roles = Rollen.Personal)]
@@ -82,7 +87,17 @@ public class FehlzeitenController : ControllerBase
         string was = (art ?? "alle").Trim().ToLowerInvariant();
         if (was is not ("alle" or "anwesenheit" or "thema")) was = "alle";
         var w = await WerteAsync();
-        return Ok(await FehlzeitenService.NichtErfasstAsync(_db, u, a, lehrer, klasse, w.ErfassungAb, w.ThemaAb, was, von, bis));
+        var d = await FehlzeitenService.NichtErfasstAsync(_db, u, a, lehrer, klasse, w.ErfassungAb, w.ThemaAb, was, von, bis);
+        // P6b (232): Daten über andere Lehrkräfte – „ich“ sind eigene Daten.
+        if (a != "ich")
+        {
+            var teile = new List<string> { a == "alle" ? "alle Lehrkräfte" : "Zuständigkeit" };
+            if (!string.IsNullOrWhiteSpace(lehrer)) teile.Add("Lehrkraft " + lehrer.Trim().ToUpperInvariant());
+            if (!string.IsNullOrWhiteSpace(klasse)) teile.Add(LeseAnsichten.GruppenGegenstand(klasse));
+            if (was != "alle") teile.Add(was == "thema" ? "Thema" : "Anwesenheit");
+            await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.NichtErfasst, string.Join(" · ", teile)));
+        }
+        return Ok(d);
     }
 
     [Authorize(Roles = Rollen.Personal)]
@@ -108,7 +123,12 @@ public class FehlzeitenController : ControllerBase
 
         var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
         var liste = await FehlzeitenService.UnterrichtAsync(_db, u, unr, lehrer, v, b);
-        return liste == null ? NotFound(new { fehler = "Diesen Unterricht gibt es nicht." }) : Ok(liste);
+        if (liste == null) return NotFound(new { fehler = "Diesen Unterricht gibt es nicht." });
+        int un = unr;
+        string le = lehrer;
+        await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.FehlzeitenUnterricht,
+            LeseAnsichten.UnterrichtGegenstand(un, le), GruppeLaden: db => LeseAnsichten.GruppenDesUnterrichtsAsync(db, un, le)));
+        return Ok(liste);
     }
 
     [Authorize(Roles = Rollen.Personal)]
@@ -122,7 +142,10 @@ public class FehlzeitenController : ControllerBase
             return StatusCode(403, new { fehler = "Diese Liste sehen nur die Klassenleitung bzw. Stufenkoordination und die Verwaltung." });
 
         var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
-        return Ok(await FehlzeitenService.KlasseAsync(_db, klasse, v, b));
+        var d = await FehlzeitenService.KlasseAsync(_db, klasse, v, b);
+        await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.FehlzeitenKlasse, LeseAnsichten.GruppenGegenstand(klasse),
+            Gruppe: LeseAnsichten.Liste(new[] { klasse })));
+        return Ok(d);
     }
 
     /// <summary>Phase 4.1 (Entscheidung 43): offene Fälle einer Klasse/Stufe im ganzen Schuljahr.</summary>
@@ -135,7 +158,10 @@ public class FehlzeitenController : ControllerBase
         if (!u.IstAdmin && !(u.IstKlassenleitungOderKoordination
                              && KlassenbuchService.ZustaendigFuer(u.Zustaendig, new[] { klasse })))
             return StatusCode(403, new { fehler = "Offene Fälle sehen nur die Klassenleitung bzw. Stufenkoordination und die Verwaltung." });
-        return Ok(await FehlzeitenService.OffeneFaelleAsync(_db, klasse));
+        var d = await FehlzeitenService.OffeneFaelleAsync(_db, klasse);
+        await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.OffeneFaelle, LeseAnsichten.GruppenGegenstand(klasse),
+            Gruppe: LeseAnsichten.Liste(new[] { klasse })));
+        return Ok(d);
     }
 
     [Authorize(Roles = Rollen.Personal)]
@@ -147,7 +173,10 @@ public class FehlzeitenController : ControllerBase
         if (u == null) return Unauthorized();
         var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
         var d = await FehlzeitenService.SchuelerAsync(_db, u, id, v, b, unr, lehrer);
-        return d == null ? NotFound(new { fehler = "Schüler nicht gefunden." }) : Ok(d);
+        if (d == null) return NotFound(new { fehler = "Schüler nicht gefunden." });
+        await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.FehlzeitenSchueler,
+            LeseAnsichten.SchuelerGegenstand(id, d.Klasse), SchuelerId: id));
+        return Ok(d);
     }
 
     /// <summary>Eigene Fehlzeiten – nur Schülerkonten; die Zuordnung kommt aus dem Konto.</summary>
@@ -172,7 +201,7 @@ public class FehlzeitenController : ControllerBase
     {
         var u = await NutzerAsync();
         if (u == null) return Unauthorized();
-        return Antwort(await FehlzeitenService.EntschuldigenAsync(_db, u, id, dto));
+        return Antwort(await FehlzeitenService.EntschuldigenAsync(_db, u, id, dto, await _einst.GrundErfassenAsync(_db)));
     }
 
     [Authorize(Roles = Rollen.Personal)]
@@ -181,7 +210,7 @@ public class FehlzeitenController : ControllerBase
     {
         var u = await NutzerAsync();
         if (u == null) return Unauthorized();
-        return Antwort(await FehlzeitenService.EntschuldigungLoeschenAsync(_db, u, id));
+        return Antwort(await FehlzeitenService.EntschuldigungLoeschenAsync(_db, u, id, await _einst.GrundErfassenAsync(_db)));
     }
 
     [Authorize(Roles = Rollen.Personal)]
@@ -190,7 +219,7 @@ public class FehlzeitenController : ControllerBase
     {
         var u = await NutzerAsync();
         if (u == null) return Unauthorized();
-        return Antwort(await FehlzeitenService.BewertenAsync(_db, u, id, dto));
+        return Antwort(await FehlzeitenService.BewertenAsync(_db, u, id, dto, await _einst.GrundErfassenAsync(_db)));
     }
 
     // -----------------------------------------------------------------

@@ -134,8 +134,28 @@ public static class FehlzeitenService
         FehlGrund.Krankheit => "Krankheit",
         FehlGrund.Arzttermin => "Arzttermin",
         FehlGrund.Familiaer => "familiär",
+        FehlGrund.OhneAngabe => OhneAngabeText,   // P6b (236)
         _ => "sonstiges"
     };
+
+    /// <summary>P6b (236): Text für „ohne Angabe“ – Schalter „Grund der Entschuldigung erfassen“ aus bzw. Gründe entfernt.</summary>
+    public const string OhneAngabeText = "ohne Angabe";
+
+    /// <summary>
+    /// P6b (236): Grund aus der Eingabe. Schalter aus → immer „ohne Angabe“ (eine mitgeschickte Auswahl zählt nicht);
+    /// Schalter an → eine der vier Kategorien („ohne Angabe“ wählt man nicht selbst). null = ungültig.
+    /// </summary>
+    public static FehlGrund? GrundAusEingabe(string? eingabe, bool grundErfassen)
+    {
+        if (!grundErfassen) return FehlGrund.OhneAngabe;
+        if (!Enum.TryParse(eingabe?.Trim(), true, out FehlGrund g) || !Enum.IsDefined(g) || g == FehlGrund.OhneAngabe
+            || int.TryParse(eingabe?.Trim(), out _))
+            return null;
+        return g;
+    }
+
+    /// <summary>Fehlermeldung, wenn bei eingeschaltetem Schalter kein gültiger Grund kam.</summary>
+    public const string GrundFehlt = "Bitte einen Grund wählen.";
 
     public static string BewertungText(FehlBewertung b, FehlGrund? g) => b switch
     {
@@ -205,12 +225,13 @@ public static class FehlzeitenService
     //  Rechte / Auswahl
     // =================================================================
 
-    public static async Task<FzRechteDto> RechteAsync(AppDbContext db, KbNutzer u, DateOnly erfassungAb, bool berichteNurAdmin = false)
+    public static async Task<FzRechteDto> RechteAsync(AppDbContext db, KbNutzer u, DateOnly erfassungAb, bool berichteNurAdmin = false,
+        bool grundErfassen = true)
     {
         List<string> klassen = u.IstAdmin
             ? await AlleKlassenUndStufenAsync(db)
             : u.IstKlassenleitungOderKoordination ? u.Zustaendig.ToList() : new List<string>();
-        return new FzRechteDto(u.Kuerzel != null, u.IstAdmin, klassen, erfassungAb, u.IstAdmin || !berichteNurAdmin);
+        return new FzRechteDto(u.Kuerzel != null, u.IstAdmin, klassen, erfassungAb, u.IstAdmin || !berichteNurAdmin, grundErfassen);
     }
 
     /// <summary>
@@ -529,15 +550,19 @@ public static class FehlzeitenService
     //  Entschuldigen und bewerten
     // =================================================================
 
-    /// <summary>Zeitraum-Entschuldigung eintragen (Klassenleitung/Stufenkoordination/Admin).</summary>
-    public static async Task<KbErgebnis> EntschuldigenAsync(AppDbContext db, KbNutzer u, int schuelerId, FzEntschuldigungNeuDto dto)
+    /// <summary>
+    /// Zeitraum-Entschuldigung eintragen (Klassenleitung/Stufenkoordination/Admin). P6b (236): grundErfassen = Schalter
+    /// „Grund der Entschuldigung erfassen“ (aus → „ohne Angabe“).
+    /// </summary>
+    public static async Task<KbErgebnis> EntschuldigenAsync(AppDbContext db, KbNutzer u, int schuelerId, FzEntschuldigungNeuDto dto,
+        bool grundErfassen = true)
     {
         var (s, klasse) = await SchuelerMitKlasseAsync(db, schuelerId);
         if (s == null) return new KbErgebnis(404, "Schüler nicht gefunden.");
         if (!IstLeitungFuer(u, klasse, s.Stufe))
             return new KbErgebnis(403, "Zeiträume entschuldigen dürfen nur die Klassenleitung bzw. Stufenkoordination und die Verwaltung.");
-        if (!Enum.TryParse(dto.Grund?.Trim(), true, out FehlGrund grund) || !Enum.IsDefined(grund))
-            return new KbErgebnis(400, "Bitte einen Grund wählen.");
+        if (GrundAusEingabe(dto.Grund, grundErfassen) is not FehlGrund grund)
+            return new KbErgebnis(400, GrundFehlt);
         if (dto.Bis < dto.Von) return new KbErgebnis(400, "„Bis“ liegt vor „von“.");
         if (dto.Bis.DayNumber - dto.Von.DayNumber > 366) return new KbErgebnis(400, "Der Zeitraum ist länger als ein Jahr.");
 
@@ -580,7 +605,7 @@ public static class FehlzeitenService
     /// Entschuldigung löschen: Die abgedeckten Stunden werden wieder „offen" – außer ein anderer
     /// Zeitraum deckt sie ebenfalls ab.
     /// </summary>
-    public static async Task<KbErgebnis> EntschuldigungLoeschenAsync(AppDbContext db, KbNutzer u, int id)
+    public static async Task<KbErgebnis> EntschuldigungLoeschenAsync(AppDbContext db, KbNutzer u, int id, bool grundErfassen = true)
     {
         var e = await db.Entschuldigungen.FirstOrDefaultAsync(x => x.Id == id);
         if (e == null) return new KbErgebnis(404, "Entschuldigung nicht gefunden.");
@@ -602,7 +627,7 @@ public static class FehlzeitenService
                 .OrderByDescending(x => x.ErfasstAm)
                 .FirstOrDefault();
             a.Bewertung = ersatz != null ? FehlBewertung.Entschuldigt : FehlBewertung.Offen;
-            a.Grund = ersatz?.Grund;
+            a.Grund = ersatz == null ? null : grundErfassen ? ersatz.Grund : FehlGrund.OhneAngabe;   // P6b (236)
             a.EntschuldigungId = ersatz?.Id;
             a.BewertetVon = u.Name;
             a.BewertetAm = jetzt;
@@ -625,7 +650,8 @@ public static class FehlzeitenService
     /// „offen"). Kurslehrkraft der Oberstufe: eigene Kursstunden, solange nicht festgelegt.
     /// Eine Einzelbewertung löst die Stunde von einem Entschuldigungs-Zeitraum.
     /// </summary>
-    public static async Task<KbErgebnis> BewertenAsync(AppDbContext db, KbNutzer u, int anwesenheitId, FzBewertungDto dto)
+    public static async Task<KbErgebnis> BewertenAsync(AppDbContext db, KbNutzer u, int anwesenheitId, FzBewertungDto dto,
+        bool grundErfassen = true)
     {
         var a = await db.Anwesenheiten.Include(x => x.Lektion).FirstOrDefaultAsync(x => x.Id == anwesenheitId);
         if (a == null || a.Lektion == null) return new KbErgebnis(404, "Eintrag nicht gefunden.");
@@ -637,8 +663,8 @@ public static class FehlzeitenService
         FehlGrund? grund = null;
         if (bewertung == FehlBewertung.Entschuldigt)
         {
-            if (!Enum.TryParse(dto.Grund?.Trim(), true, out FehlGrund g) || !Enum.IsDefined(g))
-                return new KbErgebnis(400, "Bitte einen Grund wählen.");
+            if (GrundAusEingabe(dto.Grund, grundErfassen) is not FehlGrund g)   // P6b (236)
+                return new KbErgebnis(400, GrundFehlt);
             grund = g;
         }
 

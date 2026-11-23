@@ -5,6 +5,7 @@ using VertretungApi.Data;
 using VertretungApi.Dtos;
 using VertretungApi.Helpers;
 using VertretungApi.Model;
+using VertretungApi.Services;
 
 namespace VertretungApi.Controllers;
 
@@ -19,6 +20,7 @@ namespace VertretungApi.Controllers;
 ///
 /// Abwesenheitsgründe sind Personaldaten der Lehrkräfte (VO-DV II) und gehen daher nur an
 /// Admins bzw. an die betroffene Lehrkraft selbst (Phase 2, Schritt 4).
+/// P6b (232): „tag“ und „lehrer“ (Admin, andere Lehrkraft) stehen im Leseprotokoll – die eigenen Stunden nicht.
 /// </summary>
 [ApiController]
 [Route("api/plan")]
@@ -26,13 +28,18 @@ public class PlanController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration _cfg;
+    private readonly Leseprotokoll _lese;
 
-    public PlanController(AppDbContext db, IConfiguration cfg)
+    public PlanController(AppDbContext db, IConfiguration cfg, Leseprotokoll lese)
     {
         _db = db;
         _cfg = cfg;
+        _lese = lese;
     }
 
+    private static string D(DateOnly d) => d.ToString("dd.MM.yyyy", System.Globalization.CultureInfo.InvariantCulture);
+
+    [DesktopSchnittstelle]   // P6a (229)
     [HttpPost("push")]
     public async Task<IActionResult> Push([FromBody] PlanPushDto dto)
     {
@@ -104,6 +111,8 @@ public class PlanController : ControllerBase
     {
         var tag = await LadeTag(schuljahr, datum);
         if (tag == null) return NotFound();
+        await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.VertretungenTag, $"Vertretungen am {D(datum)}",
+            IstPseudo: false));
         return Ok(tag.Eintraege.OrderBy(e => e.Stunde).ThenBy(e => e.Klassen).Select(ToVoll));
     }
 
@@ -118,6 +127,10 @@ public class PlanController : ControllerBase
 
         var tag = await LadeTag(schuljahr, datum);
         if (tag == null) return Ok(Array.Empty<PlanEintragDto>());
+        // P6b (232): Admin sieht die Gründe einer anderen Lehrkraft – die eigenen Stunden stehen nicht im Leseprotokoll.
+        if (admin && !string.Equals(Rollen.Kuerzel(User), kuerzel, StringComparison.OrdinalIgnoreCase))
+            await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.VertretungenLehrkraft,
+                $"Vertretungen {kuerzel.Trim().ToUpperInvariant()} am {D(datum)}", IstPseudo: false));
 
         var rel = tag.Eintraege.Where(e =>
             string.Equals(e.Lehrer, kuerzel, StringComparison.OrdinalIgnoreCase) ||

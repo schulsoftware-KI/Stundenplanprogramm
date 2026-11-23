@@ -44,11 +44,16 @@
 //  (nur Admin; Zip mit allen Klassenbüchern und Kursheften, Abbruch möglich).
 //  Wie beim PDF: nur herunterladen, nichts im Browser-Speicher.
 //
+//  P6b (Entscheidungen 234, 236): Schalter „Grund der Entschuldigung erfassen“ (rechte.grundErfassen) – aus: keine
+//  Auswahl beim Entschuldigen und Bewerten, gespeichert wird „ohne Angabe“. Admin: im Schülerdetail „Auskunft
+//  (Art. 15)…“ (Dialog in zugriffe.js).
+//
 //  Datenschutz: nichts davon im Browser-Speicher; beim Verlassen geleert.
 //  Wird nach klassenbuch.js und VOR app.js geladen; Einstieg fehlzeitenInit().
 // =====================================================================
 
-const FZ_GRUND = { Krankheit: "Krankheit", Arzttermin: "Arzttermin", Familiaer: "familiär", Sonstiges: "sonstiges" };
+const FZ_GRUND = { Krankheit: "Krankheit", Arzttermin: "Arzttermin", Familiaer: "familiär", Sonstiges: "sonstiges",
+  OhneAngabe: "ohne Angabe" };   // P6b (236)
 const FZ_BEWERTUNG = { Offen: "offen", Entschuldigt: "entschuldigt", Unentschuldigt: "unentschuldigt" };
 const FZ_STATUS = { Fehlt: "fehlt", Verspaetet: "verspätet", Beurlaubt: "beurlaubt", Schulveranstaltung: "Schulveranst." };
 const FZ_WT = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
@@ -90,6 +95,8 @@ const fz = {
 };
 
 const fehlzeitenOffen = () => !el("fehlzeiten").hidden;
+/** P6b (236): Grund der Entschuldigung erfassen? (Standard an, auch wenn die Rechte noch fehlen) */
+const fzGrundErfassen = () => !fz.rechte || fz.rechte.grundErfassen !== false;
 const fzOben = () => fz.stapel[fz.stapel.length - 1] || null;
 const fzDatum = (iso) => { const d = ausIso(iso); return `${FZ_WT[d.getDay()]} ${pad(d.getDate())}.${pad(d.getMonth() + 1)}.`; };
 const fzDatumLang = (iso) => { const d = ausIso(iso); return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`; };
@@ -117,7 +124,8 @@ function fehlzeitenMenueAnpassen() {
   b.textContent = "Klassenbuch";   // Phase 3.4 (Entscheidung 37)
 }
 
-async function fehlzeitenOeffnen() {
+/** @param {string} [start] P4a (Jahresablauf): „ne“ = Reiter „Nicht erfasst“, „offen“ = Klassen → Offene Fälle. */
+async function fehlzeitenOeffnen(start) {
   kontoSchliessen();
   if (!einstellungenSchliessen()) return;   // P3: Einstellungen mit Ungespeichertem – abgebrochen
   if (verwaltungOffen()) {
@@ -157,7 +165,11 @@ async function fehlzeitenOeffnen() {
     if (!reiter.length) { fehlerIn("fzFehler", "Hier gibt es für dich nichts zu sehen."); return; }
     fz.neAnsicht = fzNeAnsichten()[0].id;
     fz.klasse = r.klassen[0] || "";
-    fz.stapel = [{ art: "reiter", reiter: reiter[0].id }];
+    // P4a: Sprung aus dem Jahresablauf (als Klick-Handler kommt hier ein Ereignis an – dann der erste Reiter).
+    const ziel = start === "offen" ? "klasse" : typeof start === "string" ? start : null;
+    const erster = reiter.find((x) => x.id === ziel) || reiter[0];
+    if (start === "offen" && erster.id === "klasse") fz.kAnsicht = "offen";
+    fz.stapel = [{ art: "reiter", reiter: erster.id }];
     fzZeigen();
   } catch (f) {
     if (nr !== fz.ladeNr) return;
@@ -1218,6 +1230,15 @@ function fzRenderSchueler(d) {
   if (d.unterricht) info.push(`nur ${d.unterricht}`);
   else if (d.nurEigeneStunden) info.push("nur deine Stunden");
   el("fzSInfo").replaceChildren(info.filter(Boolean).join(" · "));
+  // P6b (234): Auskunft nach Art. 15 – nur Admin
+  const aktionen = el("fzSAktionen");
+  const admin = !!fz.rechte && fz.rechte.admin;
+  aktionen.hidden = !admin;
+  aktionen.replaceChildren(...(admin ? [h("button", {
+    class: "textknopf klein", type: "button", "aria-haspopup": "dialog",
+    onclick: () => auskunftOeffnen({ url: `api/auskunft/schueler/${d.id}`, name: `${d.vorname} ${d.nachname}` +
+      (d.klasse ? ` (${d.klasse})` : ""), schueler: true }),
+  }, "Auskunft (Art. 15) …")] : []));
 
   const s = d.summe;
   const karte = (zahl, titel, details, art) => h("div", { class: "fz-karte" + (art ? " " + art : "") },
@@ -1345,7 +1366,7 @@ function fzBewertenOeffnen(e) {
   el("fbTitel").textContent = `${status} bewerten`;
   el("fbWas").textContent = `${fzDatum(e.datum)} · ${e.stunde}. Stunde · ${e.fach} · ${e.grundLehrer}`;
   for (const r of document.querySelectorAll('input[name="fbBew"]')) r.checked = r.value === e.bewertung;
-  el("fbGrund").value = e.grund || "Krankheit";
+  el("fbGrund").value = e.grund && e.grund !== "OhneAngabe" ? e.grund : "Krankheit";
   el("fbHinweis").hidden = !e.entschuldigungId;
   el("fbHinweis").textContent = e.entschuldigungId
     ? "Diese Stunde ist über eine Entschuldigung (Zeitraum) entschuldigt. Eine Änderung hier gilt nur für diese Stunde." : "";
@@ -1358,7 +1379,28 @@ function fzBewertenOeffnen(e) {
 
 function fbGrundAnpassen() {
   const r = document.querySelector('input[name="fbBew"]:checked');
-  el("fbGrundBox").hidden = !r || r.value !== "Entschuldigt";
+  const ent = !!r && r.value === "Entschuldigt";
+  el("fbGrundBox").hidden = !ent || !fzGrundErfassen();   // P6b (236)
+  el("fbOhneGrund").hidden = !ent || fzGrundErfassen();
+}
+
+/**
+ * P6b (236): Der Server verlangt einen Grund, die App hat keine Auswahl gezeigt (der Schalter wurde inzwischen wieder
+ * eingeschaltet) – Rechte neu laden und die Auswahl zeigen. true = neu geladen.
+ */
+async function fzGrundNachladen(f) {
+  if (fzGrundErfassen() || !(f instanceof HttpFehler) || f.status !== 400) return false;
+  try {
+    fz.rechte = await senden("GET", "api/fehlzeiten/rechte");
+  } catch { return false; }
+  fbGrundAnpassen();
+  feGrundAnpassen();
+  return fzGrundErfassen();
+}
+
+function feGrundAnpassen() {
+  el("feGrundBox").hidden = !fzGrundErfassen();
+  el("feOhneGrund").hidden = fzGrundErfassen();
 }
 
 async function fzBewertungSpeichern() {
@@ -1370,11 +1412,12 @@ async function fzBewertungSpeichern() {
   fehlerIn("fbFehler", "");
   try {
     const antwort = await senden("PUT", `api/fehlzeiten/eintrag/${e.id}`,
-      { bewertung: r.value, grund: r.value === "Entschuldigt" ? el("fbGrund").value : null });
+      { bewertung: r.value, grund: r.value === "Entschuldigt" && fzGrundErfassen() ? el("fbGrund").value : null });
     dialogZu(el("fzBewertDialog"));
     if (antwort && antwort.meldung) toast(antwort.meldung);
     fzLaden();
   } catch (f) {
+    if (await fzGrundNachladen(f)) { fehlerIn("fbFehler", "Die Schule erfasst den Grund jetzt wieder – bitte einen Grund wählen."); return; }
     const t = aktionsFehler(f);
     if (t !== null) fehlerIn("fbFehler", t);
   } finally {
@@ -1393,6 +1436,7 @@ function fzEntschuldigungOeffnen(p, von, bis) {
   el("feVon").value = von || heuteIso();
   el("feBis").value = bis || von || heuteIso();
   el("feGrund").value = "Krankheit";
+  feGrundAnpassen();   // P6b (236)
   fehlerIn("feFehler", "");
   dialogAuf(el("fzEntschDialog"));
   el("feVon").focus();
@@ -1410,11 +1454,12 @@ async function fzEntschuldigungSpeichern() {
   fehlerIn("feFehler", "");
   try {
     const antwort = await senden("POST", `api/fehlzeiten/schueler/${id}/entschuldigung`,
-      { von, bis, grund: el("feGrund").value });
+      { von, bis, grund: fzGrundErfassen() ? el("feGrund").value : null });
     dialogZu(el("fzEntschDialog"));
     if (antwort && antwort.meldung) toast(antwort.meldung);
     fzLaden();
   } catch (f) {
+    if (await fzGrundNachladen(f)) { fehlerIn("feFehler", "Die Schule erfasst den Grund jetzt wieder – bitte einen Grund wählen."); return; }
     const t = aktionsFehler(f);
     if (t !== null) fehlerIn("feFehler", t);
   } finally {

@@ -15,6 +15,13 @@
 //  - Anrede „du" (Entscheidung 55). Alle Texte stehen unten gesammelt
 //    (HI_KARTEN, HI_THEMEN) und lassen sich ohne Neukompilieren ändern.
 //
+//  P6a: Themen „Zweiter Faktor“ (Personal, auch vor der Anmeldung lesbar – beim Code-Schritt) und „Zugriffe“
+//  (Admin); „Anmelden“, „Konten verwalten“ und „Einstellungen der Schule“ ergänzt. nurPersonal: true = nach der
+//  Anmeldung nur für Personalkonten.
+//  P6b: Thema „Auskunft nach Art. 15“ (Admin) neu; „Zugriffe“ (Teil „Ansichten“ = Leseprotokoll), „Einstellungen der
+//  Schule“ (Leseprotokoll, Grund der Entschuldigung), „Offene Fälle …“, „Fehlstunden bewerten“, „Konten verwalten“ und
+//  „Downloads“ ergänzt.
+//
 //  Wird nach eintraege.js und VOR app.js geladen; Einstieg hilfeInit().
 //  Alle Namen mit Präfix „hi…" (klassische Skripte teilen sich einen
 //  Namensraum).
@@ -78,6 +85,9 @@ const HI_THEMEN = [
       { nur: "ohneBleiben", teile: ["Die Anmeldung endet, wenn du den Browser schließt."] },
       "Nach mehreren falschen Versuchen musst du kurz warten, bevor es wieder geht.",
       "Mit einem **Startpasswort** legst du beim ersten Anmelden ein eigenes Passwort fest – erst danach geht es weiter.",
+      // P6a (225)
+      "Hast du einen **zweiten Faktor** eingerichtet (nur Lehrkräfte und Verwaltung), fragt die App nach dem Passwort nach " +
+        "dem 6-stelligen Code aus deiner Authenticator-App – siehe „Zweiter Faktor“.",
       "**Passwort vergessen?** Ein neues Startpasswort bekommst du von deiner Klassenleitung bzw. " +
         "Stufenkoordination, Lehrkräfte vom Admin. Per E-Mail geht das nicht.",
     ],
@@ -137,8 +147,39 @@ const HI_THEMEN = [
         "sicherer als Sonderzeichen.",
       "„Auf allen Geräten abmelden“ hilft, wenn du ein Handy verloren hast oder dich an einem fremden Gerät nicht " +
         "abgemeldet hast.",
+      { nur: "personal", teile: ["**„Zweiter Faktor…“** im Kontomenü: einrichten, neu einrichten, neue " +
+        "Wiederherstellungscodes, ausschalten – siehe „Zweiter Faktor“."] },
       "Beim Abmelden löscht die App, was sie für dich auf diesem Gerät gespeichert hat – nur der Merker, welche " +
         "Kurzhinweise du schon gesehen hast, bleibt.",
+    ],
+  },
+  {
+    // P6a (Entscheidungen 225–227)
+    id: "zweiterFaktor", gruppe: "alle", titel: "Zweiter Faktor", ohneAnmeldung: true, nurPersonal: true,
+    inhalt: [
+      "Der zweite Faktor schützt dein Konto, auch wenn jemand dein Passwort kennt: Nach dem Passwort fragt die App nach " +
+        "einem **6-stelligen Code**, den eine **Authenticator-App** auf deinem Handy alle 30 Sekunden neu zeigt (z. B. die " +
+        "von Google oder Microsoft, FreeOTP, Aegis, 2FAS). Jeder Code gilt nur einmal. Schülerkonten haben keinen.",
+      { zwischen: "Einrichten" },
+      { liste: [
+        "Kontomenü → **„Zweiter Faktor…“** → „Einrichten…“ und dein Passwort bestätigen.",
+        "In der Authenticator-App ein Konto hinzufügen und den **QR-Code scannen** – oder „Schlüssel eingeben“ wählen und " +
+          "den Schlüssel abtippen (zeitbasiert).",
+        "Den Code eingeben, den die App jetzt zeigt.",
+        "Die **10 Wiederherstellungscodes** drucken oder sicher speichern – sie werden nur dieses eine Mal angezeigt. " +
+          "Danach bist du auf deinen anderen Geräten abgemeldet.",
+      ] },
+      "Stimmt der Code nie, prüfe, ob Datum und Uhrzeit des Handys automatisch gestellt werden.",
+      { zwischen: "Handy weg oder neu" },
+      "Bei der Anmeldung „Wiederherstellungscode verwenden“ – jeder Code gilt einmal. Danach unter „Zweiter Faktor…“ " +
+        "**„Neu einrichten (neues Handy)“**; mit dem letzten Code musst du ihn gleich neu einrichten. „Neue " +
+        "Wiederherstellungscodes…“ ersetzt alle bisherigen.",
+      "Ohne Codes setzt der **Admin** den zweiten Faktor zurück (Konten verwalten → Konto). Admin-Konten setzt ein zweiter " +
+        "Admin zurück – oder der Notfallzugang auf dem Server.",
+      { zwischen: "Pflicht" },
+      "Schreibt die Schule ihn für dein Konto vor (für Admin-Konten immer), kannst du nach dem Passwort zuerst nur den " +
+        "zweiten Faktor einrichten – und ihn nicht ausschalten. Sonst ist er freiwillig und lässt sich mit Passwort und " +
+        "Code wieder ausschalten.",
     ],
   },
   {
@@ -286,14 +327,15 @@ const HI_THEMEN = [
       "Die schriftliche Entschuldigung bleibt auf Papier. Hier trägst du nur ein, dass sie vorliegt.",
       "„Entschuldigung eintragen“ gilt für einen **Zeitraum** und deckt alle Fehlstunden und Verspätungen darin ab – " +
         "auch später nachgetragene.",
-      "Als Grund genügt eine Kategorie. Nichts wird automatisch unentschuldigt.",
+      "Als Grund genügt eine Kategorie – erfasst die Schule keinen Grund (Einstellung), entfällt die Auswahl und es steht " +
+        "„ohne Angabe“ da. Nichts wird automatisch unentschuldigt.",
     ],
   },
   {
     id: "bewerten", gruppe: "leitung", titel: "Fehlstunden bewerten",
     inhalt: [
-      "Im Schülerdetail kannst du eine einzelne Fehlstunde bewerten: entschuldigt (mit Grund), offen oder " +
-        "unentschuldigt.",
+      "Im Schülerdetail kannst du eine einzelne Fehlstunde bewerten: entschuldigt (mit Grund, sofern die Schule ihn " +
+        "erfasst), offen oder unentschuldigt.",
       "Was du festlegst, kann die Fach- bzw. Kurslehrkraft nicht mehr ändern.",
       "Eine Entschuldigung für einen Zeitraum trägst du ebenfalls im Schülerdetail ein – dort kannst du sie auch " +
         "wieder löschen.",
@@ -345,7 +387,13 @@ const HI_THEMEN = [
   {
     id: "konten", gruppe: "admin", titel: "Konten verwalten",
     inhalt: [
-      "**Konten:** anlegen, bearbeiten, Passwort zurücksetzen, sperren, auf allen Geräten abmelden, löschen.",
+      "**Konten:** anlegen, bearbeiten, Passwort zurücksetzen, sperren, auf allen Geräten abmelden, löschen. Ist das Handy " +
+        "einer Lehrkraft weg: **„Zweiten Faktor zurücksetzen“** (meldet das Konto überall ab; bei Pflicht richtet sie ihn " +
+        "neu ein). Filter „Mit zweitem Faktor“ und „Zweiter Faktor fehlt (Pflicht)“.",
+      "**Zugriffe:** erfolglose Anmeldungen aller Konten und erfolgreiche Anmeldungen der Admin-Konten, dazu – wenn " +
+        "eingeschaltet – das Leseprotokoll (siehe „Zugriffe“).",
+      "**Auskunft (Art. 15) …** im Konto: PDF mit allen gespeicherten Daten – beim Schülerkonto über die Schülerin bzw. den " +
+        "Schüler, bei Personalkonten kompakt (siehe „Auskunft nach Art. 15“).",
       "**Sammelanlage:** Lehrkräfte aus dem Grundplan bzw. Schüler je Klasse oder Stufe. Danach die Zugangszettel " +
         "drucken oder als CSV speichern, bevor du die Liste schließt – die Startpasswörter sind danach weg.",
       "**Protokoll:** wer wann was an welchem Konto geändert hat – ohne Passwörter. Wie lange es aufbewahrt wird, " +
@@ -405,14 +453,144 @@ const HI_THEMEN = [
       { zwischen: "Datenschutz und Anmeldung" },
       "Diese Werte vor dem Echtbetrieb mit der bzw. dem **Datenschutzbeauftragten** abstimmen und „Abgestimmt am“ und " +
         "„mit“ eintragen. Änderst du später einen dieser Werte, entfällt die Abstimmung – dann neu eintragen.",
-      "**Löschfrist** und **Aufbewahrung der Protokolle:** Eine kürzere Frist löscht ältere Daten gleich beim " +
-        "Speichern. Vorher steht da, wie viele – „Speichern“ musst du dann ein zweites Mal tippen. Danach räumt der " +
-        "Server jede Nacht auf.",
+      "**Fristen** (Klassenbucheinträge, Abwesenheitsgründe der Vertretungen, Konten abgegangener Schüler, " +
+        "Aufbewahrung der Protokolle): Eine kürzere Frist löscht ältere Daten gleich beim Speichern. Vorher steht da, " +
+        "wie viele – „Speichern“ musst du dann ein zweites Mal tippen. Danach räumt der Server jede Nacht auf; was " +
+        "gelöscht wurde, steht mit Zahlen im Reiter „Protokoll“ („System (Löschfrist)“).",
+      { liste: [
+        "**Abwesenheitsgründe:** Grund und Bemerkung zur Abwesenheit der Lehrkräfte in veröffentlichten Vertretungen – " +
+          "die Vertretung selbst bleibt. Die Vertretungsdatei im Desktop behält ihre Gründe.",
+        "**Konten abgegangener Schüler:** das gesperrte Konto nach einem Abgang laut SchILD. Schülerdaten und " +
+          "Klassenbuch bleiben; ein wieder entsperrtes Konto bleibt auch.",
+        "**Protokolle:** auch die der SchILD-Importe – der jeweils letzte Import je Schuljahr und Abschnitt bleibt, " +
+          "weil der nächste Import ihn braucht.",
+      ] },
+      "Standard ist bei den neuen Fristen „0 (aus)“: Es wird nichts gelöscht, bis du eine Frist einträgst.",
       "**Dauer einer Anmeldung** und **„Angemeldet bleiben“** gelten für neue Anmeldungen; wer schon angemeldet ist, " +
         "bleibt es bis zum Ende der bisherigen Dauer. 0 Tage bei „Angemeldet bleiben“ blendet den Haken auf der " +
         "Anmeldeseite aus.",
+      // P6a (226, 229, 230)
+      "**Zweiter Faktor Pflicht** (Karte „Anmeldung“): für Klassenleitung und Stufenkoordination bzw. für alle Lehrkräfte. " +
+        "Wer noch keinen hat, kann ab dem nächsten Abruf nur noch ihn einrichten – vorher ankündigen. Für Admin-Konten ist " +
+        "er im Echtbetrieb immer Pflicht; der Schalter dafür wirkt nur in der Entwicklung.",
+      // P6b (233, 236)
+      "**Leseprotokoll** (Karte „Datenschutz“, Standard aus): An, zeichnet die App auf, wer wann welche Schülerdaten " +
+        "angesehen hat – je Tag, Konto, Ansicht und Gegenstand ein Eintrag. Es zeigt auch, wann welche Lehrkraft gearbeitet " +
+        "hat: vorher mit dem bzw. der Datenschutzbeauftragten und dem Personalrat klären (Dienstvereinbarung). Einsicht: " +
+        "Konten verwalten → „Zugriffe“ → „Ansichten“.",
+      "**Grund der Entschuldigung erfassen** (Standard an): Aus, entfällt die Auswahl beim Entschuldigen und Bewerten; " +
+        "gespeichert wird „ohne Angabe“. Schon gespeicherte Gründe bleiben – darunter erscheint dann **„Vorhandene Gründe " +
+        "entfernen …“**: zählt, fragt mit der Zahl nach („Nochmal tippen“) und setzt alle Gründe auf „ohne Angabe“ (auch im " +
+        "Änderungsverlauf). Die Bewertung „entschuldigt“ bleibt; rückgängig machen lässt sich das nicht.",
       "Was vor dem Start des Servers feststehen muss (Datenbank, Schlüssel, Adresse), steht weiter in der " +
-        "Einstellungsdatei des Servers und ist hier nicht zu sehen.",
+        "Einstellungsdatei des Servers. Die Karte **„Zugriff“** zeigt davon nur zum Lesen: Schuladressen, ob Desktop und " +
+        "Admin nur aus dem Schulnetz dürfen, die Anfragebegrenzung und wie die Adresse deines Geräts eingeordnet wird.",
+    ],
+  },
+  {
+    // P6a (Entscheidung 228)
+    id: "zugriffe", gruppe: "admin", titel: "Zugriffe",
+    inhalt: [
+      "Konten verwalten → Reiter **„Zugriffe“** → „Anmeldungen“: das Anmeldeprotokoll. Es enthält **erfolglose " +
+        "Anmeldungen aller Konten** (Passwort oder Code falsch, Konto gesperrt, zu viele Fehlversuche, Adresse nicht " +
+        "erlaubt), **erfolgreiche nur von Admin-Konten** und jede Anmeldung mit Wiederherstellungscode.",
+      "Erfolgreiche Anmeldungen von Lehrkräften und Schülern stehen bewusst nicht darin – sonst entstünde ein " +
+        "Anwesenheitsprotokoll. Ein unbekannter Benutzername erscheint als „unbekanntes Konto“ (dort steht oft ein " +
+        "vertipptes Passwort). Die Adresse steht nur gekürzt da, dazu „Schulnetz“ und das Gerät grob.",
+      "Filter: Konto (Teil des Benutzernamens, „-“ für unbekannte), Ergebnis, Zeitraum. Oben steht, wie viele erfolglose " +
+        "Anmeldungen es in den letzten 24 Stunden gab. Jede Person sieht nach ihrer Anmeldung einmal, wie viele erfolglose " +
+        "Versuche es seit ihrer letzten Anmeldung gab.",
+      "Nur lesen, kein Löschen von Hand. Gelöscht wird nach „Aufbewahrung der Protokolle“ (Einstellungen → Datenschutz).",
+      // P6b (232, 233)
+      { zwischen: "Ansichten (Leseprotokoll)" },
+      "„Zugriffe“ → **„Ansichten“**: wer wann welche Schülerdaten angesehen hat – Fehlzeiten, Stundenblatt und sein Verlauf, " +
+        "Einträge, Schülerplan, Schülerdaten, Teilnehmer- und Gruppenlisten – und wer die Abwesenheitsgründe der " +
+        "Lehrkräfte bzw. „Nicht erfasst“ anderer Lehrkräfte geöffnet hat. Eigene Daten, Pläne von Klassen und Lehrkräften, " +
+        "Hausaufgaben und Themen stehen nicht darin, Downloads im eigenen Reiter.",
+      "Je Tag, Konto, Ansicht und Gegenstand gibt es **einen** Eintrag mit der Anzahl und der ersten und letzten Uhrzeit. " +
+        "Der Gegenstand nennt keine Namen (z. B. „Schüler-Id 12 (05A)“, „Klasse 05A“, „Stunde 18.11.2026, 3.“); den Namen " +
+        "des Schülers zeigt die Liste nur dir.",
+      "Filter: **Schüler** (Namen eintippen und antippen – dann nur die Einzelansichten dieses Schülers), Konto, Ansicht, " +
+        "Zeitraum. Jeder Aufruf dieser Liste steht selbst im Leseprotokoll.",
+      "Das Leseprotokoll ist **Standard aus** – einschalten unter Einstellungen → Datenschutz → „Leseprotokoll“ (vorher mit " +
+        "DSB und Personalrat klären). Solange es aus ist, steht oben ein Hinweis.",
+    ],
+  },
+  {
+    // P6b (Entscheidungen 234, 235)
+    id: "auskunft", gruppe: "admin", titel: "Auskunft nach Art. 15",
+    inhalt: [
+      "Wer wissen möchte, welche Daten die Schule über sie bzw. ihn speichert, hat ein Recht auf Auskunft (Art. 15 DSGVO). " +
+        "Die App erstellt dafür ein PDF:",
+      { liste: [
+        "**Schüler:** Klassenbuch → Klassen → Schüler antippen → „Auskunft (Art. 15) …“ bzw. Konten verwalten → Schülerkonto " +
+          "→ „Auskunft (Art. 15) …“. Enthält die Angaben nach Art. 15 Abs. 1 (Zwecke, Empfänger, Speicherdauer nach den " +
+          "Fristen der Einstellungen, Rechte), Stammdaten, Klassen und Kurse, Konto mit Protokollen, jede Fehlstunde mit " +
+          "Bewertung und Grund, Entschuldigungen, Summen je Halbjahr, Einträge, Änderungsverlauf, das Leseprotokoll und den " +
+          "Rückweg nach SchILD – über alle gespeicherten Schuljahre.",
+        "**Lehrkräfte und Verwaltung:** Konten verwalten → Konto → „Auskunft (Art. 15) …“: Konto, Zuständigkeit, Name laut " +
+          "SchILD, Konten- und Anmeldeprotokoll, Abwesenheitsgründe in veröffentlichten Vertretungen, Ansichten, " +
+          "Tätigkeiten im Klassenbuch und Downloads als Zahlen je Monat.",
+      ] },
+      "Im Leseprotokoll der Schüler-Auskunft stehen Datum, Ansicht und **Rolle – keine Namen** der Beschäftigten. " +
+        "Listenansichten (Stundenblatt, Klassen- und Kurslisten) stehen als Zahl je Monat und Rolle.",
+      "**Wer bekommt die Auskunft?** Das regelt die Schule: Identität prüfen, bei Minderjährigen ggf. die Eltern. Das PDF " +
+        "enthält personenbezogene Daten – nur der berechtigten Person geben. Jeder Abruf steht im Download-Protokoll (Art " +
+        "„Auskunft (Art. 15)“, ohne Namen).",
+      "Die Texte zu Zwecken, Empfängern und Rechten sind Vorschläge – vor dem Echtbetrieb mit der bzw. dem " +
+        "Datenschutzbeauftragten abstimmen. Den Auftragsverarbeiter (Betreiber des Servers) trägt die Einrichtung ein.",
+    ],
+  },
+  {
+    // P4a (5.3a, Entscheidungen 205, 206)
+    id: "jahresablauf", gruppe: "admin", titel: "Jahresablauf",
+    inhalt: [
+      "Kontomenü → „Jahresablauf“: was zum Halbjahres- und (später) Schuljahreswechsel zu tun ist. Jede Karte und " +
+        "jeder Punkt hat eine **Ampel**: grün erledigt, gelb zu tun, rot überfällig, grau nur ein Hinweis bzw. noch " +
+        "nicht dran. Hier geschieht **nichts von selbst** – die Knöpfe führen in den passenden Bereich.",
+      { zwischen: "Halbjahreswechsel" },
+      "Die Karte erscheint **4 Wochen vor** „2. Halbjahr ab“ (Einstellungen → Schuljahr) und bleibt bis zum Ende des " +
+        "Schuljahres. Sie prüft:",
+      { liste: [
+        "**Grundplan ab dem 2. Halbjahr:** Gibt es zum Halbjahr einen neuen Stundenplan, im Desktop „Grundplan " +
+          "veröffentlichen…“ mit „gilt ab“ = erster Tag des 2. Halbjahres. Bleibt der Plan, ist der graue Hinweis in Ordnung.",
+        "**SchILD-Import Abschnitt 2:** nach dem Halbjahreswechsel in SchILD im Desktop „SchILD-Daten…“ mit dem Export " +
+          "des 2. Halbjahres, Abschnitt 2 und „Änderungen gelten ab“ = erster Tag des 2. Halbjahres. Die Vorschau warnt, " +
+          "wenn Abschnitt und Datum nicht passen oder zum Halbjahr kein neuer Grundplan veröffentlicht ist.",
+        "**Offene und nicht erfasste Stunden** im 1. Halbjahr – offene Fehlstunden kommen nicht in den Rückweg nach SchILD.",
+        "**Rückweg nach SchILD** für das 1. Halbjahr – grün erst, wenn der Desktop eine vollständige Datei für das ganze " +
+          "Halbjahr gemeldet hat (siehe „Rückweg nach SchILD“).",
+        "**Sek-I-Gruppen ohne Liste** im Plan des 2. Halbjahres und **Gruppenlisten mit wegfallendem Schlüssel** – nur " +
+          "Hinweise. Neue Gruppen stellen die Fachlehrkräfte unter „Meine Gruppen“ zusammen bzw. der SchILD-Import " +
+          "liefert sie; alte Listen bleiben für die Stunden davor erhalten.",
+      ] },
+      "Die Seite nennt nur Zahlen, Daten und Bezeichnungen – keine Namen.",
+    ],
+  },
+  {
+    // P4b (5.3a, Entscheidungen 210–213)
+    id: "rueckweg", gruppe: "admin", titel: "Rückweg nach SchILD",
+    inhalt: [
+      "Jahresablauf → Karte „Rückweg nach SchILD“ → **„Fehlstunden für SchILD bereitstellen…“**: Die Fehlstunden kommen " +
+        "einzeln (Tag, Stunde, Fach, Lehrkraft, entschuldigt J/N) in die Datei SchuelerFehlstunden.dat, die SchILD " +
+        "importieren kann.",
+      { liste: [
+        "**Zeitraum** wählen – Standard ist das laufende bzw. gerade beendete Halbjahr. Für eine Probedatei geht auch ein " +
+          "kurzer Zeitraum.",
+        "Die Zahlen prüfen: **offene** Fehlstunden, **Verspätungen** und **schulische Veranstaltungen** werden nicht " +
+          "übertragen, **beurlaubte** Stunden zählen als entschuldigt. Offene Fehlstunden vorher bewerten.",
+        "**„Abholcode erzeugen“** – der Code gilt 15 Minuten und für einen Abruf. Ein neuer Code ersetzt den alten.",
+        "Im **Desktop**: Wocheneditor → „SchILD-Daten…“ → aktuellen SchILD-Export wählen und prüfen → Reiter **„Rückweg“** → " +
+          "Code eingeben → „Abrufen“ → Vorschau prüfen → **„Datei schreiben…“**. Die Datei dann in SchILD von Hand " +
+          "importieren.",
+      ] },
+      "Die App gibt **keine Namen** heraus – nur Prüfsummen. Namen, Geburtsdatum und Klasse ergänzt der Desktop aus dem " +
+        "SchILD-Export. Abruf und geschriebene Datei stehen im Download-Protokoll.",
+      "**Vor der ersten echten Übertragung:** SchILD-Datenbank sichern, eine Probedatei für eine Klasse und wenige Tage " +
+        "importieren, in SchILD mit der Konferenzübersicht vergleichen und prüfen, ob ein zweiter Import desselben Zeitraums " +
+        "doppelt zählt. Bis dahin ist die Fehlzeiten-CSV (Klassenbuch → Klassen) der sichere Weg.",
+      "Den Zeitraum nicht zweimal übertragen: Die App und der Desktop warnen, wenn er sich mit einer früheren Übertragung " +
+        "überschneidet.",
     ],
   },
   {
@@ -440,7 +618,10 @@ const HI_THEMEN = [
     id: "downloads", gruppe: "admin", titel: "Downloads",
     inhalt: [
       "Konten verwalten → „Downloads“ zeigt, wer wann welche Datei mit Schülerdaten geladen hat: Klassenbuch- und " +
-        "Kursheft-PDFs, Fehlzeiten-CSV und Jahresarchive – mit Zeitraum und ob Schülereinträge enthalten waren.",
+        "Kursheft-PDFs, Fehlzeiten-CSV und Jahresarchive – mit Zeitraum und ob Schülereinträge enthalten waren. Dazu der " +
+        "Rückweg nach SchILD: „abgeholt“ (der Desktop hat die Fehlstunden mit dem Abholcode geholt) und „Datei“ bzw. " +
+        "„Probedatei“ (was er daraus geschrieben hat; „durch“ nennt, wer den Code erzeugt hat) und jede Auskunft nach " +
+        "Art. 15 (ohne Namen, nur die Id).",
       "Filtern kannst du nach Art und nach Person (Teil des Benutzernamens).",
       "Gespeichert wird nur, was geladen wurde, nicht der Inhalt. Einträge werden nach der Aufbewahrungsfrist " +
         "gelöscht (Einstellungen → Datenschutz, Standard ein Jahr).",
@@ -474,6 +655,7 @@ function hiErlaubt(t, r = hiRollen()) {
   if (!t) return false;
   if (!r.angemeldet) return !!t.ohneAnmeldung;
   if (t.nichtAdmin && r.admin) return false;
+  if (t.nurPersonal && !r.personal) return false;   // P6a
   switch (t.gruppe) {
     case "alle": return true;
     case "schueler": return r.schueler;
@@ -505,15 +687,19 @@ const hiSichtbar = (id) => { const e = el(id); return !!e && !e.hidden; };
 
 function hiKontext() {
   const r = hiRollen();
-  if (hiSichtbar("anmeldung")) return { themen: ["anmelden", "startbildschirm"] };
+  if (hiSichtbar("anmeldung"))
+    return { themen: hiSichtbar("codeForm") ? ["zweiterFaktor", "anmelden"] : ["anmelden", "startbildschirm"] };   // P6a
   if (hiSichtbar("pflicht")) return { themen: ["konto", "anmelden"] };
-  if (hiSichtbar("einstellungen")) return { themen: ["einstellungen", "konten", "downloads"] };   // P3
+  if (hiSichtbar("faktorPflicht")) return { themen: ["zweiterFaktor", "konto"] };   // P6a
+  if (hiSichtbar("einstellungen")) return { themen: ["einstellungen", "zugriffe", "konten", "zweiterFaktor", "downloads"] };   // P3, P6a, P6b
+  if (hiSichtbar("jahresablauf")) return { themen: ["jahresablauf", "rueckweg", "einstellungen", "schildImporte"] };   // P4a/P4b
   if (hiSichtbar("verwaltung")) {
     if (r.admin && verw.reiter === "downloads") return { themen: ["downloads", "konten"] };
+    if (r.admin && verw.reiter === "zugriffe") return { themen: ["zugriffe", "einstellungen", "auskunft", "konten"] };   // P6a, P6b
     if (r.admin && verw.reiter === "schild")
       return { themen: verw.schildTeil === "importe"
         ? ["schildImporte", "schildVorschlaege", "konten"] : ["schildVorschlaege", "schildImporte", "konten"] };
-    return { themen: r.admin ? ["konten", "gruppenlisten", "downloads"] : ["schuelerkonten"] };
+    return { themen: r.admin ? ["konten", "auskunft", "gruppenlisten", "downloads"] : ["schuelerkonten"] };   // P6b
   }
   if (hiSichtbar("klassenbuch")) {
     if (kb.ansicht === "stunde")
@@ -526,7 +712,9 @@ function hiKontext() {
     const karte = r.personal ? "klassenbuch" : null;
     if (!o) return { themen: r.schueler ? ["meineFehlzeiten"] : [], karte };
     if (o.art === "ich") return { themen: ["meineFehlzeiten", "begriffe"] };
-    if (o.art === "schueler") return { themen: ["bewerten", "meineKurse", "offeneFaelle", "eintraegeSchueler", "begriffe"], karte };
+    if (o.art === "schueler")   // P6b: Admin – „Auskunft (Art. 15) …“
+      return { themen: ["bewerten", "meineKurse", "offeneFaelle", "eintraegeSchueler", ...(r.admin ? ["auskunft"] : []), "begriffe"],
+        karte };
     if (o.art === "themen") return { themen: ["meineKurse", "themaHa", "kursheft"], karte };
     if (o.art === "unterricht" || o.art === "keUnterricht")
       return { themen: ["meineKurse", "kursheft", "eintraege", "begriffe"], karte };

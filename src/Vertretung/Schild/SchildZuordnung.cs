@@ -160,6 +160,16 @@ namespace Stundenplan_V2.Vertretung
         /// gleich, ohne Vorschläge, nur Kürzel des Plans. Für Klassenleitung und Namen der Lehrkräfte (191, 193).
         /// </summary>
         public Dictionary<string, string> KuerzelFest { get; } = new(StringComparer.OrdinalIgnoreCase);
+        /// <summary>
+        /// P4b (211): Rückweg Plan → SchILD. Plan-Kürzel (Großbuchstaben) → SchILD-Kürzel (Schreibweise der Datei) – aus der
+        /// festen Tabelle; mehr als ein Eintrag = mehrdeutig.
+        /// </summary>
+        public Dictionary<string, List<string>> KuerzelRueck { get; } = new(StringComparer.OrdinalIgnoreCase);
+        /// <summary>
+        /// P4b (211): Plan-Fach (Basis, Großbuchstaben) → SchILD-Fächer (Schreibweise der Datei) – von Hand bzw. gleich, ohne
+        /// Vorschläge; mehr als ein Eintrag = mehrdeutig (der Desktop nimmt dann das Fach aus den Leistungsdaten des Schülers).
+        /// </summary>
+        public Dictionary<string, List<string>> FaecherRueck { get; } = new(StringComparer.OrdinalIgnoreCase);
         /// <summary>SchILD-Fach → vollständige vorgeschlagene Liste der Plan-Fächer.</summary>
         public Dictionary<string, List<string>> VorschlagFaecher { get; } = new(StringComparer.OrdinalIgnoreCase);
         /// <summary>5.2a-3 (136): vorgeschlagene „gemeinsam“-Festlegungen (Jahrgang und KursBez wie in Kurse.dat, Plan-Schlüssel).</summary>
@@ -341,6 +351,24 @@ namespace Stundenplan_V2.Vertretung
                     string? p = fest(S);
                     if (p != null && _plan.Kuerzel.Contains(p)) _e.KuerzelFest[S] = _plan.KuerzelText(p);
                 }
+
+                // P4b (211): Rückweg Plan → SchILD aus denselben festen Tabellen (von Hand bzw. gleich, ohne Vorschläge).
+                static void Zu(Dictionary<string, List<string>> d, string schluessel, string wert)
+                {
+                    if (!d.TryGetValue(schluessel, out var l)) d[schluessel] = l = new List<string>();
+                    if (!l.Contains(wert, StringComparer.OrdinalIgnoreCase)) l.Add(wert);
+                }
+                foreach (var kv in _e.KuerzelFest.OrderBy(x => x.Key, StringComparer.Ordinal))
+                    Zu(_e.KuerzelRueck, kv.Value.Trim().ToUpperInvariant(), SK(kv.Key));
+                var fSchreib = new Dictionary<string, string>(StringComparer.Ordinal);
+                if (_ex.Hat(SchildDateiArt.Faecher))
+                    foreach (var f in _ex.Faecher) fSchreib.TryAdd(f.Kuerzel.Trim().ToUpperInvariant(), f.Kuerzel.Trim());
+                foreach (var l in _ex.Leistungen) fSchreib.TryAdd(l.Fach.Trim().ToUpperInvariant(), l.Fach.Trim());
+                foreach (var k in _ex.Kurse) fSchreib.TryAdd(k.Fach.Trim().ToUpperInvariant(), k.Fach.Trim());
+                var ffest = FMap(false);
+                foreach (var X in _fAlle.OrderBy(x => x, StringComparer.Ordinal))
+                    foreach (var pf in ffest(X))
+                        if (_plan.Faecher.Contains(pf)) Zu(_e.FaecherRueck, pf, fSchreib.TryGetValue(X, out var xs) ? xs : X);
                 return _e;
             }
 

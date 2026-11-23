@@ -31,6 +31,11 @@ namespace VertretungApi.Controllers;
 //    POST   api/konten/sammel               – Sammelanlage (Vorschau bzw. Anlegen)
 //    GET    api/konten/schild-vorschlaege   – 5.2c-2 (192): Vorschläge aus SchILD (Klassenleitung laut Klassen.dat)
 //    POST   api/konten/schild-vorschlaege   – gewählte Vorschläge übernehmen (nur per Knopf, Kontenprotokoll)
+//    POST   api/konten/{id}/zweiter-faktor/zuruecksetzen – P6a (227): zweiten Faktor eines anderen Kontos zurücksetzen
+//                                             (Handy verloren; Kontenprotokoll, Abmeldung auf allen Geräten)
+//
+//  P6a: Konten zeigen den Stand des zweiten Faktors (aktiv seit, „fehlt“ bei Pflicht); Filter „faktor“ (mit zweitem
+//  Faktor) und „faktorfehlt“ (Pflicht, aber noch keiner). Klassenleitung und Stufenkoordination setzen nichts zurück.
 //
 //  Phase 5.2c-2: Namen der Lehrkräfte (Lehrkraefte.dat) erscheinen nur für den Admin (194); Schülerkonten zeigen
 //  „laut SchILD wieder aktiv, aber gesperrt“ und „Benutzername passt nicht mehr zum Namen“ (197) – nichts geschieht
@@ -52,11 +57,15 @@ public class KontenController : ControllerBase
 
     private readonly AppDbContext _db;
     private readonly LoginBremse _bremse;
+    private readonly Schuleinstellungen _einst;
+    private readonly IHostEnvironment _env;
 
-    public KontenController(AppDbContext db, LoginBremse bremse)
+    public KontenController(AppDbContext db, LoginBremse bremse, Schuleinstellungen einst, IHostEnvironment env)
     {
         _db = db;
         _bremse = bremse;
+        _einst = einst;
+        _env = env;
     }
 
     private string Ich => User.Identity?.Name ?? "";
@@ -109,6 +118,9 @@ public class KontenController : ControllerBase
             // 5.2c-2 (197): die genaue Prüfung folgt nach AlsDto
             case "wiederaktiv": query = query.Where(b => b.Rolle == BenutzerRolle.Schueler && b.Gesperrt); break;
             case "namegeaendert": query = query.Where(b => b.Rolle == BenutzerRolle.Schueler); break;
+            // P6a: mit zweitem Faktor bzw. Pflicht ohne (genaue Prüfung nach AlsDto)
+            case "faktor": query = query.Where(b => b.ZweiterFaktorSeit != null); break;
+            case "faktorfehlt": query = query.Where(b => b.Rolle != BenutzerRolle.Schueler && b.ZweiterFaktorSeit == null); break;
         }
 
         var dtos = await AlsDto(await query.ToListAsync());
@@ -118,6 +130,8 @@ public class KontenController : ControllerBase
             dtos = dtos.Where(d => d.WiederAktiv).ToList();
         else if (string.Equals(filter, "namegeaendert", StringComparison.OrdinalIgnoreCase))
             dtos = dtos.Where(d => d.NameGeaendert).ToList();
+        else if (string.Equals(filter, "faktorfehlt", StringComparison.OrdinalIgnoreCase))
+            dtos = dtos.Where(d => d.FaktorFehlt).ToList();
 
         var woerter = (q ?? "").ToLowerInvariant()
             .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -341,6 +355,33 @@ public class KontenController : ControllerBase
 
         u.SicherheitsStempel = KontenService.NeuerStempel();
         KontenService.Protokoll(_db, Ich, Aktion.Abgemeldet, u);
+        await _db.SaveChangesAsync();
+        return Ok(await AlsDto(u));
+    }
+
+    /// <summary>
+    /// P6a (Entscheidung 227): zweiten Faktor eines anderen Kontos zurücksetzen (Handy verloren). Das Konto wird auf allen
+    /// Geräten abgemeldet; gilt für seine Rolle die Pflicht, richtet es ihn bei der nächsten Anmeldung neu ein. Das eigene
+    /// Admin-Konto: ein zweiter Admin oder der Notfallzugang „admin-anlegen“ auf dem Server.
+    /// </summary>
+    [Authorize(Roles = Rollen.Admin)]
+    [HttpPost("{id:int}/zweiter-faktor/zuruecksetzen")]
+    public async Task<IActionResult> FaktorZuruecksetzen(int id)
+    {
+        var u = await _db.Benutzer.FindAsync(id);
+        if (u == null) return NichtGefunden();
+        if (u.Id == IchId)
+            return BadRequest(new
+            {
+                fehler = "Den eigenen zweiten Faktor änderst du über „Zweiter Faktor…“ im Kontomenü. Ist das Handy weg, setzt " +
+                         "ihn ein zweiter Admin zurück – oder der Notfallzugang „admin-anlegen“ auf dem Server."
+            });
+        if (!ZweiterFaktor.Aktiv(u)) return BadRequest(new { fehler = "Für dieses Konto ist kein zweiter Faktor eingerichtet." });
+
+        ZweiterFaktor.Entfernen(u);
+        u.SicherheitsStempel = KontenService.NeuerStempel();
+        _bremse.Erfolg(u.Benutzername);
+        KontenService.Protokoll(_db, Ich, Aktion.FaktorZurueckgesetzt, u);
         await _db.SaveChangesAsync();
         return Ok(await AlsDto(u));
     }
@@ -770,7 +811,7 @@ public class KontenController : ControllerBase
     //  Hilfen
     // -----------------------------------------------------------------
 
-    private static DateOnly Heute() => DateOnly.FromDateTime(DateTime.Now);
+    private static DateOnly Heute() => KlassenbuchService.Heute();   // P4a: mit Testdatum
 
     private IActionResult NichtGefunden() => NotFound(new { fehler = "Konto nicht gefunden." });
 
@@ -880,6 +921,9 @@ public class KontenController : ControllerBase
                 .Select(k => k.LehrerKuerzel!))
             : new Dictionary<string, string>();
         var ich = IchId;
+        // P6a (226): Pflicht zum zweiten Faktor je Rolle (Schalter der Einstellungen; Admin im Echtbetrieb immer)
+        var pflichten = await _einst.FaktorPflichtAsync(_db);
+        bool produktiv = Betrieb.Produktiv(_env);
         return konten.Select(u =>
         {
             (string Name, string? Klasse, string Stufe)? s =
@@ -897,7 +941,10 @@ public class KontenController : ControllerBase
                 Lehrkraft: u.Rolle != BenutzerRolle.Schueler && u.LehrerKuerzel != null
                            && namen.TryGetValue(u.LehrerKuerzel.Trim(), out var n) ? n : null,
                 NameGeaendert: importiert && NamePasstNicht(u.Benutzername, st!.Value.Vorname, st.Value.Nachname),
-                WiederAktiv: u.Gesperrt && importiert && !st!.Value.Abgang);
+                WiederAktiv: u.Gesperrt && importiert && !st!.Value.Abgang,
+                ZweiterFaktor: ZweiterFaktor.Aktiv(u),
+                ZweiterFaktorSeit: u.ZweiterFaktorSeit,
+                FaktorFehlt: !ZweiterFaktor.Aktiv(u) && ZweiterFaktor.Pflicht(u.Rolle, pflichten, produktiv));
         }).ToList();
     }
 

@@ -2,6 +2,7 @@ using System.Net;
 using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -37,8 +38,29 @@ if (befehl == null && pruefung.Fehler.Count > 0)
     return 1;
 }
 
+// P4a (Entscheidung 221): Testdatum „Entwicklung:Heute“ – nur in der Entwicklung (Helpers/Testdatum.cs).
+if (!produktiv)
+    Testdatum.Setzen(Testdatum.Lesen(builder.Configuration, out _));
+
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();   // OpenAPI-Dokument unter /openapi/v1.json (nur Entwicklung)
+
+// P6a (Entscheidung 231): Kestrel ohne „Server“-Kopf; HSTS 365 Tage mit includeSubDomains, ohne preload.
+builder.WebHost.ConfigureKestrel(o => o.AddServerHeader = false);
+builder.Services.AddHsts(o =>
+{
+    o.MaxAge = TimeSpan.FromDays(365);
+    o.IncludeSubDomains = true;
+    o.Preload = false;
+});
+
+// P6a (Entscheidungen 229, 230): Schuladressen/Adressbeschränkung und Anfragebegrenzung aus der Einstellungsdatei
+// (Abschnitte „Zugriff“ und „Begrenzung“; geprüft von der Startprüfung, wirksam nach einem Neustart).
+var zugriff = new Zugriffsschutz(builder.Configuration);
+var begrenzung = BegrenzungsWerte.Lesen(builder.Configuration);
+builder.Services.AddSingleton(zugriff);
+builder.Services.AddBegrenzung(begrenzung);
+builder.Services.AddScoped<Anmeldedienst>();   // Token + Antwort der Anmeldung (Auth, zweiter Faktor)
 
 // ---------------------------------------------------------------------------
 //  EF Core mit umschaltbarem Provider (SQLite dev / PostgreSQL prod).
@@ -121,15 +143,30 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 var db = ctx.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
                 var aktuell = await db.Benutzer.AsNoTracking()
                     .Where(b => b.Id == id.Value)
-                    .Select(b => new { b.SicherheitsStempel, b.Gesperrt, b.MussPasswortAendern })
+                    .Select(b => new
+                    {
+                        b.SicherheitsStempel, b.Gesperrt, b.MussPasswortAendern, b.Rolle,
+                        FaktorAktiv = b.ZweiterFaktorSeit != null && b.ZweiterFaktorGeheimnis != null,
+                        KeineCodes = b.ZweiterFaktorCodes == null || b.ZweiterFaktorCodes == ""
+                    })
                     .FirstOrDefaultAsync();
                 if (aktuell == null || aktuell.SicherheitsStempel != stempel || aktuell.Gesperrt)
                 {
                     ctx.Fail("Anmeldung wurde beendet.");
                     return;
                 }
-                if (aktuell.MussPasswortAendern && principal!.Identity is ClaimsIdentity ident)
+                if (principal!.Identity is not ClaimsIdentity ident) return;
+                if (aktuell.MussPasswortAendern)
+                {
                     ident.AddClaim(new Claim(Rollen.PasswortPflichtClaim, "1"));
+                    return;
+                }
+                // P6a (226): erst Passwort, dann zweiter Faktor – Pflicht ohne Faktor bzw. keine Codes mehr: nur Einrichtung.
+                if (!ZweiterFaktor.Moeglich(aktuell.Rolle) || (aktuell.FaktorAktiv && !aktuell.KeineCodes)) return;
+                var pflichten = aktuell.FaktorAktiv ? FaktorPflichten.Keine
+                    : await ctx.HttpContext.RequestServices.GetRequiredService<Schuleinstellungen>().FaktorPflichtAsync(db);
+                var muss = ZweiterFaktor.MussEinrichten(aktuell.Rolle, aktuell.FaktorAktiv, aktuell.KeineCodes, pflichten, produktiv);
+                if (muss != null) ident.AddClaim(new Claim(Rollen.FaktorPflichtClaim, muss));
             }
         };
     });
@@ -149,6 +186,8 @@ builder.Services.AddSingleton<LoginBremse>();
 // P3 (E-1): Schuleinstellungen aus der Datenbank (mit Zwischenspeicher, wirken ohne Neustart) und das tägliche
 // Aufräumen nach Fristen (3 Uhr). Der Lauf beim Start steht in DatenbankStart.
 builder.Services.AddSingleton<Schuleinstellungen>();
+builder.Services.AddSingleton<Leseprotokoll>();   // P6b (232, 233): Leseprotokoll (Schalter in den Einstellungen)
+builder.Services.AddSingleton<RueckwegCodes>();   // P4b (210): Abholcodes für den Rückweg nach SchILD (nur im Speicher)
 builder.Services.AddHostedService<Aufraeumdienst>();
 
 var app = builder.Build();
@@ -168,6 +207,14 @@ app.Logger.LogInformation(
     provider, proxyAktiv ? "an" : "aus", produktiv && httpsErzwingen ? "an" : "aus");
 foreach (var hinweis in pruefung.Hinweise)
     app.Logger.LogWarning("Einstellungen: {Hinweis}", hinweis);
+app.Logger.LogInformation(
+    "Zugriff: {Anzahl} Schuladresse(n){Liste} · Desktop nur aus dem Schulnetz {Desktop} · Admin nur aus dem Schulnetz {Admin} · " +
+    "Begrenzung {Begrenzung}",
+    zugriff.Schuladressen.Count, zugriff.HatSchuladressen ? " (" + string.Join(", ", zugriff.Schuladressen) + ")" : "",
+    zugriff.DesktopNurSchule ? "an" : "aus", zugriff.AdminNurSchule ? "an" : "aus", begrenzung.Text());
+if (Testdatum.Wert != null)
+    app.Logger.LogWarning("TESTDATUM: Die API rechnet mit dem {Datum} als heute ({Schluessel}) – nur zum Testen. " +
+                          "Zeitstempel der Protokolle bleiben echt.", Testdatum.Text, Testdatum.Schluessel);
 
 // Phase 5.1: zuerst die Angaben des Proxys übernehmen (Absenderadresse, https).
 if (proxyAktiv)
@@ -211,6 +258,12 @@ if (corsAktiv)
 // Sicherheitsheader (Phase 2, Schritt 4). Die PWA lädt nur eigene Dateien (keine
 // fremden Skripte/Schriften); API-Antworten mit Personendaten werden nicht im
 // Browser-/Proxy-Cache abgelegt.
+// P6a (Entscheidung 231): dazu Permissions-Policy (die App braucht keine Kamera, kein Mikrofon, keinen Standort …),
+// Cross-Origin-Opener-/Resource-Policy und X-Permitted-Cross-Domain-Policies. Die CSP bleibt streng – auch der
+// QR-Code des zweiten Faktors entsteht in der PWA selbst (SVG ohne Inline-Stile).
+const string Berechtigungen =
+    "accelerometer=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), " +
+    "magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()";
 app.Use(async (ctx, next) =>
 {
     var h = ctx.Response.Headers;
@@ -221,6 +274,10 @@ app.Use(async (ctx, next) =>
         "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; " +
         "connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; " +
         "base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
+    h["Permissions-Policy"] = Berechtigungen;
+    h["Cross-Origin-Opener-Policy"] = "same-origin";
+    h["Cross-Origin-Resource-Policy"] = "same-origin";
+    h["X-Permitted-Cross-Domain-Policies"] = "none";
     if (ctx.Request.Path.StartsWithSegments("/api"))
         h["Cache-Control"] = "no-store";
     await next();
@@ -258,8 +315,50 @@ app.UseStaticFiles();
 
 app.UseAuthentication();
 
+// P6a (Entscheidung 230): Anfragebegrenzung nur für /api – nach der Anmeldung, damit je Konto gezählt wird.
+app.UseRateLimiter();
+
+// P6a (230): Anfragen ohne Anmeldung höchstens 64 KB (Standard) – nicht für die Desktop-Schnittstellen, deren
+// Schlüssel [DesktopSchnittstelle] vor dem Lesen des Inhalts prüft.
+long ohneAnmeldungMax = begrenzung.OhneAnmeldungMaxBytes;
+app.Use(async (ctx, next) =>
+{
+    if (ohneAnmeldungMax > 0
+        && ctx.Request.Path.StartsWithSegments("/api")
+        && ctx.User.Identity?.IsAuthenticated != true
+        && ctx.GetEndpoint()?.Metadata.GetMetadata<DesktopSchnittstelleAttribute>() == null)
+    {
+        if (ctx.Request.ContentLength > ohneAnmeldungMax)
+        {
+            ctx.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+            await ctx.Response.WriteAsJsonAsync(new { fehler = "Die Anfrage ist zu groß." });
+            return;
+        }
+        var groesse = ctx.Features.Get<IHttpMaxRequestBodySizeFeature>();
+        if (groesse is { IsReadOnly: false }) groesse.MaxRequestBodySize = ohneAnmeldungMax;
+    }
+    await next();
+});
+
+// P6a (Entscheidung 229): Mit Zugriff:AdminNurSchule nützt ein Admin-Token außerhalb des Schulnetzes nichts.
+if (zugriff.AdminNurSchule)
+    app.Use(async (ctx, next) =>
+    {
+        if (ctx.Request.Path.StartsWithSegments("/api")
+            && ctx.User.IsInRole(Rollen.Admin)
+            && !zugriff.IstSchule(ctx.Connection.RemoteIpAddress))
+        {
+            ctx.RequestServices.GetRequiredService<BegrenzungsMelder>().Melden("Admin außerhalb des Schulnetzes", Begrenzung.Wer(ctx));
+            ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await ctx.Response.WriteAsJsonAsync(new { fehler = Zugriffsschutz.AdminText, adresseNichtErlaubt = true });
+            return;
+        }
+        await next();
+    });
+
 // Phase 2, Schritt 5: Mit Startpasswort bzw. zurückgesetztem Passwort ist nur das
 // Ändern des Passworts erlaubt (plus Anmelden/Abmelden). Alles andere: 403 mit Hinweis.
+// P6a (226): danach – bei Pflicht ohne zweiten Faktor bzw. ohne Wiederherstellungscodes – nur dessen Einrichtung.
 app.Use(async (ctx, next) =>
 {
     if (ctx.User.HasClaim(Rollen.PasswortPflichtClaim, "1")
@@ -274,10 +373,46 @@ app.Use(async (ctx, next) =>
         });
         return;
     }
+    if (ctx.User.FindFirst(Rollen.FaktorPflichtClaim) is Claim faktor
+        && ctx.Request.Path.StartsWithSegments("/api")
+        && !Rollen.ErlaubtBeiFaktorPflicht(ctx.Request.Path))
+    {
+        ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await ctx.Response.WriteAsJsonAsync(new
+        {
+            fehler = faktor.Value == ZweiterFaktor.Neu
+                ? "Du hast deinen letzten Wiederherstellungscode benutzt. Bitte richte den zweiten Faktor neu ein."
+                : "Für dein Konto ist ein zweiter Faktor vorgeschrieben. Bitte richte ihn zuerst ein.",
+            faktorEinrichten = faktor.Value
+        });
+        return;
+    }
     await next();
 });
 
 app.UseAuthorization();
+
+// P6a (230): teure Abrufe (PDF, CSV, Archiv, SchILD-Import, Rückweg) – höchstens 2 gleichzeitig je Konto, 4 insgesamt.
+// Nach UseAuthorization: Nur berechtigte Anfragen belegen einen Platz.
+app.Use(async (ctx, next) =>
+{
+    if (ctx.GetEndpoint()?.Metadata.GetMetadata<TeurerAbrufAttribute>() == null)
+    {
+        await next();
+        return;
+    }
+    var teuer = ctx.RequestServices.GetRequiredService<TeureAbrufe>();
+    string wer = ctx.User.Identity?.IsAuthenticated == true && Rollen.BenutzerId(ctx.User) is int kontoId
+        ? "konto|" + kontoId
+        : "adresse|" + (ctx.Connection.RemoteIpAddress is IPAddress a ? Zugriffsschutz.Normal(a).ToString() : "?");
+    using var platz = await teuer.BetretenAsync(wer, ctx.RequestAborted);
+    if (platz == null)
+    {
+        await Begrenzung.AbweisenAsync(ctx, teuer.WartenSekunden, "Teure Abrufe", ctx.RequestAborted);
+        return;
+    }
+    await next();
+});
 
 app.MapControllers();
 

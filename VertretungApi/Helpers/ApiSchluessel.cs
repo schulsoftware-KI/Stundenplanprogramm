@@ -13,6 +13,9 @@ namespace VertretungApi.Helpers;
 //
 //  Ohne Api:PushKey ist der Push offen. Das kommt nur in der Entwicklung vor: Im
 //  Echtbetrieb startet die API ohne Schlüssel gar nicht (Helpers/Betrieb.cs).
+//
+//  P6a (229): [DesktopSchnittstelle] an allen Endpunkten mit X-Api-Key – Adressbeschränkung und Schlüssel vor dem
+//  Lesen des Inhalts (siehe unten).
 // =====================================================================
 
 public static class ApiSchluessel
@@ -31,6 +34,38 @@ public static class ApiSchluessel
         var b = SHA256.HashData(Encoding.UTF8.GetBytes(erwartet));
         return CryptographicOperations.FixedTimeEquals(a, b);
     }
+}
+
+/// <summary>
+/// P6a (Entscheidung 229): Desktop-Schnittstelle (X-Api-Key). Läuft vor dem Lesen des Anfrageinhalts:
+/// mit Zugriff:DesktopNurSchule von anderen Adressen 403 „Adresse nicht freigegeben“ – vor der Prüfung des Schlüssels;
+/// danach der Schlüssel selbst (401). Die Aktionen prüfen den Schlüssel wie bisher zusätzlich. Markiert den Endpunkt
+/// außerdem für die Anfragebegrenzung (ohne die Grenze von 64 KB für Anfragen ohne Anmeldung).
+/// </summary>
+[AttributeUsage(AttributeTargets.Method | AttributeTargets.Class)]
+public sealed class DesktopSchnittstelleAttribute : Attribute, IResourceFilter, IOrderedFilter
+{
+    /// <summary>Nach [NurEntwicklung] (Order 0): Seeds im Echtbetrieb bleiben 404.</summary>
+    public int Order => 10;
+
+    public void OnResourceExecuting(ResourceExecutingContext context)
+    {
+        var http = context.HttpContext;
+        var zugriff = http.RequestServices.GetRequiredService<Zugriffsschutz>();
+        if (zugriff.DesktopNurSchule && !zugriff.IstSchule(http.Connection.RemoteIpAddress))
+        {
+            context.Result = new ObjectResult(new { fehler = Zugriffsschutz.AdresseText, adresseNichtFreigegeben = true })
+            {
+                StatusCode = StatusCodes.Status403Forbidden
+            };
+            return;
+        }
+        var cfg = http.RequestServices.GetRequiredService<IConfiguration>();
+        if (!ApiSchluessel.Gueltig(http.Request, cfg))
+            context.Result = new UnauthorizedObjectResult(ApiSchluessel.Fehlertext);
+    }
+
+    public void OnResourceExecuted(ResourceExecutedContext context) { }
 }
 
 /// <summary>

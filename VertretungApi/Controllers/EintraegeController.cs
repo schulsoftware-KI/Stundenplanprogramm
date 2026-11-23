@@ -20,6 +20,7 @@ namespace VertretungApi.Controllers;
 ///   GET    api/eintraege/klasse/{klasse}?von=&amp;bis=                 Einträge einer Klasse/Stufe (KL/SK zuständig, Admin)
 ///   GET    api/eintraege/unterricht?unr=&amp;lehrer=&amp;von=&amp;bis=        Einträge eines Unterrichts (Lehrkraft selbst, Admin)
 /// Zeitraum ohne von/bis: das laufende Schuljahr. Rechte siehe Services/KlassenbuchEintragService.cs.
+/// P6b (232): Leseprotokoll für alle lesenden Abrufe (Stunde, Verlauf, Schüler, Klasse/Stufe, Unterricht).
 /// </summary>
 [ApiController]
 [Route("api/eintraege")]
@@ -27,8 +28,13 @@ namespace VertretungApi.Controllers;
 public class EintraegeController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly Leseprotokoll _lese;
 
-    public EintraegeController(AppDbContext db) => _db = db;
+    public EintraegeController(AppDbContext db, Leseprotokoll lese)
+    {
+        _db = db;
+        _lese = lese;
+    }
 
     [HttpGet("stunde")]
     public async Task<IActionResult> Stunde(
@@ -36,7 +42,10 @@ public class EintraegeController : ControllerBase
     {
         var (u, tag, st, fehler) = await LadeAsync(datum, stunde, unr, lehrer);
         if (fehler != null) return fehler;
-        return Ok(await KlassenbuchEintragService.StundeAsync(_db, u!, tag!, st!));
+        var d = await KlassenbuchEintragService.StundeAsync(_db, u!, tag!, st!);
+        await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.EintraegeStunde,
+            LeseAnsichten.StundeGegenstand(tag!.Datum, st!), Gruppe: LeseAnsichten.GruppenDerStunde(st!)));
+        return Ok(d);
     }
 
     [HttpPost("stunde")]
@@ -83,7 +92,15 @@ public class EintraegeController : ControllerBase
         var u = await NutzerAsync();
         if (u == null) return Unauthorized();
         var liste = await KlassenbuchEintragService.HistorieAsync(_db, u, id);
-        return liste == null ? NotFound(new { fehler = "Diesen Eintrag gibt es nicht (mehr)." }) : Ok(liste);
+        if (liste == null) return NotFound(new { fehler = "Diesen Eintrag gibt es nicht (mehr)." });
+        // P6b (232): Schülereintrag → Einzelansicht des Schülers; Klasseneintrag → Lerngruppen der Stunde.
+        var e = await _db.KlassenbuchEintraege.AsNoTracking().Where(x => x.Id == id)
+            .Select(x => new { x.SchuelerId, x.Lerngruppen, x.Klassen }).FirstOrDefaultAsync();
+        await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.EintragVerlauf, $"Eintrag-Id {id}",
+            SchuelerId: e?.SchuelerId,
+            Gruppe: e == null || e.SchuelerId != null ? null
+                : LeseAnsichten.Liste(LeseAnsichten.Teile(string.IsNullOrWhiteSpace(e.Lerngruppen) ? e.Klassen : e.Lerngruppen))));
+        return Ok(liste);
     }
 
     [HttpGet("schueler/{id:int}")]
@@ -94,7 +111,10 @@ public class EintraegeController : ControllerBase
         if (u == null) return Unauthorized();
         var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
         var d = await KlassenbuchEintragService.SchuelerAsync(_db, u, id, v, b, unr, lehrer);
-        return d == null ? NotFound(new { fehler = "Schüler nicht gefunden." }) : Ok(d);
+        if (d == null) return NotFound(new { fehler = "Schüler nicht gefunden." });
+        await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.EintraegeSchueler,
+            LeseAnsichten.SchuelerGegenstand(id, null), SchuelerId: id));
+        return Ok(d);
     }
 
     [HttpGet("klasse/{klasse}")]
@@ -106,7 +126,10 @@ public class EintraegeController : ControllerBase
                              && KlassenbuchService.ZustaendigFuer(u.Zustaendig, new[] { klasse })))
             return StatusCode(403, new { fehler = "Die Einträge einer Klasse bzw. Stufe sehen die Klassenleitung bzw. Stufenkoordination und die Verwaltung." });
         var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
-        return Ok(await KlassenbuchEintragService.KlasseAsync(_db, u, klasse, v, b));
+        var d = await KlassenbuchEintragService.KlasseAsync(_db, u, klasse, v, b);
+        await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.EintraegeKlasse, LeseAnsichten.GruppenGegenstand(klasse),
+            Gruppe: LeseAnsichten.Liste(new[] { klasse })));
+        return Ok(d);
     }
 
     [HttpGet("unterricht")]
@@ -120,7 +143,12 @@ public class EintraegeController : ControllerBase
             return StatusCode(403, new { fehler = "Diese Liste sieht nur die Lehrkraft des Unterrichts." });
         var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
         var d = await KlassenbuchEintragService.UnterrichtAsync(_db, u, unr, lehrer, v, b);
-        return d == null ? NotFound(new { fehler = "Diesen Unterricht gibt es nicht." }) : Ok(d);
+        if (d == null) return NotFound(new { fehler = "Diesen Unterricht gibt es nicht." });
+        int un = unr;
+        string le = lehrer;
+        await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.EintraegeUnterricht,
+            LeseAnsichten.UnterrichtGegenstand(un, le), GruppeLaden: db => LeseAnsichten.GruppenDesUnterrichtsAsync(db, un, le)));
+        return Ok(d);
     }
 
     // -----------------------------------------------------------------

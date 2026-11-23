@@ -49,6 +49,14 @@
 //  (nur Admin). Name und Kurzname der Schule und die Dauer von „Angemeldet
 //  bleiben" kommen ohne Anmeldung aus /api/auth/optionen (Entscheidung 201):
 //  Name der App im Titel (appName()), Schulname auf der Anmeldeseite.
+//  Jahresablauf (P4a, Code in jahresablauf.js): Kontomenü „Jahresablauf" (nur Admin).
+//  Testdatum (P4a, Entscheidung 221): Setzt die Entwicklungs-API „Entwicklung:Heute", meldet sie es über
+//  /api/auth/optionen; die App rechnet dann mit diesem Tag als heute (heuteIso, startMontag) und zeigt ein Band.
+//  Zugangsschutz (P6a, Entscheidungen 225–231): Anmeldung in zwei Schritten bei einem Konto mit zweitem Faktor
+//  (Passwort → Code bzw. Wiederherstellungscode, #codeForm), Pflicht-Seite „Zweiten Faktor einrichten“ und Kontomenü
+//  „Zweiter Faktor…“ (zweiterfaktor.js), Reiter „Zugriffe“ (zugriffe.js). Nach der Anmeldung einmal ein Hinweis
+//  (#nachAnmeldung) zu erfolglosen Versuchen seit der letzten Anmeldung. 429 (Anfragebegrenzung) und 403 „Adresse
+//  nicht erlaubt“ (Admin außerhalb des Schulnetzes) zeigt die App mit dem Text des Servers.
 // =====================================================================
 
 const MODI = {
@@ -107,6 +115,7 @@ const state = {
   anmeldungNoetig: true, // laut Server (/api/auth/optionen)
   schule: { name: "", kurzname: "", app: "Stundenplan" }, // P3: laut Server (/api/auth/optionen)
   bleibenTage: 30,       // P3: „Angemeldet bleiben" in Tagen (0 = gibt es nicht)
+  testdatum: null,       // P4a: Testdatum der Entwicklungs-API („2027-01-18") bzw. null
   modus: "klasse",
   werte: leereWerte(),   // zuletzt gewählter Wert je Ansicht (schueler: Id)
   montag: "",            // ISO-Datum des Montags der angezeigten Woche
@@ -147,12 +156,14 @@ const isoAus = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDa
 const ausIso = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
 const plusTage = (iso, n) => { const d = ausIso(iso); d.setDate(d.getDate() + n); return isoAus(d); };
 const montagVon = (iso) => { const d = ausIso(iso); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return isoAus(d); };
-const heuteIso = () => isoAus(new Date());
 const istIso = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
+/** P4a (221): „heute" – das Testdatum der Entwicklungs-API bzw. das Datum dieses Geräts. */
+const jetztDatum = () => (state.testdatum && istIso(state.testdatum) ? ausIso(state.testdatum) : new Date());
+const heuteIso = () => isoAus(jetztDatum());
 
 /** Montag der Woche, die beim Öffnen gezeigt wird – am Wochenende schon die nächste. */
 function startMontag() {
-  const d = new Date();
+  const d = jetztDatum();
   if (d.getDay() === 6) d.setDate(d.getDate() + 2);
   else if (d.getDay() === 0) d.setDate(d.getDate() + 1);
   return montagVon(isoAus(d));
@@ -324,11 +335,13 @@ async function holen(url, { merken = true } = {}) {
   const timer = setTimeout(() => abbruch.abort(), 12000);
   try {
     const resp = await fetch(url, { cache: "no-store", signal: abbruch.signal, headers: authKopf() });
-    if (resp.status === 401 || resp.status === 403 || resp.status === 404) {
-      let text = "";
-      let pflicht = false;
-      try { const j = await resp.json(); text = (j && j.fehler) || ""; pflicht = !!(j && j.passwortAendern); } catch { /* kein JSON */ }
-      throw new HttpFehler(resp.status, text, pflicht);
+    // P6a: 429 (Anfragebegrenzung) nicht als „offline“ behandeln – sonst zeigte die App still alte Daten.
+    if (resp.status === 401 || resp.status === 403 || resp.status === 404 || resp.status === 429) {
+      let j = null;
+      try { j = await resp.json(); } catch { /* kein JSON */ }
+      const f = new HttpFehler(resp.status, (j && j.fehler) || "", !!(j && j.passwortAendern));
+      f.daten = j;
+      throw f;
     }
     if (!resp.ok) throw new Error("Server antwortet mit " + resp.status);
     const daten = await resp.json();
@@ -365,6 +378,19 @@ function zugriffsFehler(fehler) {
     zeigePflicht();
     return true;
   }
+  // P6a (226): Pflicht zum zweiten Faktor (bzw. keine Wiederherstellungscodes mehr) – nur die Einrichtung
+  const daten = fehler instanceof HttpFehler ? fehler.daten : null;
+  if (fehler instanceof HttpFehler && fehler.status === 403 && daten && daten.faktorEinrichten && state.anmeldung) {
+    state.anmeldung.faktorEinrichten = daten.faktorEinrichten;
+    anmeldungSpeichern();
+    zeigeFaktorPflicht();
+    return true;
+  }
+  // P6a (229): Admin-Konto außerhalb des Schulnetzes (Zugriff:AdminNurSchule)
+  if (fehler instanceof HttpFehler && fehler.status === 403 && daten && daten.adresseNichtErlaubt && state.anmeldung) {
+    abmelden(fehler.text || "Admin-Konten sind nur aus dem Schulnetz nutzbar.");
+    return true;
+  }
   if (!(fehler instanceof HttpFehler) || fehler.status !== 401) return false;
   if (state.anmeldung) {
     abmelden("Deine Anmeldung ist abgelaufen oder wurde beendet. Bitte melde dich neu an.");
@@ -377,6 +403,8 @@ function zugriffsFehler(fehler) {
 }
 
 function fehlerText(f) {
+  if (f instanceof HttpFehler && f.status === 429)   // P6a: Anfragebegrenzung
+    return f.text || "Zu viele Anfragen – bitte gleich erneut versuchen.";
   if (f instanceof HttpFehler && f.status === 403)
     return "Für diese Ansicht fehlt dir die Berechtigung.";
   if (f instanceof HttpFehler && f.status === 404) {
@@ -1046,6 +1074,7 @@ function zeigeAnmeldung(hinweis) {
   fehlzeitenLeeren();
   hausaufgabenLeeren();
   einstellungenLeeren();
+  zfLeeren();                          // P6a
   el("inhalt").hidden = true;
   el("verwaltung").hidden = true;
   el("klassenbuch").hidden = true;
@@ -1053,6 +1082,8 @@ function zeigeAnmeldung(hinweis) {
   el("hausaufgaben").hidden = true;
   el("einstellungen").hidden = true;
   el("pflicht").hidden = true;
+  el("faktorPflicht").hidden = true;   // P6a
+  codeBeenden();                       // P6a: zurück zum ersten Schritt
   el("anmeldung").hidden = false;
   el("aktualisieren").hidden = true;
   el("kontoKnopf").hidden = true;
@@ -1072,12 +1103,14 @@ function appStarten() {
   sitzungNr++;
   ladenAbbrechen();
   alleDialogeZu();
+  jahresablaufZu();     // P4a
   verwaltungLeeren();
   klassenbuchLeeren();
   fehlzeitenLeeren();
   hausaufgabenLeeren();
   el("anmeldung").hidden = true;
   el("pflicht").hidden = true;
+  el("faktorPflicht").hidden = true;   // P6a
   el("verwaltung").hidden = true;
   el("klassenbuch").hidden = true;
   el("fehlzeiten").hidden = true;
@@ -1139,22 +1172,167 @@ async function anmelden(e) {
       el("passwort").select();
       return;
     }
-    anmeldungUebernehmen(d, dauerhaft);
-    el("passwort").value = "";
-    passwortVerbergen();
-    history.replaceState(null, "", location.pathname + location.search);
-    if (d.mussPasswortAendern) {
-      pwMerk = passwort; // nur im Arbeitsspeicher, damit es nicht noch einmal eingetippt werden muss
-      zeigePflicht();
-    } else {
-      appStarten();
+    // P6a (225): Konto mit zweitem Faktor – zweiter Schritt mit dem Code
+    if (d && d.codeNoetig) {
+      codeSchrittZeigen(d, passwort, dauerhaft);
+      return;
     }
+    anmeldungFertig(d, dauerhaft, passwort);
   } catch {
     anmeldeFehler("Keine Verbindung zum Schulserver. Prüfe die Internetverbindung und versuche es erneut.");
   } finally {
     knopf.disabled = false;
     knopf.textContent = "Anmelden";
   }
+}
+
+/**
+ * Nach erfolgreicher Anmeldung (mit Passwort bzw. Code): übernehmen, Hinweis zeigen und weiter – Passwort festlegen,
+ * zweiten Faktor einrichten oder zum Plan. Das Passwort bleibt dafür nur im Arbeitsspeicher.
+ */
+function anmeldungFertig(d, dauerhaft, passwort) {
+  anmeldungUebernehmen(d, dauerhaft);
+  el("passwort").value = "";
+  passwortVerbergen();
+  history.replaceState(null, "", location.pathname + location.search);
+  nachAnmeldungZeigen(d);
+  if (d.mussPasswortAendern) {
+    pwMerk = passwort; // nur im Arbeitsspeicher, damit es nicht noch einmal eingetippt werden muss
+    zeigePflicht();
+  } else if (d.faktorEinrichten) {
+    zfPwMerk = passwort;   // P6a: für die Einrichtung nicht noch einmal eintippen
+    zeigeFaktorPflicht();
+  } else {
+    appStarten();
+  }
+}
+
+// ---------------------------------------------------------------------
+//  P6a (Entscheidung 225): zweiter Schritt der Anmeldung – Code der App bzw. Wiederherstellungscode
+// ---------------------------------------------------------------------
+
+let anmeldeCode = null;   // { vorgang, benutzername, dauerhaft, passwort, wh, laeuft, timer } – nur im Arbeitsspeicher
+
+function codeFehler(text) {
+  el("codeFehler").textContent = text || "";
+  el("codeFehler").hidden = !text;
+}
+
+function codeArtSetzen(wh) {
+  if (anmeldeCode) anmeldeCode.wh = wh;
+  const e = el("codeEingabe");
+  e.value = "";
+  el("codeLabel").textContent = wh ? "Wiederherstellungscode" : "Code aus der App";
+  e.setAttribute("inputmode", wh ? "text" : "numeric");
+  e.setAttribute("autocomplete", wh ? "off" : "one-time-code");
+  e.setAttribute("autocapitalize", wh ? "characters" : "none");
+  e.setAttribute("maxlength", wh ? "11" : "7");
+  e.setAttribute("placeholder", wh ? "ABCDE-FGHJK" : "123456");
+  el("codeWechsel").textContent = wh ? "Code aus der App verwenden" : "Wiederherstellungscode verwenden";
+  codeFehler("");
+}
+
+function codeSchrittZeigen(d, passwort, dauerhaft) {
+  codeBeenden();
+  anmeldeCode = { vorgang: d.vorgang, benutzername: d.benutzername, dauerhaft, passwort, wh: false, laeuft: false, timer: null };
+  const sek = Number(d.gueltigSekunden) > 0 ? Number(d.gueltigSekunden) : 300;
+  anmeldeCode.timer = setTimeout(() => {
+    codeBeenden();
+    zeigeAnmeldeForm("Die Zeit für den Code ist abgelaufen. Bitte melde dich noch einmal an.");
+  }, sek * 1000);
+  el("anmeldeForm").hidden = true;
+  el("codeForm").hidden = false;
+  el("codeName").value = d.benutzername || "";
+  el("codeHinweis").textContent = `Passwort richtig. Jetzt den 6-stelligen Code aus deiner Authenticator-App für „${d.benutzername}“.`;
+  codeArtSetzen(false);
+  el("passwort").value = "";
+  passwortVerbergen();
+  setTimeout(() => { try { el("codeEingabe").focus({ preventScroll: true }); } catch { /* egal */ } }, 0);
+}
+
+/** Zweiten Schritt verwerfen (Passwort und Vorgang aus dem Arbeitsspeicher). */
+function codeBeenden() {
+  if (anmeldeCode && anmeldeCode.timer) clearTimeout(anmeldeCode.timer);
+  anmeldeCode = null;
+  el("codeForm").hidden = true;
+  el("anmeldeForm").hidden = false;
+  el("codeEingabe").value = "";
+  codeFehler("");
+}
+
+/** Erster Schritt (Benutzername + Passwort) mit Hinweis. */
+function zeigeAnmeldeForm(hinweis) {
+  codeBeenden();
+  anmeldeHinweis(hinweis);
+  anmeldeFehler("");
+  setTimeout(() => { try { el("passwort").focus({ preventScroll: true }); } catch { /* egal */ } }, 0);
+}
+
+async function codeSenden(e) {
+  if (e) e.preventDefault();
+  const a = anmeldeCode;
+  if (!a || a.laeuft) return;
+  const code = el("codeEingabe").value.trim();
+  if (!code) {
+    codeFehler(a.wh ? "Bitte einen Wiederherstellungscode eingeben." : "Bitte den Code aus der App eingeben.");
+    el("codeEingabe").focus();
+    return;
+  }
+  const knopf = el("codeKnopf");
+  a.laeuft = true;
+  knopf.disabled = true;
+  knopf.textContent = "Prüfe …";
+  codeFehler("");
+  try {
+    const resp = await fetch("api/auth/login/code", {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ vorgang: a.vorgang, code }),
+    });
+    let d = null;
+    try { d = await resp.json(); } catch { /* kein JSON */ }
+    if (anmeldeCode !== a) return;   // inzwischen abgebrochen
+    if (resp.ok) {
+      codeBeenden();
+      anmeldungFertig(d, a.dauerhaft, a.passwort);
+      return;
+    }
+    if (resp.status === 400 && d && d.neuAnmelden) {
+      zeigeAnmeldeForm(d.fehler);
+      return;
+    }
+    codeFehler(resp.status === 401 || resp.status === 403 || resp.status === 429
+      ? (d && d.fehler) || "Der Code stimmt nicht."
+      : `Anmeldung zurzeit nicht möglich (Fehler ${resp.status}).`);
+    el("codeEingabe").select();
+  } catch {
+    if (anmeldeCode === a) codeFehler("Keine Verbindung zum Schulserver. Prüfe die Internetverbindung und versuche es erneut.");
+  } finally {
+    a.laeuft = false;
+    knopf.disabled = false;
+    knopf.textContent = "Bestätigen";
+  }
+}
+
+/** P6a (228): einmal nach der Anmeldung – erfolglose Versuche, Wiederherstellungscode, Admin ohne „Angemeldet bleiben“. */
+function nachAnmeldungZeigen(d) {
+  const teile = [];
+  const f = d && d.fehlversuche;
+  if (f && f.anzahl > 0)
+    teile.push(`Seit deiner letzten Anmeldung gab es ${f.anzahl} erfolglose${f.anzahl === 1 ? "n" : ""} ` +
+      `Anmeldeversuch${f.anzahl === 1 ? "" : "e"} für dein Konto` + (f.zuletzt ? ` (zuletzt am ${datumZeit(f.zuletzt)})` : "") +
+      ". Warst du das nicht, ändere dein Passwort.");
+  if (d && Number.isInteger(d.wiederherstellungRest)) {
+    const n = d.wiederherstellungRest;
+    teile.push(`Du hast dich mit einem Wiederherstellungscode angemeldet – ${n === 1 ? "noch 1 Code" : `noch ${n} Codes`} übrig.` +
+      (n > 0 && n <= 3 ? " Erzeuge bald neue: Kontomenü → „Zweiter Faktor…“." : ""));
+  }
+  if (d && d.bleibenAbgelehnt)
+    teile.push("Admin-Konten bleiben nicht dauerhaft angemeldet – die Anmeldung endet mit dem Schließen des Browsers " +
+      "bzw. nach der „Dauer einer Anmeldung“.");
+  el("nachAnmeldungText").textContent = teile.join(" ");
+  el("nachAnmeldung").hidden = teile.length === 0;
 }
 
 /** Antwort von Login bzw. Passwortänderung übernehmen und speichern. */
@@ -1171,6 +1349,8 @@ function anmeldungUebernehmen(d, dauerhaft) {
     passwortRegel: d.passwortRegel || null,
     dauerhaft: dauerhaft && d.angemeldetBleiben !== false,   // P3: der Server kann „Angemeldet bleiben“ abschalten
     gueltigBis: d.gueltigBis || null,
+    zweiterFaktor: d.zweiterFaktor || null,      // P6a: { aktiv, seit, restCodes, pflicht } (Personalkonten)
+    faktorEinrichten: d.faktorEinrichten || null, // P6a: „einrichten“ | „neu“ | null
   };
   anmeldungSpeichern();
 }
@@ -1179,6 +1359,9 @@ function anmeldungUebernehmen(d, dauerhaft) {
 function abmelden(hinweis) {
   const name = state.anmeldung ? state.anmeldung.benutzername : "";
   pwMerk = "";
+  zfPwMerk = "";                          // P6a
+  el("nachAnmeldung").hidden = true;      // P6a
+  el("nachAnmeldungText").textContent = "";
   nutzerdatenLoeschen();
   lokal.entfernen("anmeldung");
   sitzung.entfernen("anmeldung");
@@ -1201,7 +1384,8 @@ async function ladeOptionen() {
     const d = await resp.json();
     state.anmeldungNoetig = d.anmeldungNoetig !== false;
     optionenUebernehmen(d);
-    lokal.schreiben("optionen", { anmeldungNoetig: state.anmeldungNoetig, schule: state.schule, bleibenTage: state.bleibenTage });
+    lokal.schreiben("optionen", { anmeldungNoetig: state.anmeldungNoetig, schule: state.schule, bleibenTage: state.bleibenTage,
+      testdatum: state.testdatum });
     if (!el("anmeldung").hidden) el("ohneAnmeldung").hidden = state.anmeldungNoetig;
     schuleAnzeigen();
   } catch { /* offline: der zuletzt bekannte Wert gilt */ }
@@ -1215,6 +1399,19 @@ function optionenUebernehmen(d) {
   state.schule = { name, kurzname: kurz, app: (typeof s.app === "string" && s.app) || kurz || "Stundenplan" };
   const t = d ? Number(d.angemeldetBleibenTage ?? d.bleibenTage) : NaN;
   state.bleibenTage = Number.isFinite(t) && t >= 0 ? Math.floor(t) : 30;
+  // P4a (221): Testdatum der Entwicklung
+  state.testdatum = d && istIso(d.testdatum) ? d.testdatum : null;
+  testdatumAnzeigen();
+}
+
+/** P4a (221): Band „Testdatum …" unter dem Kopf (nur, wenn die Entwicklungs-API eines setzt). */
+function testdatumAnzeigen() {
+  const b = el("testdatumBand");
+  if (!b) return;
+  b.hidden = !state.testdatum;
+  b.textContent = state.testdatum
+    ? `Testdatum ${kurzDatum(state.testdatum)} – die App rechnet mit diesem Tag als heute (nur Entwicklung).`
+    : "";
 }
 
 /** Schulname auf der Anmeldeseite, „Angemeldet bleiben" (aus bei 0 Tagen), Titel vor der Anmeldung. */
@@ -1272,7 +1469,9 @@ function kontoOeffnen() {
   el("kontoInfo").textContent = info.join(" · ");
   el("meinPlan").hidden = !(istPersonal() && eigenesKuerzel());
   kontoMenueAnpassen();
+  zfMenueAnpassen();             // P6a
   einstellungenMenueAnpassen();
+  jahresablaufMenueAnpassen();   // P4a
   klassenbuchMenueAnpassen();
   fehlzeitenMenueAnpassen();
   hausaufgabenMenueAnpassen();
@@ -1382,6 +1581,7 @@ el("nurAenderungen").addEventListener("change", (e) => {
 
 el("aktualisieren").addEventListener("click", () => {
   if (einstellungenOffen()) { esAktualisieren(); return; }
+  if (jahresablaufOffen()) { jaLaden(); return; }   // P4a
   if (verwaltungOffen()) { verwaltungAktualisieren(); return; }
   if (klassenbuchOffen()) { kbAktualisieren(); return; }
   if (fehlzeitenOffen()) { fzAktualisieren(); return; }
@@ -1422,6 +1622,21 @@ el("zeigen").addEventListener("click", () => {
   feld.focus();
 });
 el("ohneAnmeldung").addEventListener("click", () => appStarten());
+// P6a (225): zweiter Schritt mit Code – bei 6 Ziffern gleich prüfen
+el("codeForm").addEventListener("submit", codeSenden);
+el("codeEingabe").addEventListener("input", () => {
+  if (!anmeldeCode || anmeldeCode.wh || anmeldeCode.laeuft) return;
+  if (/^\d{6}$/.test(el("codeEingabe").value.replace(/\s/g, ""))) codeSenden();
+});
+el("codeWechsel").addEventListener("click", () => {
+  codeArtSetzen(!(anmeldeCode && anmeldeCode.wh));
+  el("codeEingabe").focus();
+});
+el("codeZurueck").addEventListener("click", () => zeigeAnmeldeForm(""));
+el("nachAnmeldungOk").addEventListener("click", () => {
+  el("nachAnmeldung").hidden = true;
+  el("nachAnmeldungText").textContent = "";
+});
 
 // Kontomenü
 el("kontoKnopf").addEventListener("click", kontoOeffnen);
@@ -1436,6 +1651,10 @@ el("meinPlan").addEventListener("click", () => {
   kontoSchliessen();
   if (einstellungenOffen()) {
     if (!einstellungenSchliessen()) return;
+    el("inhalt").hidden = false;
+  }
+  if (jahresablaufOffen()) {   // P4a
+    jahresablaufZu();
     el("inhalt").hidden = false;
   }
   if (verwaltungOffen()) {
@@ -1544,6 +1763,9 @@ async function start() {
   hausaufgabenInit();
   eintraegeInit();
   einstellungenInit();
+  jahresablaufInit();   // P4a
+  zfInit();             // P6a
+  zugriffeInit();       // P6a
   hilfeInit();
   altlastenEntfernen();
   state.anmeldung = anmeldungLesen();
@@ -1557,6 +1779,7 @@ async function start() {
   if (!state.anmeldung) await Promise.race([optionen, new Promise((r) => setTimeout(r, 4000))]);
 
   if (state.anmeldung && state.anmeldung.mussPasswortAendern) zeigePflicht();
+  else if (state.anmeldung && state.anmeldung.faktorEinrichten) zeigeFaktorPflicht();   // P6a
   else if (state.anmeldung || !state.anmeldungNoetig) appStarten();
   else zeigeAnmeldung();
 }

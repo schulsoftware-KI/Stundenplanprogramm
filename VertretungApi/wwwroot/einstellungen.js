@@ -12,6 +12,20 @@
 //  Wird nach eintraege.js und VOR hilfe.js/app.js geladen und nutzt deren Hilfen (h, el, state, senden,
 //  aktionsFehler, toast, datumZeit, heuteIso, appName, …) erst zur Laufzeit. Einstieg einstellungenInit()
 //  aus start() in app.js. Alle Namen mit Präfix „es…“ bzw. „einstellungen…“.
+//
+//  P4a: Alle Bereiche schließen beim Öffnen die Einstellungen über einstellungenSchliessen() bzw. leeren sie
+//  mit einstellungenLeeren() – beide schließen jetzt auch den Jahresablauf (jahresablauf.js, keine Eingaben).
+//  Neue Fristen (Abwesenheitsgründe, Konten abgegangener Schüler) baut der Katalog der API von selbst; die
+//  Meldung „Gelöscht: …“ nennt alle Zahlen.
+//
+//  P6a (Entscheidungen 226, 229, 230): In der Karte „Anmeldung“ die Schalter der Pflicht zum zweiten Faktor (baut der
+//  Katalog der API). Dazu am Ende die Karte „Zugriff (Einstellungsdatei)“ nur zum Lesen: Schuladressen,
+//  Adressbeschränkung für Desktop und Admin, Anfragebegrenzung und wie die Adresse dieses Geräts eingeordnet wird.
+//
+//  P6b (Entscheidungen 233, 236): Schalter „Leseprotokoll“ und „Grund der Entschuldigung erfassen“ (Karte „Datenschutz“,
+//  baut der Katalog der API). Ist „Grund … erfassen“ gespeichert aus, steht darunter „Vorhandene Gründe entfernen …“:
+//  zählt zuerst (api/einstellungen/gruende), fragt mit der Zahl nach („Nochmal tippen“) und setzt dann alle Gründe auf
+//  „ohne Angabe“ (api/einstellungen/gruende-entfernen mit der Zahl; der Server zählt neu).
 // =====================================================================
 
 const es = {
@@ -44,6 +58,7 @@ function esUngespeichert() {
 
 /** true = geschlossen bzw. war nicht offen; false = abgebrochen (Ungespeichertes behalten). */
 function einstellungenSchliessen() {
+  jahresablaufZu();   // P4a: Jahresablauf hat nichts zu speichern
   if (!einstellungenOffen()) return true;
   if (esUngespeichert() && !window.confirm("Die Einstellungen wurden noch nicht gespeichert. Änderungen verwerfen?"))
     return false;
@@ -54,6 +69,7 @@ function einstellungenSchliessen() {
 
 /** Alles aus der Ansicht entfernen (Verlassen, Abmelden). */
 function einstellungenLeeren() {
+  jahresablaufZu();   // P4a
   es.ladeNr++;
   es.daten = null;
   es.felder.clear();
@@ -69,6 +85,7 @@ function einstellungenLeeren() {
 function einstellungenOeffnen() {
   if (!esDarf()) return;
   kontoSchliessen();
+  jahresablaufZu();   // P4a
   if (verwaltungOffen()) {
     if (!startpasswoerterVerwerfen()) return;
     verwaltungLeeren();
@@ -146,6 +163,35 @@ function esRender(d) {
   es.bestaetigen = null;
   esHinweiseZeigen(d.hinweise);
   el("esGruppen").replaceChildren(...d.gruppen.map((g) => esKarte(g, d.einstellungen.filter((e) => e.gruppe === g.id))));
+  if (d.zugriff) el("esGruppen").append(esZugriffKarte(d.zugriff));   // P6a
+}
+
+/** P6a (229, 230): Zugriff und Anfragebegrenzung aus der Einstellungsdatei – nur zum Lesen. */
+function esZugriffKarte(z) {
+  const anAus = (b) => (b ? "an" : "aus");
+  const zahl = (n, einheit) => (n === 0 ? "unbegrenzt" : `${n} ${einheit}`);
+  const b = z.begrenzung || {};
+  const schule = z.dieseAdresseSchule === true ? "Schulnetz" : z.dieseAdresseSchule === false ? "nicht im Schulnetz"
+    : "keine Schuladressen eingetragen";
+  const zeilen = [
+    ["Schuladressen", z.schuladressen && z.schuladressen.length ? z.schuladressen.join(", ") : "keine eingetragen"],
+    ["Desktop nur aus dem Schulnetz", anAus(z.desktopNurSchule) + (z.desktopNurSchule
+      ? " – Veröffentlichen und SchILD-Import gehen nur von den Schuladressen" : "")],
+    ["Admin nur aus dem Schulnetz", anAus(z.adminNurSchule) + (z.adminNurSchule
+      ? " – Anmeldung und jede Admin-Anfrage nur von den Schuladressen" : "")],
+    ["Dieses Gerät", `${z.dieseAdresse} – ${schule}`],
+    ["Reverse Proxy", anAus(z.proxyAktiv) + (z.echtbetrieb && !z.proxyAktiv && (z.desktopNurSchule || z.adminNurSchule)
+      ? " – Achtung: hinter einem Proxy kämen alle Anfragen von dessen Adresse" : "")],
+    ["Anfragebegrenzung", `je Konto ${zahl(b.jeKonto, "je Minute")} · ohne Anmeldung ${zahl(b.ohneAnmeldung, "je Minute und Adresse")}` +
+      ` (Schuladressen ausgenommen) · Desktop ${zahl(b.desktop, "je Minute")} · große Abrufe (PDF, CSV, Archiv) ` +
+      `${zahl(b.teuerJeKonto, "je Konto")} und ${zahl(b.teuerGesamt, "insgesamt")} gleichzeitig`],
+  ];
+  return h("section", { class: "karte es-karte es-zugriff", "aria-labelledby": "esT_zugriff" },
+    h("h2", { class: "karte-titel", id: "esT_zugriff" }, "Zugriff (Einstellungsdatei des Servers)"),
+    h("p", { class: "kleingedruckt ohne-einzug" }, "Nur zum Lesen: Diese Werte stehen in der Einstellungsdatei des Servers " +
+      "(appsettings.Production.json, Abschnitte „Zugriff“ und „Begrenzung“) und gelten nach einem Neustart. In der App " +
+      "lassen sie sich nicht ändern – ein falscher Wert könnte sonst genau den Admin aussperren, der ihn ändern müsste."),
+    h("dl", { class: "kd-daten es-zugriff-daten" }, zeilen.flatMap(([a, w]) => [h("dt", null, a), h("dd", null, w)])));
 }
 
 /** Eine Karte nach dem Speichern neu aufbauen (die anderen behalten ihre Eingaben). */
@@ -243,7 +289,71 @@ function esFeld(e, gruppe) {
   if (e.typ === "datum") eingabe.addEventListener("change", anpassen);
   if (am) { am.addEventListener("input", anpassen); am.addEventListener("change", anpassen); mit.addEventListener("input", anpassen); }
 
-  return h("div", { class: "es-feld" + (e.dsbFrage ? " mit-dsb" : "") }, zeile, fehler, info, dsb);
+  return h("div", { class: "es-feld" + (e.dsbFrage ? " mit-dsb" : "") }, zeile, fehler, info, dsb,
+    e.schluessel === ES_GRUND && e.wert === "false" ? esGruendeBlock() : null);
+}
+
+// ---------------------------------------------------------------------
+//  P6b (Entscheidung 236): vorhandene Gründe der Entschuldigungen entfernen
+// ---------------------------------------------------------------------
+
+const ES_GRUND = "Datenschutz.GrundErfassen";
+
+function esGruendeBlock() {
+  const knopf = h("button", { type: "button", class: "textknopf es-gruende-knopf" }, "Vorhandene Gründe entfernen …");
+  const status = h("p", { class: "es-info", role: "status", hidden: true });
+  const fehler = h("p", { class: "fehler klein", role: "alert", hidden: true });
+  const zustand = { anzahl: null, ab: 0, laeuft: false };
+  const zuruecksetzen = () => {
+    zustand.anzahl = null;
+    knopf.textContent = "Vorhandene Gründe entfernen …";
+    knopf.classList.remove("warnung");
+  };
+  knopf.addEventListener("click", async () => {
+    if (zustand.laeuft) return;
+    if (zustand.anzahl !== null && Date.now() < zustand.ab) return;   // Doppelklick-Schutz
+    zustand.laeuft = true;
+    knopf.disabled = true;
+    esText(fehler, "");
+    const nr = es.ladeNr;
+    try {
+      if (zustand.anzahl === null) {
+        const d = await senden("GET", "api/einstellungen/gruende");
+        if (nr !== es.ladeNr) return;
+        if (!d.gesamt) { esText(status, "Es sind keine Gründe gespeichert."); return; }
+        esText(status, `Gespeichert sind: ${d.text}. Sie werden auf „ohne Angabe“ gesetzt – die Bewertung „entschuldigt“ ` +
+          "bleibt. Das lässt sich nicht rückgängig machen.");
+        zustand.anzahl = d.gesamt;
+        zustand.ab = Date.now() + ES_BESTAETIGEN_SPERRE_MS;
+        knopf.textContent = `${d.gesamt} ${d.gesamt === 1 ? "Grund" : "Gründe"} entfernen? Nochmal tippen`;
+        knopf.classList.add("warnung");
+      } else {
+        const d = await senden("POST", "api/einstellungen/gruende-entfernen", { anzahl: zustand.anzahl });
+        if (nr !== es.ladeNr) return;
+        zuruecksetzen();
+        esText(status, d.meldung || "Erledigt.");
+        toast(d.meldung || "Gründe entfernt.");
+      }
+    } catch (f) {
+      if (nr !== es.ladeNr) return;
+      if (f instanceof HttpFehler && f.status === 409 && f.daten && f.daten.bestaetigen) {
+        zustand.anzahl = f.daten.anzahl;
+        zustand.ab = Date.now() + ES_BESTAETIGEN_SPERRE_MS;
+        knopf.textContent = `${f.daten.anzahl} ${f.daten.anzahl === 1 ? "Grund" : "Gründe"} entfernen? Nochmal tippen`;
+        esText(status, `Gespeichert sind: ${f.daten.text}.`);
+      } else {
+        zuruecksetzen();
+        const t = aktionsFehler(f);
+        if (t !== null) esText(fehler, t);
+      }
+    } finally {
+      if (nr === es.ladeNr) {
+        zustand.laeuft = false;
+        knopf.disabled = false;
+      }
+    }
+  });
+  return h("div", { class: "es-gruende" }, knopf, status, fehler);
 }
 
 // ---------------------------------------------------------------------
@@ -333,8 +443,14 @@ async function esSpeichern(gruppe) {
     esKarteErsetzen(d.stand, gruppe);
     const neu = es.karten.get(gruppe);
     const teile = [];
-    if (d.geloescht && (d.geloescht.protokolle || d.geloescht.eintraege))
-      teile.push(`Gelöscht: ${d.geloescht.protokolle} Protokolleinträge, ${d.geloescht.eintraege} Klassenbucheinträge.`);
+    const g = d.geloescht;
+    if (g && (g.protokolle || g.eintraege || g.gruende || g.konten)) {
+      // P4a: auch Abwesenheitsgründe und Konten abgegangener Schüler
+      const zahlen = [`${g.protokolle || 0} Protokolleinträge`, `${g.eintraege || 0} Klassenbucheinträge`];
+      if (g.gruende) zahlen.push(`Gründe in ${g.gruende} Vertretungen`);
+      if (g.konten) zahlen.push(`${g.konten} Konten abgegangener Schüler`);
+      teile.push(`Gelöscht: ${zahlen.join(", ")}.`);
+    }
     for (const t of d.hinweise || []) teile.push(t);
     if (neu && teile.length) esText(neu.hinweis, teile.join(" "));
     toast(d.geaendert === 1 ? "Gespeichert – gilt ab sofort." : `${d.geaendert} Änderungen gespeichert – gelten ab sofort.`);

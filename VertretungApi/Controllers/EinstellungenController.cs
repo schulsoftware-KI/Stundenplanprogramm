@@ -29,6 +29,16 @@ namespace VertretungApi.Controllers;
 //  (nur die Schlüssel). Ändert sich der Wert einer Einstellung mit Datenschutzwirkung, entfällt die bisherige
 //  Abstimmung („abgestimmt am / mit“), wenn sie nicht im selben Schritt neu eingetragen wird. Eine kürzere
 //  Frist zählt vorher die betroffenen Datensätze und braucht eine Bestätigung; danach wird gleich aufgeräumt.
+//  P4a (208, 209): auch für die Fristen der Abwesenheitsgründe und der Konten abgegangener Schüler; die Antwort
+//  „geloescht“ nennt alle Zahlen.
+//  P6a (226, 229, 230): Schalter der Pflicht zum zweiten Faktor (Karte „Anmeldung“); dazu „zugriff“ nur zum Lesen –
+//  Schuladressen, Adressbeschränkung und Anfragebegrenzung stehen in der Einstellungsdatei, nicht in der App. Die
+//  Antwort nennt auch, wie die Adresse dieser Anfrage eingeordnet wird (gekürzt), damit sich die Liste prüfen lässt.
+//  P6b (233, 236): Schalter „Leseprotokoll“ und „Grund der Entschuldigung erfassen“ (Karte „Datenschutz“), dazu
+//
+//    GET  api/einstellungen/gruende           – wie viele Gründe gespeichert sind (Fehlstunden, Entschuldigungen, Verlauf)
+//    POST api/einstellungen/gruende-entfernen – { anzahl } (Zahl aus der Rückfrage): alle auf „ohne Angabe“; nur bei
+//                                               ausgeschaltetem Schalter; 409, wenn sich die Zahl inzwischen geändert hat
 // =====================================================================
 
 [ApiController]
@@ -41,12 +51,21 @@ public class EinstellungenController : ControllerBase
     private readonly AppDbContext _db;
     private readonly Schuleinstellungen _einst;
     private readonly ILogger<EinstellungenController> _log;
+    private readonly IHostEnvironment _env;
+    private readonly Zugriffsschutz _zugriff;
+    private readonly BegrenzungsWerte _begrenzung;
+    private readonly IConfiguration _cfg;
 
-    public EinstellungenController(AppDbContext db, Schuleinstellungen einst, ILogger<EinstellungenController> log)
+    public EinstellungenController(AppDbContext db, Schuleinstellungen einst, ILogger<EinstellungenController> log,
+        IHostEnvironment env, Zugriffsschutz zugriff, BegrenzungsWerte begrenzung, IConfiguration cfg)
     {
         _db = db;
         _einst = einst;
         _log = log;
+        _env = env;
+        _zugriff = zugriff;
+        _begrenzung = begrenzung;
+        _cfg = cfg;
     }
 
     private string Ich => User.Identity?.Name ?? "";
@@ -69,6 +88,7 @@ public class EinstellungenController : ControllerBase
         var kal = await _db.Kalender.AsNoTracking().FirstOrDefaultAsync(k => k.Schuljahr == sj);
         var w = _einst.Bauen(zeilen, sj, kal?.Start);
 
+        bool produktiv = Betrieb.Produktiv(_env);
         var liste = new List<EinstellungDto>();
         foreach (var d in K.Alle)
         {
@@ -76,7 +96,7 @@ public class EinstellungenController : ControllerBase
             string? roh = _einst.Roh(zeilen, d.Schluessel);
             liste.Add(new EinstellungDto(
                 d.Schluessel, d.Gruppe, d.Titel, d.Typ.ToString().ToLowerInvariant(), roh, d.StandardText,
-                Wirksam(d, roh, w, kal), d.Hilfe, d.DsbFrage, z?.AbgestimmtAm, z?.AbgestimmtMit, z?.GeaendertAm, z?.GeaendertVon,
+                Wirksam(d, roh, w, kal, produktiv), d.Hilfe, d.DsbFrage, z?.AbgestimmtAm, z?.AbgestimmtMit, z?.GeaendertAm, z?.GeaendertVon,
                 d.Typ == EinstellungsTyp.Zahl ? d.Min : null, d.Typ == EinstellungsTyp.Zahl ? d.Max : null,
                 d.MaxLaenge > 0 ? d.MaxLaenge : null, d.Einheit, d.Loescht));
         }
@@ -95,14 +115,42 @@ public class EinstellungenController : ControllerBase
             K.Gruppen.Select(g => new EinstellungsGruppeDto(g.Id, g.Titel, g.Text)).ToList(),
             liste,
             kal == null ? null : new EinstellungKalenderDto(kal.Schuljahr, kal.Start, kal.Ende),
-            hinweise);
+            hinweise,
+            ZugriffInfo(produktiv));
+    }
+
+    /// <summary>P6a (229, 230): Zugriff und Begrenzung aus der Einstellungsdatei – nur zum Lesen.</summary>
+    private ZugriffInfoDto ZugriffInfo(bool produktiv)
+    {
+        var adresse = HttpContext.Connection.RemoteIpAddress;
+        var b = _begrenzung;
+        return new ZugriffInfoDto(
+            _zugriff.Schuladressen.Select(n => n.ToString()).ToList(),
+            _zugriff.DesktopNurSchule,
+            _zugriff.AdminNurSchule,
+            _cfg.GetValue("Proxy:Aktiv", false),
+            produktiv,
+            Zugriffsschutz.Kuerzen(adresse),
+            _zugriff.Schulnetz(adresse),
+            new BegrenzungInfoDto(b.JeKontoJeMinute, b.OhneAnmeldungJeMinute, b.DesktopJeMinute, b.TeuerJeKonto, b.TeuerGesamt,
+                b.OhneAnmeldungMaxKB));
     }
 
     /// <summary>Was gerade gilt – lesbar, mit Herkunft beim Standard.</summary>
-    private static string Wirksam(EinstellungsDef d, string? roh, SchulWerte w, KalenderDb? kal)
+    private static string Wirksam(EinstellungsDef d, string? roh, SchulWerte w, KalenderDb? kal, bool produktiv)
     {
         switch (d.Schluessel)
         {
+            // P6a (226): Pflicht zum zweiten Faktor
+            case K.FaktorPflichtAdmin:
+                return produktiv ? "an – im Echtbetrieb immer (unabhängig von diesem Schalter)"
+                     : K.AlsSchalter(roh, false) ? "an – Admin-Konten ohne zweiten Faktor können nur noch ihn einrichten"
+                     : "aus – Admin-Konten kommen auch ohne zweiten Faktor herein (nur Entwicklung)";
+            case K.FaktorPflichtLeitung:
+            case K.FaktorPflichtLehrkraefte:
+                return K.AlsSchalter(roh, false)
+                    ? "an – ohne zweiten Faktor ist nach dem Passwort nur dessen Einrichtung möglich"
+                    : "aus – freiwillig (Kontomenü → „Zweiter Faktor…“)";
             case K.SchuleName:
                 return w.SchuleName.Length > 0 ? $"„{w.SchuleName}“" : "kein Name";
             case K.SchuleKurzname:
@@ -124,10 +172,19 @@ public class EinstellungenController : ControllerBase
             }
             case K.BerichteNurAdmin:
                 return w.BerichteNurAdmin ? "an – nur die Verwaltung" : "aus – auch Lehrkräfte für ihre Klassen und Kurse";
+            // P6b (233, 236)
+            case K.Leseprotokoll:
+                return w.Leseprotokoll ? "an – Ansichten von Schülerdaten werden aufgezeichnet (Konten verwalten → „Zugriffe“ → „Ansichten“)"
+                                       : "aus – es wird nichts aufgezeichnet";
+            case K.GrundErfassen:
+                return w.GrundErfassen ? "an – beim Entschuldigen wird ein Grund gewählt"
+                                       : "aus – gespeichert wird „ohne Angabe“ (vorhandene Gründe bleiben bis zum Entfernen)";
             default:
                 int zahl = d.Schluessel switch
                 {
                     K.EintraegeLoeschen => w.EintraegeLoeschenNachTagen,
+                    K.GruendeLoeschen => w.GruendeLoeschenNachTagen,             // P4a
+                    K.AbgangKontenLoeschen => w.AbgangKontenLoeschenNachTagen,   // P4a
                     K.ProtokollTage => w.ProtokollTage,
                     K.SitzungStunden => w.SitzungStunden,
                     K.AngemeldetBleibenTage => w.AngemeldetBleibenTage,
@@ -284,12 +341,32 @@ public class EinstellungenController : ControllerBase
             int std = K.StandardZahl(p.Def.Schluessel);
             int alt = K.AlsZahl(p.AltWert, std), neu = K.AlsZahl(p.NeuWert, std);
             if (neu <= 0 || (alt > 0 && neu >= alt)) continue;
-            bool eintraege = p.Def.Schluessel == K.EintraegeLoeschen;
-            int n = eintraege ? await Aufraeumen.EintraegeZaehlenAsync(_db, neu) : await Aufraeumen.ProtokolleZaehlenAsync(_db, neu);
+            int n;
+            string text;
+            switch (p.Def.Schluessel)
+            {
+                case K.EintraegeLoeschen:
+                    n = await Aufraeumen.EintraegeZaehlenAsync(_db, neu);
+                    text = $"{n} Klassenbucheinträge (samt Verlauf), deren Datum länger als {neu} Tage zurückliegt";
+                    break;
+                case K.GruendeLoeschen:   // P4a (208)
+                    n = await Aufraeumen.GruendeZaehlenAsync(_db, neu);
+                    text = $"Grund bzw. Bemerkung in {n} Vertretungen, deren Tag länger als {neu} Tage zurückliegt " +
+                           "(die Vertretungen bleiben)";
+                    break;
+                case K.AbgangKontenLoeschen:   // P4a (208)
+                    n = await Aufraeumen.AbgangKontenZaehlenAsync(_db, neu);
+                    text = $"{n} gesperrte Konten abgegangener Schülerinnen und Schüler, deren Abgang länger als {neu} Tage " +
+                           "zurückliegt";
+                    break;
+                default:
+                    n = await Aufraeumen.ProtokolleZaehlenAsync(_db, neu);
+                    text = $"{n} Protokolleinträge (Konten, Anmeldungen, Ansichten, Downloads, Einstellungen, SchILD-Importe), " +
+                           $"die älter als {neu} Tage sind";
+                    break;
+            }
             if (n == 0) continue;
-            loeschen.Add(new EinstellungsLoeschungDto(p.Def.Schluessel, p.Def.Titel, n, eintraege
-                ? $"{n} Klassenbucheinträge (samt Verlauf), deren Datum länger als {neu} Tage zurückliegt"
-                : $"{n} Protokolleinträge (Konten, Downloads, Einstellungen), die älter als {neu} Tage sind"));
+            loeschen.Add(new EinstellungsLoeschungDto(p.Def.Schluessel, p.Def.Titel, n, text));
         }
         if (loeschen.Count > 0 && dto?.Bestaetigt != true)
             return Conflict(new
@@ -342,9 +419,53 @@ public class EinstellungenController : ControllerBase
         if (geplant.Any(x => x.Def.Loescht && x.WertGeaendert))
         {
             var erg = Aufraeumen.Ausfuehren(_db, await _einst.LesenAsync(_db), _log);
-            geloescht = new { protokolle = erg.Protokolle, eintraege = erg.Eintraege };
+            geloescht = new { protokolle = erg.Protokolle, eintraege = erg.Eintraege, gruende = erg.Gruende, konten = erg.Konten };
         }
 
         return Ok(new { geaendert = geplant.Count, geloescht, hinweise, stand = await ListeAsync() });
+    }
+
+    // -----------------------------------------------------------------
+    //  P6b (Entscheidung 236): vorhandene Gründe der Entschuldigungen entfernen
+    // -----------------------------------------------------------------
+
+    [HttpGet("gruende")]
+    public async Task<IActionResult> Gruende()
+    {
+        var z = await GrundSchalter.ZaehlenAsync(_db);
+        bool an = await _einst.GrundErfassenAsync(_db);
+        return Ok(new { z.Fehlstunden, z.Entschuldigungen, z.Verlauf, z.Gesamt, text = z.Text(), schalterAn = an });
+    }
+
+    [HttpPost("gruende-entfernen")]
+    public async Task<IActionResult> GruendeEntfernen([FromBody] GruendeEntfernenDto dto)
+    {
+        if (await _einst.GrundErfassenAsync(_db))
+            return Conflict(new { fehler = "Erst „Grund der Entschuldigung erfassen“ ausschalten und speichern – sonst kommen gleich " +
+                                           "neue Gründe dazu." });
+        var vorher = await GrundSchalter.ZaehlenAsync(_db);
+        if (vorher.Gesamt == 0) return Ok(new { geaendert = 0, text = "Es sind keine Gründe gespeichert.", meldung = "Es sind keine Gründe gespeichert." });
+        if (dto == null || dto.Anzahl != vorher.Gesamt)
+            return Conflict(new
+            {
+                bestaetigen = true,
+                anzahl = vorher.Gesamt,
+                text = vorher.Text(),
+                fehler = $"Inzwischen sind es andere Zahlen: {vorher.Text()}. Bitte noch einmal bestätigen."
+            });
+
+        var z = await GrundSchalter.EntfernenAsync(_db);
+        string ich = Ich;
+        _db.EinstellungsProtokolle.Add(new EinstellungsProtokoll
+        {
+            Zeit = DateTime.UtcNow,
+            Akteur = ich,
+            Schluessel = K.GrundErfassen,
+            Details = $"Vorhandene Gründe entfernt (jetzt „{FehlzeitenService.OhneAngabeText}“): {z.Text()}.",
+        });
+        await _db.SaveChangesAsync();
+        _log.LogInformation("Gründe der Entschuldigungen entfernt von {Akteur}: {Fehlstunden} Fehlstunden, {Entschuldigungen} " +
+                            "Entschuldigungen, {Verlauf} Verlaufseinträge.", ich, z.Fehlstunden, z.Entschuldigungen, z.Verlauf);
+        return Ok(new { geaendert = z.Gesamt, text = z.Text(), meldung = $"Entfernt: {z.Text()}." });
     }
 }

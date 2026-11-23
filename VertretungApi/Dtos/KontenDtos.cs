@@ -27,7 +27,11 @@ public record KontoDto(
     bool NameGeaendert = false,   // Schülerkonto: Benutzername „vorname.nachname“ passt nicht mehr zum Namen laut SchILD
     string? BenutzernameVorschlag = null, // nur in der Einzelansicht (Admin): freier Name nach dem neuen Namen
     bool WiederAktiv = false,     // Schülerkonto gesperrt, laut SchILD aber (wieder) aktiv – z. B. Wiedereintritt
-    string? GesperrtDurch = null);// Einzelansicht (Admin): wer zuletzt gesperrt hat, mit Grund und Datum
+    string? GesperrtDurch = null, // Einzelansicht (Admin): wer zuletzt gesperrt hat, mit Grund und Datum
+    // ---- P6a (Entscheidungen 225–227) ----
+    bool ZweiterFaktor = false,   // zweiter Faktor eingerichtet
+    DateTime? ZweiterFaktorSeit = null, // UTC
+    bool FaktorFehlt = false);    // Pflicht für die Rolle, aber noch kein zweiter Faktor
 
 public record KontenListeDto(IReadOnlyList<KontoDto> Konten, int Gesamt, bool Mehr);
 

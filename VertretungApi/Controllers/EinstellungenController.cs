@@ -377,9 +377,27 @@ public class EinstellungenController : ControllerBase
                 loeschen
             });
 
+        // ---- P5a (219): Wechsel des aktuellen Schuljahres – Zuständigkeiten ohne Schuljahr bleiben im bisherigen ----
+        string ich = Ich;
+        if (geplant.FirstOrDefault(x => x.Def.Schluessel == K.Schuljahr && x.WertGeaendert) is Geplant sjNeu)
+        {
+            string altJahr = sjNeu.AltWert ?? K.SchuljahrVon(heute);
+            string neuJahr = sjNeu.NeuWert ?? K.SchuljahrVon(heute);
+            if (altJahr != neuJahr)
+            {
+                await SchuljahrRechte.ZustaendigkeitenFestschreibenAsync(_db, altJahr, ich, "„Aktuelles Schuljahr“ geändert");
+                int bleiben = await _db.Benutzer.CountAsync(b => b.Zustaendig != null && b.Zustaendig != "" && b.ZustaendigSchuljahr == altJahr);
+                hinweise.Add($"Aktuelles Schuljahr jetzt {neuJahr}. " + (bleiben > 0
+                    ? $"{bleiben} Zuständigkeit(en) von Klassenleitung bzw. Stufenkoordination gelten weiter nur für {altJahr} – " +
+                      "für das neue Schuljahr unter Konten verwalten ändern. "
+                    : "") +
+                    "Für den Wechsel gibt es Kontomenü → „Jahresablauf“ → „Neues Schuljahr vorbereiten…“ (setzt auch die Daten des " +
+                    "Schuljahres zurück).");
+            }
+        }
+
         // ---- Schreiben + Protokoll ----
         var jetzt = DateTime.UtcNow;
-        string ich = Ich;
         foreach (var p in geplant)
         {
             var z = p.Zeile;

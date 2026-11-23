@@ -57,12 +57,31 @@ namespace VertretungApi.Services;
 //  Fachlehrkraft bleibt ohne Datum (Entscheidung C) – Entfernen löscht wie bisher.
 // =====================================================================
 
-/// <summary>Angemeldete Person (aus der Datenbank, nicht nur aus dem Token).</summary>
-public sealed record KbNutzer(string Name, BenutzerRolle Rolle, string? Kuerzel, IReadOnlyList<string> Zustaendig)
+/// <summary>
+/// Angemeldete Person (aus der Datenbank, nicht nur aus dem Token). P5a (219, 242): <see cref="ZustaendigSchuljahr"/> =
+/// Schuljahr, für das die Zuständigkeit gilt (null = ohne Einschränkung, z. B. die Admin-Sicht beim Zählen).
+/// </summary>
+public sealed record KbNutzer(string Name, BenutzerRolle Rolle, string? Kuerzel, IReadOnlyList<string> Zustaendig,
+    string? ZustaendigSchuljahr = null)
 {
     public bool IstAdmin => Rolle == BenutzerRolle.Admin;
     public bool IstKlassenleitungOderKoordination =>
         Rolle is BenutzerRolle.Klassenlehrer or BenutzerRolle.Stufenkoordination;
+
+    /// <summary>
+    /// P5a (219, 242): dieselbe Person für Daten der Schuljahre <paramref name="jahre"/> – die Zuständigkeit bleibt nur, wenn
+    /// alle diese Schuljahre ihr Schuljahr sind; sonst ohne Zuständigkeit (Lehrkraft der Stunde bzw. Admin bleiben).
+    /// </summary>
+    public KbNutzer FuerSchuljahre(IReadOnlyCollection<string> jahre)
+        => Zustaendig.Count == 0 || ZustaendigSchuljahr == null || jahre.Count == 0
+           || jahre.All(j => string.Equals(j, ZustaendigSchuljahr, StringComparison.Ordinal))
+            ? this
+            : this with { Zustaendig = Array.Empty<string>() };
+
+    /// <summary>P5a (219, 242): Zuständigkeit an einem Tag des Schuljahres <paramref name="sj"/> – nur im eigenen Schuljahr.</summary>
+    public IReadOnlyList<string> ZustaendigIm(string sj)
+        => ZustaendigSchuljahr == null || string.Equals(ZustaendigSchuljahr, sj, StringComparison.Ordinal)
+            ? Zustaendig : Array.Empty<string>();
 }
 
 /// <summary>Sek-I-Gruppe laut Grundplan (Slots mit dieser Schülergruppe und Klassenangabe).</summary>
@@ -94,6 +113,20 @@ public static class KlassenbuchService
 
     /// <summary>„Heute“ der API – seit P4a mit Testdatum (Entwicklung:Heute, Entscheidung 221).</summary>
     public static DateOnly Heute() => Helpers.Testdatum.Heute();
+
+    /// <summary>
+    /// Person aus dem Konto. P5a (219): Zuständigkeit ohne Schuljahr (ältere Konten) gilt für das aktuelle Schuljahr.
+    /// </summary>
+    public static KbNutzer NutzerAus(Benutzer b, string aktuellesSchuljahr)
+    {
+        var zustaendig = KontenService.Zustaendigkeiten(b.Zustaendig);
+        string? sj = zustaendig.Count == 0 ? null
+            : string.IsNullOrWhiteSpace(b.ZustaendigSchuljahr) ? aktuellesSchuljahr : b.ZustaendigSchuljahr.Trim();
+        return new KbNutzer(
+            b.Benutzername, b.Rolle,
+            string.IsNullOrWhiteSpace(b.LehrerKuerzel) ? null : b.LehrerKuerzel.Trim(),
+            zustaendig, sj);
+    }
 
     // =================================================================
     //  Rechte
@@ -216,8 +249,12 @@ public static class KlassenbuchService
             .OrderBy(t => t.Nachname, NamenCmp).ThenBy(t => t.Vorname, NamenCmp).ThenBy(t => t.Id)
             .ToList();
 
+        // P5a (215): abgeschlossenes Schuljahr – nur lesbar (auch für den Admin, der es als Einziger noch sieht).
+        bool abgeschlossen = await SchuljahrRechte.IstAbgeschlossenAsync(db, tag.Schuljahr);
         string? sperre = null;
-        if (tag.Datum > Heute())
+        if (abgeschlossen)
+            sperre = SchuljahrRechte.NurLesenText(tag.Schuljahr);
+        else if (tag.Datum > Heute())
             sperre = "Die Anwesenheit kann erst ab dem Tag der Stunde erfasst werden.";
         else if (offen.Count > 0)
             sperre = offen.Count == 1
@@ -228,6 +265,8 @@ public static class KlassenbuchService
 
         // Phase 3.3: Thema und Hausaufgabe (eigene Rechte: unterrichtende Lehrkraft, Admin).
         var inhalt = await UnterrichtInhaltService.InhaltAsync(db, u, tag, st, lektion);
+        // P5a (215): nur lesbar – auch der Schalter „Hausaufgaben für Schüler sichtbar“ (Nachtrag P5a-b).
+        if (abgeschlossen) inhalt = inhalt with { DarfSchreiben = false, Sperrgrund = sperre, DarfSichtbarkeit = false };
 
         // Doppelstunde: nur anbieten, wer auch die 2. Stunde schreiben darf.
         KbFolgeDto? folgeDto = null;
@@ -260,6 +299,8 @@ public static class KlassenbuchService
     public static async Task<KbErgebnis> SpeichernAsync(
         AppDbContext db, KbNutzer u, TagKontext tag, PlanStunde st, KbSpeichernDto dto, bool grundErfassen = true)
     {
+        // P5a (215): abgeschlossenes Schuljahr – nur lesbar (die 2. Stunde einer Doppelstunde liegt im selben Schuljahr).
+        if (await SchuljahrRechte.SchreibsperreAsync(db, tag.Schuljahr) is KbErgebnis gesperrt) return gesperrt;
         if (tag.Datum > Heute())
             return new KbErgebnis(400, "Das Stundenblatt kann erst ab dem Tag der Stunde ausgefüllt werden.");
 
@@ -793,6 +834,8 @@ public static class KlassenbuchService
     {
         var ver = await AktuelleVersionAsync(db);
         if (ver == null) return new List<KbGruppeKurzDto>();
+        // P5a (216): Gruppen eines abgeschlossenen Schuljahres sieht nur der Admin.
+        if (!u.IstAdmin && await SchuljahrRechte.IstAbgeschlossenAsync(db, ver.Schuljahr)) return new List<KbGruppeKurzDto>();
 
         var gruppen = (await GruppenSlotsAsync(db, ver.Id))
             .GroupBy(s => s.Schuelergruppe!.Trim(), Cmp)
@@ -845,10 +888,11 @@ public static class KlassenbuchService
 
         var pool = await PoolAsync(db, g, mitglieder);
         bool ausSchild = lg != null && Gueltigkeit.ListeAusSchild(lg, heute);
+        bool abgeschlossen = await SchuljahrRechte.IstAbgeschlossenAsync(db, g.Schuljahr);   // P5a (215): nur lesbar
         return new KbGruppeDto(
             g.Schluessel, g.Fach, g.Schuljahr, g.Klassen, g.Lehrer,
             lg != null, lg?.BearbeitetVon, lg?.BearbeitetAm,
-            IstGruppenLehrer(u, g) && !ausSchild,
+            IstGruppenLehrer(u, g) && !ausSchild && !abgeschlossen,
             pool.Select(p => new KbPoolDto(p.Id, p.Vorname, p.Nachname, p.Klasse ?? "", mitglieder.Contains(p.Id)))
                 .OrderBy(p => p.Klasse, Cmp).ThenBy(p => p.Nachname, NamenCmp).ThenBy(p => p.Vorname, NamenCmp)
                 .ThenBy(p => p.Id)
@@ -864,6 +908,7 @@ public static class KlassenbuchService
     /// </summary>
     public static async Task<KbErgebnis> GruppeSpeichernAsync(AppDbContext db, KbNutzer u, GrundplanGruppe g, List<int> ids)
     {
+        if (await SchuljahrRechte.SchreibsperreAsync(db, g.Schuljahr) is KbErgebnis gesperrt) return gesperrt;   // P5a (215)
         var heute = Heute();
         var lg = await GruppeLerngruppeAsync(db, g, mitMitgliedern: true);
         // Phase 5.2b-1 (Entscheidung 81): Kommt die Liste aus SchILD, ändert sie nur der Import.

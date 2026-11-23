@@ -233,7 +233,8 @@ public static class KlassenbuchEintragService
         var leser = await LeserAsync(db, u);
 
         bool zukunft = tag.Datum > KlassenbuchService.Heute();
-        bool darf = KlassenbuchService.DarfStunde(u, st) && !zukunft;
+        bool abgeschlossen = await SchuljahrRechte.IstAbgeschlossenAsync(db, tag.Schuljahr);   // P5a (215): nur lesbar
+        bool darf = KlassenbuchService.DarfStunde(u, st) && !zukunft && !abgeschlossen;
         var erlaubt = darf ? (await ErlaubteSchuelerAsync(db, u, tag, st)).Erlaubt : new HashSet<int>();
 
         var eintraege = alle
@@ -244,7 +245,9 @@ public static class KlassenbuchEintragService
             .ThenBy(e => e.VerfasstAm)
             .ToList();
 
-        return new KeStundeDto(darf, zukunft ? "Einträge lassen sich erst ab dem Tag der Stunde schreiben." : null,
+        return new KeStundeDto(darf,
+            abgeschlossen ? SchuljahrRechte.NurLesenText(tag.Schuljahr)
+            : zukunft ? "Einträge lassen sich erst ab dem Tag der Stunde schreiben." : null,
             erlaubt.OrderBy(i => i).ToList(), eintraege, meldung);
     }
 
@@ -252,6 +255,7 @@ public static class KlassenbuchEintragService
     public static async Task<KbErgebnis> AnlegenAsync(
         AppDbContext db, KbNutzer u, TagKontext tag, PlanStunde st, KeNeuStundeDto dto)
     {
+        if (await SchuljahrRechte.SchreibsperreAsync(db, tag.Schuljahr) is KbErgebnis gesperrt) return gesperrt;   // P5a (215)
         if (tag.Datum > KlassenbuchService.Heute())
             return new KbErgebnis(400, "Einträge lassen sich erst ab dem Tag der Stunde schreiben.");
         if (!Enum.TryParse(dto.Art?.Trim(), true, out KbEintragArt art) || !Enum.IsDefined(art))
@@ -323,6 +327,10 @@ public static class KlassenbuchEintragService
     {
         var info = await SchuelerInfoAsync(db, new[] { schuelerId });
         if (!info.TryGetValue(schuelerId, out var s)) return new KbErgebnis(404, "Schüler nicht gefunden.");
+        // P5a (215, 219): Schuljahr des Datums – abgeschlossen = nur lesbar; Zuständigkeit nur in ihrem Schuljahr.
+        var jahr = await SchuljahrRechte.JahrAmAsync(db, dto.Datum);
+        if (await SchuljahrRechte.SchreibsperreAsync(db, jahr) is KbErgebnis gesperrt) return gesperrt;
+        u = u.FuerSchuljahre(new[] { jahr });
         if (!FehlzeitenService.IstLeitungFuer(u, s.Klasse, s.Stufe))
             return new KbErgebnis(403, "Einträge ohne Stunde schreiben die Klassenleitung bzw. Stufenkoordination und die Verwaltung.");
         var heute = KlassenbuchService.Heute();
@@ -371,6 +379,7 @@ public static class KlassenbuchEintragService
     {
         var e = await db.KlassenbuchEintraege.FirstOrDefaultAsync(x => x.Id == id);
         if (e == null) return (new KbErgebnis(404, "Diesen Eintrag gibt es nicht (mehr)."), null);
+        if (await SchreibsperreAsync(db, e) is KbErgebnis gesperrt) return (gesperrt, null);   // P5a (215)
         if (!DarfAendern(u, e))
             return (new KbErgebnis(403, "Ändern dürfen nur die Verfasserin bzw. der Verfasser und die Verwaltung."), null);
         if (dto.Version != e.Version)
@@ -412,6 +421,7 @@ public static class KlassenbuchEintragService
     {
         var e = await db.KlassenbuchEintraege.FirstOrDefaultAsync(x => x.Id == id);
         if (e == null) return new KbErgebnis(404, "Diesen Eintrag gibt es nicht (mehr).");
+        if (await SchreibsperreAsync(db, e) is KbErgebnis gesperrt) return gesperrt;   // P5a (215)
         if (!DarfAendern(u, e))
             return new KbErgebnis(403, "Löschen dürfen nur die Verfasserin bzw. der Verfasser und die Verwaltung.");
 
@@ -436,6 +446,11 @@ public static class KlassenbuchEintragService
         await tx.CommitAsync();
         return new KbErgebnis(200, Meldung: "Eintrag gelöscht.");
     }
+
+    /// <summary>P5a (215): Eintrag eines abgeschlossenen Schuljahres – nur lesbar (ältere Einträge ohne Schuljahr: nach dem Datum).</summary>
+    private static async Task<KbErgebnis?> SchreibsperreAsync(AppDbContext db, KlassenbuchEintrag e)
+        => await SchuljahrRechte.SchreibsperreAsync(db,
+            string.IsNullOrWhiteSpace(e.Schuljahr) ? await SchuljahrRechte.JahrAmAsync(db, e.Datum) : e.Schuljahr);
 
     /// <summary>Änderungshistorie eines Eintrags (nur wer ihn lesen darf). null = nicht gefunden bzw. nicht erlaubt.</summary>
     public static async Task<List<KbHistorieDto>?> HistorieAsync(AppDbContext db, KbNutzer u, int id)

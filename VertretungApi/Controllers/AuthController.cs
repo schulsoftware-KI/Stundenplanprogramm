@@ -342,9 +342,11 @@ public class AuthController : ControllerBase
         };
 
         var ergebnis = new List<object>();
+        string aktuellesJahr = await _einst.AktuellesSchuljahrAsync(_db);   // P5a (219): Zuständigkeit im aktuellen Schuljahr
         foreach (var k in standard)
         {
             bool zurueck = false;
+            string? zustJahr = k.Zustaendig == null ? null : aktuellesJahr;
             var konto = await _db.Benutzer.FirstOrDefaultAsync(b => b.Benutzername == k.Name);
             if (konto == null)
             {
@@ -355,23 +357,26 @@ public class AuthController : ControllerBase
                     Rolle = k.Rolle,
                     LehrerKuerzel = k.Kuerzel,
                     Zustaendig = k.Zustaendig,
+                    ZustaendigSchuljahr = zustJahr,
                     AngelegtAm = DateTime.UtcNow
                 });
             }
-            else if (konto.Rolle != k.Rolle || konto.LehrerKuerzel != k.Kuerzel || konto.Zustaendig != k.Zustaendig)
+            else if (konto.Rolle != k.Rolle || konto.LehrerKuerzel != k.Kuerzel || konto.Zustaendig != k.Zustaendig
+                     || konto.ZustaendigSchuljahr != zustJahr)
             {
                 // Ältere Testkonten nachtragen bzw. – seit 5.2c-2 – nach einem Test der „Vorschläge aus SchILD“ wieder auf
-                // den Standard setzen (Rolle, Kürzel, Zuständigkeit; das Passwort bleibt).
+                // den Standard setzen (Rolle, Kürzel, Zuständigkeit samt Schuljahr seit P5a; das Passwort bleibt).
                 konto.Rolle = k.Rolle;
                 konto.LehrerKuerzel = k.Kuerzel;
                 konto.Zustaendig = k.Zustaendig;
+                konto.ZustaendigSchuljahr = zustJahr;
                 konto.SicherheitsStempel = NeuerStempel();
                 zurueck = true;
             }
             ergebnis.Add(new
             {
                 k.Name, rolle = k.Rolle.ToString(), angelegt = konto == null, zustaendig = k.Zustaendig,
-                zurueckgesetzt = zurueck
+                zustaendigSchuljahr = zustJahr, zurueckgesetzt = zurueck
             });
         }
 

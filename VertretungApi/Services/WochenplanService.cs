@@ -45,16 +45,23 @@ namespace VertretungApi.Services;
 /// Wer im Wochenplan Thema und Hausaufgabe der Stunden lesen darf (Phase 3.3).
 /// <see cref="Zustaendig"/> nur bei Klassenleitung/Stufenkoordination.
 /// </summary>
-public sealed record InhaltLeser(bool Admin, string? Kuerzel, IReadOnlyList<string> Zustaendig, bool Schueler)
+public sealed record InhaltLeser(bool Admin, string? Kuerzel, IReadOnlyList<string> Zustaendig, bool Schueler,
+    string? ZustaendigSchuljahr = null)
 {
     public static InhaltLeser FuerSchueler() => new(false, null, Array.Empty<string>(), true);
 
     public static InhaltLeser FuerPersonal(KbNutzer u) => new(
         u.IstAdmin, u.Kuerzel,
         u.IstKlassenleitungOderKoordination ? u.Zustaendig : Array.Empty<string>(),
-        false);
+        false,
+        u.ZustaendigSchuljahr);
 
     internal bool Aktiv => Admin || Schueler || Kuerzel != null || Zustaendig.Count > 0;
+
+    /// <summary>P5a (219, 242): Zuständigkeit an einem Tag des Schuljahres <paramref name="sj"/> – nur im eigenen Schuljahr.</summary>
+    internal IReadOnlyList<string> ZustaendigIm(string sj)
+        => ZustaendigSchuljahr == null || string.Equals(ZustaendigSchuljahr, sj, StringComparison.Ordinal)
+            ? Zustaendig : Array.Empty<string>();
 }
 
 /// <summary>
@@ -103,10 +110,14 @@ public static class WochenplanService
     /// Phase 5.2b-1 (Schülerplan): Lerngruppen-Schlüssel je Tag (Zugehörigkeiten mit von–bis).
     /// null = <paramref name="werte"/> gelten an allen Tagen.
     /// </param>
+    /// <param name="gesperrt">
+    /// P5a (216): abgeschlossene Schuljahre, die die anfragende Person nicht mehr sieht (nicht Admin) – deren Tage erscheinen
+    /// leer mit dem Hinweis „Schuljahr … abgeschlossen“. null = alle sichtbar.
+    /// </param>
     public static async Task<WochenplanDto> BerechneAsync(
         AppDbContext db, WochenZielArt art, string anzeige, IEnumerable<string> werte,
         DateOnly datum, int wochen, ISet<string>? fertigeGruppen = null, InhaltLeser? leser = null,
-        Func<DateOnly, IEnumerable<string>>? werteAm = null)
+        Func<DateOnly, IEnumerable<string>>? werteAm = null, IReadOnlySet<string>? gesperrt = null)
     {
         wochen = Math.Clamp(wochen, 1, 6);
         var von = Montag(datum);
@@ -221,6 +232,12 @@ public static class WochenplanService
                 if (iso <= 5) ergebnis.Add(LeererTag(d, wtag, "Frei", "kein Unterrichtstag"));
                 continue;
             }
+            // P5a (216): Tage eines abgeschlossenen Schuljahres sieht nur der Admin.
+            if (gesperrt != null && gesperrt.Contains(kal.Schuljahr))
+            {
+                ergebnis.Add(LeererTag(d, wtag, "SchuljahrAbgeschlossen", SchuljahrRechte.PlanHinweis(kal.Schuljahr)));
+                continue;
+            }
 
             var ganzFrei = kal.FreieZeiten
                 .Where(f => f.Von <= d && d <= f.Bis && string.IsNullOrWhiteSpace(f.Klassen))
@@ -275,7 +292,7 @@ public static class WochenplanService
                 bool darf = leser.Admin
                             || (leser.Kuerzel != null && (Gleich(leser.Kuerzel, x.Lehrer) || Gleich(leser.Kuerzel, x.GrundLehrer)
                                                           || Gleich(leser.Kuerzel, x.OriginalLehrer)))
-                            || (leser.Zustaendig.Count > 0 && KlassenbuchService.ZustaendigFuer(leser.Zustaendig, x.Klassen))
+                            || (leser.ZustaendigIm(sj).Count > 0 && KlassenbuchService.ZustaendigFuer(leser.ZustaendigIm(sj), x.Klassen))
                             || (leser.Kuerzel != null && x.Klassen.Overlaps(KlassenDerLehrkraft(versionId, verSlots)));
                 return darf ? i : null;
             }
@@ -946,8 +963,8 @@ public static class WochenplanService
             ? new List<string>()
             : s.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
-    /// <summary>Unterrichtstage laut Kalender (ISO 1–7); leer = Mo–Fr.</summary>
-    private static HashSet<int> RasterTage(KalenderDb kal)
+    /// <summary>Unterrichtstage laut Kalender (ISO 1–7); leer = Mo–Fr. Auch für den letzten Schultag (Jahresablauf).</summary>
+    internal static HashSet<int> RasterTage(KalenderDb kal)
     {
         var set = new HashSet<int>();
         foreach (var t in Liste(kal.RasterTage))

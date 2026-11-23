@@ -446,6 +446,13 @@ public sealed class SchildImportLauf
             Sperre("Umgebung", "Der Echtbetrieb nimmt keine Pseudodaten an (Entscheidung 83).");
         if (Gesperrt) return;
 
+        // ---- P5a (215): abgeschlossenes Schuljahr – Listen ändern sich nicht mehr ----
+        if (await SchuljahrRechte.DesktopSperreAsync(db, new[] { _sj }) is string jahrGesperrt)
+        {
+            Sperre("Schuljahr", jahrGesperrt);
+            return;
+        }
+
         // ---- 2. Kalender und Grundplan am „gilt ab“ ----
         var kal = await db.Kalender.AsNoTracking().FirstOrDefaultAsync(k => k.Schuljahr == _sj);
         if (kal == null)

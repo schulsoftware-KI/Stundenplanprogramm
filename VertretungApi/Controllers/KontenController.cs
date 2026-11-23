@@ -217,7 +217,7 @@ public class KontenController : ControllerBase
         if (!RolleLesen(dto.Rolle, out var rolle)) return BadRequest(new { fehler = "Unbekannte Rolle.", feld = "rolle" });
 
         var u = new Benutzer { AngelegtAm = DateTime.UtcNow, MussPasswortAendern = true };
-        var fehler = await ZuordnungSetzen(u, rolle, dto.LehrerKuerzel, dto.SchuelerId, dto.Zustaendig, null);
+        var fehler = await ZuordnungSetzen(u, rolle, dto.LehrerKuerzel, dto.SchuelerId, dto.Zustaendig, null, false);
         if (fehler != null) return fehler;
 
         var name = (dto.Benutzername ?? "").Trim();
@@ -276,7 +276,8 @@ public class KontenController : ControllerBase
         var vorher = KontenService.Zuordnung(u);
         var alterName = u.Benutzername;
 
-        var fehler = await ZuordnungSetzen(u, rolle, dto.LehrerKuerzel, dto.SchuelerId, dto.Zustaendig, u.Id);
+        var fehler = await ZuordnungSetzen(u, rolle, dto.LehrerKuerzel, dto.SchuelerId, dto.Zustaendig, u.Id,
+            dto.ZustaendigAktuellesSchuljahr);
         if (fehler != null) return fehler;
 
         var name = (dto.Benutzername ?? "").Trim();
@@ -495,9 +496,14 @@ public class KontenController : ControllerBase
                 .ToListAsync();
             // 5.2c-2 (192, 194): Namen laut Lehrkraefte.dat; Klassenleitung laut SchILD als Rolle (nur neue Konten).
             var namen = await LehrkraftNamenAsync(auswahl.Lehrer);
-            var leitung = dto.KlassenleitungEintragen
-                ? KlassenJeKuerzel((await KlassenleitungenAsync()).Klassen)
-                : new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            var leitung = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            string? leitungJahr = null;   // P5a (219): Schuljahr der Klassenleitung laut SchILD
+            if (dto.KlassenleitungEintragen)
+            {
+                var lautSchild = await KlassenleitungenAsync();
+                leitung = KlassenJeKuerzel(lautSchild.Klassen);
+                leitungJahr = lautSchild.Schuljahr;
+            }
 
             foreach (var k in auswahl.Lehrer)
             {
@@ -528,7 +534,7 @@ public class KontenController : ControllerBase
                 neueKonten.Add((new Benutzer
                 {
                     Benutzername = k, Rolle = leitet != null ? BenutzerRolle.Klassenlehrer : BenutzerRolle.Lehrer,
-                    LehrerKuerzel = k, Zustaendig = leitet,
+                    LehrerKuerzel = k, Zustaendig = leitet, ZustaendigSchuljahr = leitet != null ? leitungJahr : null,
                     AngelegtAm = DateTime.UtcNow, MussPasswortAendern = true
                 }, zeilen.Count - 1));
             }
@@ -633,7 +639,9 @@ public class KontenController : ControllerBase
         if (wahl.Count == 0) return BadRequest(new { fehler = "Kein Vorschlag gewählt." });
         if (wahl.Count > SammelMax) return BadRequest(new { fehler = $"Höchstens {SammelMax} Vorschläge auf einmal." });
 
-        var aktuell = (await VorschlaegeAsync()).Vorschlaege
+        var vorschlaege = await VorschlaegeAsync();
+        string? vorschlagJahr = vorschlaege.Schuljahr;   // P5a (219)
+        var aktuell = vorschlaege.Vorschlaege
             .Where(v => v.Schluessel.Length > 0).Select(v => v.Schluessel).ToHashSet(StringComparer.Ordinal);
         var reihe = wahl.Where(aktuell.Contains)
             .OrderBy(x => x.StartsWith("u|", StringComparison.Ordinal) ? 0 : 1).ThenBy(x => x, StringComparer.Ordinal).ToList();
@@ -657,7 +665,10 @@ public class KontenController : ControllerBase
                 konten[id] = eintrag;
             }
             var u = eintrag.Konto;
-            var zust = KontenService.Zustaendigkeiten(u.Zustaendig);
+            // P5a (219): Eine Zuständigkeit aus einem anderen Schuljahr zählt nicht mit – sie wird ersetzt, nicht ergänzt.
+            bool imJahr = vorschlagJahr == null || string.IsNullOrWhiteSpace(u.ZustaendigSchuljahr)
+                          || string.Equals(u.ZustaendigSchuljahr, vorschlagJahr, StringComparison.Ordinal);
+            var zust = imJahr ? KontenService.Zustaendigkeiten(u.Zustaendig) : new List<string>();
             bool hat = zust.Contains(klasse, StringComparer.OrdinalIgnoreCase);
             if (teile[0] == "u")
             {
@@ -669,15 +680,17 @@ public class KontenController : ControllerBase
                 else if (u.Rolle == BenutzerRolle.Klassenlehrer && !hat)
                     u.Zustaendig = KontenService.ZustaendigText(string.Join(",", zust.Append(klasse)));
                 else { nichtMehr++; continue; }
+                u.ZustaendigSchuljahr = vorschlagJahr ?? await _einst.AktuellesSchuljahrAsync(_db);
                 eintrag.Was.Add($"Klassenleitung {klasse} laut SchILD übernommen");
             }
-            else if (teile[0] == "e" && u.Rolle == BenutzerRolle.Klassenlehrer && hat)
+            else if (teile[0] == "e" && u.Rolle == BenutzerRolle.Klassenlehrer && hat && imJahr)
             {
                 var rest = zust.Where(z => !string.Equals(z, klasse, StringComparison.OrdinalIgnoreCase)).ToList();
                 if (rest.Count == 0)
                 {
                     u.Rolle = BenutzerRolle.Lehrer;
                     u.Zustaendig = null;
+                    u.ZustaendigSchuljahr = null;
                 }
                 else u.Zustaendig = string.Join(", ", rest);
                 eintrag.Was.Add($"Zuständigkeit {klasse} laut SchILD entfernt");
@@ -763,7 +776,9 @@ public class KontenController : ControllerBase
                 }
                 foreach (var u in treffer)
                 {
-                    var zust = KontenService.Zustaendigkeiten(u.Zustaendig);
+                    // P5a (219): Zuständigkeit aus einem anderen Schuljahr zählt nicht mit (wird ersetzt).
+                    bool imJahr = ImJahr(u, sj);
+                    var zust = imJahr ? KontenService.Zustaendigkeiten(u.Zustaendig) : new List<string>();
                     if (u.Rolle == BenutzerRolle.Lehrer)
                         liste.Add(new SchildVorschlagDto($"u|{u.Id}|{klasse}", "uebernehmen", u.Id, u.Benutzername, k, klasse,
                             $"{k} ist laut SchILD Klassenleitung {klasse} – Konto {u.Benutzername} ist bisher Lehrkraft.",
@@ -771,10 +786,12 @@ public class KontenController : ControllerBase
                     else if (u.Rolle == BenutzerRolle.Klassenlehrer)
                     {
                         if (zust.Contains(klasse, StringComparer.OrdinalIgnoreCase)) continue;   // passt schon
-                        string bisher = zust.Count == 0 ? "–" : string.Join(", ", zust);
+                        string bisher = !imJahr ? $"{KontenService.ZustaendigText(u.Zustaendig)} (Schuljahr {u.ZustaendigSchuljahr})"
+                            : zust.Count == 0 ? "–" : string.Join(", ", zust);
                         liste.Add(new SchildVorschlagDto($"u|{u.Id}|{klasse}", "uebernehmen", u.Id, u.Benutzername, k, klasse,
                             $"{k} ist laut SchILD Klassenleitung {klasse} – Konto {u.Benutzername} ist bisher zuständig für {bisher}.",
-                            $"zuständig {bisher} → {KontenService.ZustaendigText(string.Join(",", zust.Append(klasse)))}",
+                            $"zuständig {bisher} → {KontenService.ZustaendigText(string.Join(",", zust.Append(klasse)))}" +
+                            (imJahr ? "" : $" (Schuljahr {sj})"),
                             u.Gesperrt));
                     }
                     else
@@ -786,7 +803,8 @@ public class KontenController : ControllerBase
             }
 
         // 2. Konto ist zuständig für X, laut SchILD leitet X aber jemand anderes (entfernen – nur einzeln).
-        foreach (var u in personal.Where(b => b.Rolle == BenutzerRolle.Klassenlehrer).OrderBy(b => b.Benutzername, Cmp))
+        foreach (var u in personal.Where(b => b.Rolle == BenutzerRolle.Klassenlehrer && ImJahr(b, sj))   // P5a (219)
+                     .OrderBy(b => b.Benutzername, Cmp))
         {
             var zust = KontenService.Zustaendigkeiten(u.Zustaendig);
             foreach (var z in zust)
@@ -813,6 +831,11 @@ public class KontenController : ControllerBase
 
     private static DateOnly Heute() => KlassenbuchService.Heute();   // P4a: mit Testdatum
 
+    /// <summary>P5a (219): Gilt die Zuständigkeit des Kontos im Schuljahr <paramref name="sj"/>? (ohne Schuljahr: ja)</summary>
+    private static bool ImJahr(Benutzer b, string? sj)
+        => sj == null || string.IsNullOrWhiteSpace(b.ZustaendigSchuljahr)
+           || string.Equals(b.ZustaendigSchuljahr.Trim(), sj, StringComparison.Ordinal);
+
     private IActionResult NichtGefunden() => NotFound(new { fehler = "Konto nicht gefunden." });
 
     private IActionResult KeinRecht() => StatusCode(StatusCodes.Status403Forbidden,
@@ -821,13 +844,21 @@ public class KontenController : ControllerBase
     private static bool RolleLesen(string? text, out BenutzerRolle rolle)
         => Enum.TryParse(text, true, out rolle) && Enum.IsDefined(rolle) && !int.TryParse(text, out _);
 
+    /// <summary>
+    /// Zuständigkeit der angemeldeten Person für die Schülerkonten – P5a (219): nur, wenn sie für das aktuelle Schuljahr gilt
+    /// (nach dem Wechsel betreut die bisherige Klassenleitung die Konten erst wieder mit der neuen Zuständigkeit).
+    /// </summary>
     private async Task<List<string>> MeineZustaendigkeit()
     {
         var id = IchId;
         if (id == null) return new();
         var z = await _db.Benutzer.AsNoTracking().Where(b => b.Id == id.Value)
-            .Select(b => b.Zustaendig).FirstOrDefaultAsync();
-        return KontenService.Zustaendigkeiten(z);
+            .Select(b => new { b.Zustaendig, b.ZustaendigSchuljahr }).FirstOrDefaultAsync();
+        if (z == null) return new();
+        if (!string.IsNullOrWhiteSpace(z.ZustaendigSchuljahr)
+            && !string.Equals(z.ZustaendigSchuljahr.Trim(), await _einst.AktuellesSchuljahrAsync(_db), StringComparison.Ordinal))
+            return new();
+        return KontenService.Zustaendigkeiten(z.Zustaendig);
     }
 
     /// <summary>Schüler, deren Konten die angemeldete Person sieht (null = alle; Admin).</summary>
@@ -851,9 +882,11 @@ public class KontenController : ControllerBase
     /// <summary>
     /// Setzt Rolle und Zuordnung (Kürzel / Zuständigkeit / Schüler) und prüft sie.
     /// Liefert eine Fehlerantwort oder null. ausser = eigene Konto-Id beim Ändern.
+    /// P5a (219): Eine neue bzw. geänderte Zuständigkeit gilt für das aktuelle Schuljahr; eine unveränderte behält ihr Schuljahr –
+    /// außer mit <paramref name="fuerAktuellesJahr"/> (Haken „für das aktuelle Schuljahr übernehmen“ beim Ändern).
     /// </summary>
     private async Task<IActionResult?> ZuordnungSetzen(Benutzer u, BenutzerRolle rolle, string? kuerzel,
-        int? schuelerId, string? zustaendig, int? ausser)
+        int? schuelerId, string? zustaendig, int? ausser, bool fuerAktuellesJahr)
     {
         if (rolle == BenutzerRolle.Schueler)
         {
@@ -869,6 +902,7 @@ public class KontenController : ControllerBase
             u.SchuelerId = sid;
             u.LehrerKuerzel = null;
             u.Zustaendig = null;
+            u.ZustaendigSchuljahr = null;
         }
         else
         {
@@ -891,11 +925,15 @@ public class KontenController : ControllerBase
                             : "Bitte die Stufe angeben (z. B. Q1).",
                         feld = "zustaendig"
                     });
+                bool neu = !string.Equals(u.Zustaendig, z, StringComparison.Ordinal)
+                           || string.IsNullOrWhiteSpace(u.ZustaendigSchuljahr) || fuerAktuellesJahr;
                 u.Zustaendig = z;
+                if (neu) u.ZustaendigSchuljahr = await _einst.AktuellesSchuljahrAsync(_db);
             }
             else
             {
                 u.Zustaendig = null;
+                u.ZustaendigSchuljahr = null;
             }
         }
         u.Rolle = rolle;
@@ -924,6 +962,7 @@ public class KontenController : ControllerBase
         // P6a (226): Pflicht zum zweiten Faktor je Rolle (Schalter der Einstellungen; Admin im Echtbetrieb immer)
         var pflichten = await _einst.FaktorPflichtAsync(_db);
         bool produktiv = Betrieb.Produktiv(_env);
+        string aktuellesJahr = await _einst.AktuellesSchuljahrAsync(_db);   // P5a (219)
         return konten.Select(u =>
         {
             (string Name, string? Klasse, string Stufe)? s =
@@ -944,7 +983,10 @@ public class KontenController : ControllerBase
                 WiederAktiv: u.Gesperrt && importiert && !st!.Value.Abgang,
                 ZweiterFaktor: ZweiterFaktor.Aktiv(u),
                 ZweiterFaktorSeit: u.ZweiterFaktorSeit,
-                FaktorFehlt: !ZweiterFaktor.Aktiv(u) && ZweiterFaktor.Pflicht(u.Rolle, pflichten, produktiv));
+                FaktorFehlt: !ZweiterFaktor.Aktiv(u) && ZweiterFaktor.Pflicht(u.Rolle, pflichten, produktiv),
+                ZustaendigSchuljahr: string.IsNullOrWhiteSpace(u.Zustaendig) ? null : u.ZustaendigSchuljahr,
+                ZustaendigAnderesJahr: !string.IsNullOrWhiteSpace(u.Zustaendig) && !ImJahr(u, aktuellesJahr),
+                AktuellesSchuljahr: aktuellesJahr);
         }).ToList();
     }
 

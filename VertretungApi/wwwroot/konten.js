@@ -525,7 +525,8 @@ function kontoZeile(k) {
   if (schueler) unten.push(k.benutzername);
   else {
     unten.push(k.rollenText);
-    if (k.zustaendig) unten.push(k.zustaendig);
+    // P5a (219): Zuständigkeit eines anderen Schuljahres mit Jahr
+    if (k.zustaendig) unten.push(k.zustaendigAnderesJahr ? `${k.zustaendig} (${k.zustaendigSchuljahr})` : k.zustaendig);
   }
   unten.push(k.letzteAnmeldung ? `zuletzt ${kurzZeit(k.letzteAnmeldung)}` : "nie angemeldet");
   const marken = kontoMarken(k);
@@ -550,7 +551,11 @@ function kontoDetail(k) {
   const zeilen = [["Benutzername", k.benutzername], ["Rolle", k.rollenText]];
   if (k.lehrerKuerzel) zeilen.push(["Kürzel", k.lehrerKuerzel]);
   if (k.lehrkraft) zeilen.push(["Name laut SchILD", k.lehrkraft]);
-  if (k.zustaendig) zeilen.push(["Zuständig", k.zustaendig]);
+  if (k.zustaendig) {
+    zeilen.push(["Zuständig", k.zustaendig + (k.zustaendigSchuljahr ? ` – Schuljahr ${k.zustaendigSchuljahr}` : "") +
+      (k.zustaendigAnderesJahr ? ` (gilt nicht für das aktuelle Schuljahr ${k.aktuellesSchuljahr || ""} – nur für die ` +
+        "Daten jenes Jahres)" : "")]);   // P5a (219)
+  }
   if (k.rolle === "Schueler") zeilen.push(["Klasse/Stufe", k.verwaist ? "– (Schülerdatensatz fehlt)" : (k.klasse || "–")]);
   zeilen.push(["Angelegt", k.angelegtAm ? datumZeit(k.angelegtAm) : "unbekannt"]);
   zeilen.push(["Zuletzt angemeldet", k.letzteAnmeldung ? datumZeit(k.letzteAnmeldung) : "nie"]);
@@ -778,6 +783,14 @@ function formular(modus, k) {
 
   el("kfKuerzel").value = (k && k.lehrerKuerzel) || "";
   el("kfZustaendig").value = (k && k.zustaendig) || "";
+  // P5a (219): Schuljahr der Zuständigkeit; Haken nur, wenn sie für ein anderes Schuljahr gilt
+  el("kfZustNeu").checked = false;
+  el("kfZustJahr").textContent = !neu && k.zustaendig && k.zustaendigSchuljahr
+    ? `Gilt für das Schuljahr ${k.zustaendigSchuljahr}.` + (k.zustaendigAnderesJahr
+      ? ` Eine geänderte Zuständigkeit gilt für das aktuelle Schuljahr ${k.aktuellesSchuljahr || ""}.` : "")
+    : "Gilt für das aktuelle Schuljahr.";
+  el("kfZustNeuText").textContent = `unverändert für das aktuelle Schuljahr ${(k && k.aktuellesSchuljahr) || ""} übernehmen`;
+  el("kfZustNeuBox").hidden = neu || !k.zustaendigAnderesJahr;
   el("kfName").value = k ? k.benutzername : "";
   el("kfSchuelerSuche").value = "";
   el("kfTreffer").replaceChildren();
@@ -795,6 +808,7 @@ function felderAnpassen() {
   el("kfSchuelerFeld").hidden = r !== "Schueler";
   el("kfKuerzelFeld").hidden = r === "Schueler";
   el("kfZustaendigFeld").hidden = !(r === "Klassenlehrer" || r === "Stufenkoordination");
+  el("kfZustJahr").hidden = el("kfZustaendigFeld").hidden;   // P5a
   el("kfZustaendigLabel").textContent = r === "Stufenkoordination" ? "Zuständig für Stufe" : "Zuständig für Klasse";
   el("kfZustaendig").placeholder = r === "Stufenkoordination" ? "z. B. Q1 (mehrere mit Komma)" : "z. B. 05A (mehrere mit Komma)";
   el("kfKuerzel").previousElementSibling.textContent = r === "Admin" ? "Lehrerkürzel (falls Lehrkraft)" : "Lehrerkürzel";
@@ -866,6 +880,7 @@ async function formSpeichern(e) {
     schuelerId: rolle === "Schueler" ? verw.formSchueler.id : null,
     zustaendig: rolle === "Klassenlehrer" || rolle === "Stufenkoordination" ? el("kfZustaendig").value.trim() : null,
   };
+  if (!neu) body.zustaendigAktuellesSchuljahr = !el("kfZustNeuBox").hidden && el("kfZustNeu").checked;   // P5a (219)
   const knopf = el("kfSpeichern");
   knopf.disabled = true;
   fehlerIn("kfFehler", "");

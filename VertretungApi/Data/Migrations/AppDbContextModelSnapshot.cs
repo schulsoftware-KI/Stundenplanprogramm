@@ -171,6 +171,9 @@ namespace VertretungApi.Data.Migrations
                     b.Property<string>("Zustaendig")
                         .HasColumnType("text");
 
+                    b.Property<string>("ZustaendigSchuljahr")
+                        .HasColumnType("text");
+
                     b.Property<string>("ZweiterFaktorCodes")
                         .HasColumnType("text");
 
@@ -1053,6 +1056,102 @@ namespace VertretungApi.Data.Migrations
                     b.HasIndex("ExtIdSchild");
 
                     b.ToTable("Schueler");
+                });
+
+            modelBuilder.Entity("VertretungApi.Model.SchuljahrDb", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("AbgeschlossenAm")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("AbgeschlossenVon")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("ArchivAm")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("ArchivGroesse")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool?>("ArchivMitSchuelerEintraegen")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("ArchivPruefsumme")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ArchivVon")
+                        .HasColumnType("text");
+
+                    b.Property<DateOnly?>("AufbewahrenBis")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime?>("AufbewahrtAm")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("AufbewahrtOrt")
+                        .HasColumnType("text");
+
+                    b.Property<string>("AufbewahrtVon")
+                        .HasColumnType("text");
+
+                    b.Property<DateOnly?>("ErfassungAb")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime?>("GeloeschtAm")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("GeloeschtText")
+                        .HasColumnType("text");
+
+                    b.Property<string>("GeloeschtVon")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("GeoeffnetAm")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("GeoeffnetGrund")
+                        .HasColumnType("text");
+
+                    b.Property<string>("GeoeffnetVon")
+                        .HasColumnType("text");
+
+                    b.Property<DateOnly?>("HalbjahrAb")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Schuljahr")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateOnly?>("ThemaAb")
+                        .HasColumnType("date");
+
+                    b.Property<DateTime?>("VorbereitetAm")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("VorbereitetVon")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("ZustaendigkeitenAm")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ZustaendigkeitenVon")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Schuljahr")
+                        .IsUnique();
+
+                    b.ToTable("Schuljahre", (string)null);
                 });
 
             modelBuilder.Entity("VertretungApi.Model.UnterrichtEinstellung", b =>

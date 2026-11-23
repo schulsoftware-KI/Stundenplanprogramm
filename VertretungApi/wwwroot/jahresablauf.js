@@ -12,6 +12,10 @@
 //  Zahlen (übertragen / nicht übertragen, nicht erfasst, frühere Bereitstellungen) und Abholcode für den Desktop. Der
 //  Code steht nur in diesem Dialog (nicht gespeichert); beim Schließen bleibt er gültig, bis er abläuft oder abgeholt ist.
 //
+//  P5a (215–217, 239, 242): Karte „Schuljahreswechsel“ mit Aktionen (Knöpfe in den Punkten): „Schuljahr … abschließen…“,
+//  „Wieder öffnen…“ (mit Begründung) und „Schuljahr … vorbereiten…“. Jede Aktion fragt zuerst die API (409 mit Vorprüfung
+//  und Änderungen) und zeigt das im Dialog jaDialog; erst „bestätigen“ führt sie aus. Danach kommt die neue Übersicht mit.
+//
 //  Keine Eingaben – beim Verlassen geht nichts verloren. Wird nach einstellungen.js und VOR hilfe.js/app.js
 //  geladen und nutzt deren Hilfen (h, el, state, senden, aktionsFehler, kurzDatum, appName, …) erst zur Laufzeit.
 //  Einstieg jahresablaufInit() aus start() in app.js. Alle Namen mit Präfix „ja…“ bzw. „jahresablauf…“.
@@ -35,6 +39,16 @@ const jaRw = {
 
 const JA_RW_ART = { SchildRueckweg: "abgeholt", SchildRueckwegDatei: "Datei", SchildRueckwegProbe: "Probedatei" };
 
+// P5a: Dialog der Aktionen (abschließen, wieder öffnen, vorbereiten)
+const jaAk = {
+  aktion: null,           // { id, text, schuljahr, gefahr }
+  laeuft: false,
+};
+
+const JA_AKTION_URL = { abschliessen: "api/jahresablauf/abschliessen", oeffnen: "api/jahresablauf/oeffnen",
+  vorbereiten: "api/jahresablauf/neues-schuljahr" };
+const JA_BEGRUENDUNG_MIN = 10;
+
 const jaDarf = () => !!state.anmeldung && state.anmeldung.rolle === "Admin";
 const jahresablaufOffen = () => !el("jahresablauf").hidden;
 
@@ -47,6 +61,7 @@ function jahresablaufLeeren() {
   ja.ladeNr++;
   ja.daten = null;
   if (el("rwDialog").open) { jaRw.ohneNeuladen = true; jaRwZu(); }
+  if (el("jaDialog").open) jaAkZu();
   el("jaKopf").replaceChildren();
   el("jaKarten").replaceChildren();
   el("jaInfo").textContent = "";
@@ -149,11 +164,17 @@ function jaPunkt(p) {
   const ziele = (p.ziele || []).map((z) => h("button", {
     type: "button", class: "textknopf klein ja-ziel", onclick: () => jaZiel(z.id),
   }, `${z.text} →`));
+  // P5a: Aktionen mit Rückfrage
+  const aktionen = (p.aktionen || []).filter((a) => JA_AKTION_URL[a.id]).map((a) => h("button", {
+    type: "button", class: `hauptknopf klein ja-aktion${a.gefahr ? " gefahr" : ""}`, "aria-haspopup": "dialog",
+    onclick: () => jaAktion(a),
+  }, a.text));
   return h("li", { class: `ja-punkt a-${JA_AMPEL[p.ampel] ? p.ampel : "grau"}` },
     h("div", { class: "ja-punkt-kopf" }, h("strong", { class: "ja-punkt-titel" }, p.titel), jaAmpel(p.ampel)),
     h("p", { class: "ja-punkt-text" }, p.text),
     liste,
-    ziele.length ? h("div", { class: "ja-ziele" }, ziele) : null);
+    ziele.length ? h("div", { class: "ja-ziele" }, ziele) : null,
+    aktionen.length ? h("div", { class: "ja-aktionen" }, aktionen) : null);
 }
 
 /** Sprung in den passenden Bereich (dort gelten die üblichen Rechte). */
@@ -164,7 +185,116 @@ function jaZiel(id) {
   if (id === "downloads") { verw.reiter = "downloads"; zeigeVerwaltung(); return; }
   if (id === "gruppen") { el("kbGruppenKnopf").click(); return; }
   if (id === "rueckweg") { jaRwOeffnen(); return; }
+  if (id === "konten") { verw.reiter = "konten"; zeigeVerwaltung(); return; }   // P5a
   if (id === "einstellungen") einstellungenOeffnen();
+}
+
+// ---------------------------------------------------------------------
+//  P5a: Aktionen der Karte „Schuljahreswechsel“ (Rückfrage im Dialog)
+// ---------------------------------------------------------------------
+
+function jaAkListe(id, eintraege) {
+  const box = el(id);
+  box.replaceChildren(...(eintraege || []).map((t) => h("li", null, t)));
+  return (eintraege || []).length > 0;
+}
+
+/** Dialog füllen: r = Rückfrage der API ({ titel, warnungen, aenderungen, knopf }) bzw. für „Wieder öffnen“ selbst gebaut. */
+function jaAkZeigen(a, r, mitGrund) {
+  jaAk.aktion = a;
+  el("jaDTitel").textContent = r.titel;
+  el("jaDText").textContent = r.text || "";
+  el("jaDText").hidden = !r.text;
+  el("jaDWarnBox").hidden = !jaAkListe("jaDWarnungen", r.warnungen);
+  el("jaDAendBox").hidden = !jaAkListe("jaDAenderungen", r.aenderungen);
+  el("jaDGrundBox").hidden = !mitGrund;
+  el("jaDGrund").value = "";
+  jaAkZeichen();
+  el("jaDOk").textContent = r.knopf;
+  el("jaDOk").className = a.gefahr ? "hauptknopf gefahr" : "hauptknopf";
+  el("jaDOk").disabled = false;
+  fehlerIn("jaDFehler", "");
+  dialogAuf(el("jaDialog"));
+  setTimeout(() => { try { (mitGrund ? el("jaDGrund") : el("jaDAbbrechen")).focus(); } catch { /* egal */ } }, 0);
+}
+
+function jaAkZu() {
+  jaAk.aktion = null;
+  el("jaDGrund").value = "";
+  dialogZu(el("jaDialog"));
+}
+
+function jaAkZeichen() {
+  const n = el("jaDGrund").value.trim().length;
+  el("jaDZeichen").textContent = n < JA_BEGRUENDUNG_MIN
+    ? `Mindestens ${JA_BEGRUENDUNG_MIN} Zeichen (noch ${JA_BEGRUENDUNG_MIN - n}).` : `${n} von 300 Zeichen.`;
+}
+
+/** Knopf in einer Karte: zuerst die Rückfrage der API holen (bzw. bei „Wieder öffnen“ gleich die Begründung erfragen). */
+async function jaAktion(a) {
+  if (!jaDarf() || jaAk.laeuft) return;
+  if (a.id === "oeffnen") {
+    jaAkZeigen(a, {
+      titel: `Schuljahr ${a.schuljahr} wieder öffnen?`,
+      text: "Danach sehen Lehrkräfte, Klassenleitung, Stufenkoordination und Schüler das Schuljahr wieder und können " +
+        "nachtragen; Vertretungen, Grundpläne und SchILD-Importe gehen wieder. Die Begründung steht im Protokoll der " +
+        "Einstellungen. Nach den Nachträgen das Schuljahr erneut abschließen.",
+      knopf: `Schuljahr ${a.schuljahr} wieder öffnen`,
+    }, true);
+    return;
+  }
+  jaAk.laeuft = true;
+  el("jaInfo").textContent = "Prüfe …";
+  try {
+    const d = await senden("POST", JA_AKTION_URL[a.id], { schuljahr: a.schuljahr, bestaetigt: false });
+    // 200 ohne Rückfrage: es gab nichts zu tun
+    el("jaInfo").textContent = "";
+    if (d && d.meldung) toast(d.meldung);
+    if (d && d.stand) jaRender(d.stand);
+  } catch (f) {
+    el("jaInfo").textContent = "";
+    if (f instanceof HttpFehler && f.status === 409 && f.daten && f.daten.bestaetigen) {
+      jaAkZeigen(a, f.daten, false);
+    } else {
+      const t = aktionsFehler(f);
+      if (t !== null) el("jaInfo").textContent = t;
+    }
+  } finally {
+    jaAk.laeuft = false;
+  }
+}
+
+/** „bestätigen“ im Dialog. */
+async function jaAkAusfuehren() {
+  const a = jaAk.aktion;
+  if (!a || jaAk.laeuft) return;
+  let body;
+  if (a.id === "oeffnen") {
+    const grund = el("jaDGrund").value.trim();
+    if (grund.length < JA_BEGRUENDUNG_MIN) {
+      fehlerIn("jaDFehler", `Bitte begründen, warum das Schuljahr wieder geöffnet wird (mindestens ${JA_BEGRUENDUNG_MIN} Zeichen).`);
+      el("jaDGrund").focus();
+      return;
+    }
+    body = { schuljahr: a.schuljahr, begruendung: grund };
+  } else {
+    body = { schuljahr: a.schuljahr, bestaetigt: true };
+  }
+  jaAk.laeuft = true;
+  el("jaDOk").disabled = true;
+  fehlerIn("jaDFehler", "");
+  try {
+    const d = await senden("POST", JA_AKTION_URL[a.id], body);
+    jaAkZu();
+    if (d && d.meldung) toast(d.meldung);
+    if (d && d.stand && jahresablaufOffen()) jaRender(d.stand);
+  } catch (f) {
+    const t = aktionsFehler(f);
+    if (t !== null) fehlerIn("jaDFehler", t);
+  } finally {
+    jaAk.laeuft = false;
+    el("jaDOk").disabled = false;
+  }
 }
 
 // ---------------------------------------------------------------------
@@ -385,4 +515,10 @@ function jahresablaufInit() {
     if (neu && jahresablaufOffen()) jaLaden();   // Karten mit dem neuen Stand (Abruf, Datei)
   });
   hintergrundSchliesst(el("rwDialog"), () => { if (!jaRw.laeuft) jaRwZu(); });
+  // P5a
+  el("jaDOk").addEventListener("click", jaAkAusfuehren);
+  el("jaDAbbrechen").addEventListener("click", () => { if (!jaAk.laeuft) jaAkZu(); });
+  el("jaDGrund").addEventListener("input", jaAkZeichen);
+  el("jaDialog").addEventListener("close", () => { jaAk.aktion = null; });
+  hintergrundSchliesst(el("jaDialog"), () => { if (!jaAk.laeuft) jaAkZu(); });
 }

@@ -5,6 +5,7 @@ using VertretungApi.Data;
 using VertretungApi.Dtos;
 using VertretungApi.Helpers;
 using VertretungApi.Model;
+using VertretungApi.Services;
 
 namespace VertretungApi.Controllers;
 
@@ -44,6 +45,9 @@ public class GrundplanController : ControllerBase
         if (string.IsNullOrWhiteSpace(dto.Schuljahr)) return BadRequest("Schuljahr fehlt.");
         if (dto.GueltigAb == default) return BadRequest("GueltigAb fehlt.");
         if (dto.Slots == null || dto.Slots.Count == 0) return BadRequest("Keine Slots übermittelt.");
+        // P5a (242): Grundpläne (und Kalender) eines abgeschlossenen Schuljahres nimmt die API nicht mehr an.
+        if (await SchuljahrRechte.DesktopSperreAsync(_db, new[] { dto.Schuljahr }) is string gesperrt)
+            return Conflict(new { fehler = gesperrt });
 
         await using var tx = await _db.Database.BeginTransactionAsync();
 

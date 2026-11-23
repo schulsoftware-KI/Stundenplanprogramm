@@ -30,6 +30,9 @@ namespace VertretungApi.Controllers;
 /// P6b (232, 236): Leseprotokoll der Ansichten (Schüler, Klasse/Stufe, offene Fälle, Unterricht, „Nicht erfasst“ anderer
 /// Lehrkräfte – nicht „ich“ und nicht „Meine Fehlzeiten“); Schalter „Grund der Entschuldigung erfassen“ (aus → „ohne
 /// Angabe“) beim Entschuldigen und Bewerten, „rechte“ meldet ihn der App.
+/// P5a (215, 216, 219, 242): Zeiträume in einem abgeschlossenen Schuljahr sieht nur der Admin (auch „Meine Fehlzeiten“ der
+/// Schüler); Entschuldigen und Bewerten dort lehnt die API ab (nur lesbar). Eine Zuständigkeit gilt nur für Zeiträume ihres
+/// Schuljahres (Services/SchuljahrRechte.cs). „Nicht erfasst“ in einem früheren Schuljahr rechnet mit dessen „erfasst ab“.
 /// </summary>
 [ApiController]
 [Route("api/fehlzeiten")]
@@ -50,6 +53,8 @@ public class FehlzeitenController : ControllerBase
     // (vorher Klassenbuch:ErfassungAb/ThemaAb/HalbjahrAb in appsettings). Standard: erster Schultag laut Kalender,
     // Thema wie Anwesenheit, 2. Halbjahr ab 1. Februar (FehlzeitenService.HalbjahrAb).
     private Task<SchulWerte> WerteAsync() => _einst.LesenAsync(_db);
+
+    private IActionResult Fehler(KbErgebnis e) => StatusCode(e.Status, new { fehler = e.Fehler });
 
     /// <summary>Phase 4.1 (Entscheidung 40): wählbare Zeiträume – auch für Schülerkonten.</summary>
     [Authorize]
@@ -75,6 +80,25 @@ public class FehlzeitenController : ControllerBase
     {
         var u = await NutzerAsync();
         if (u == null) return Unauthorized();
+        var w = await WerteAsync();
+        // P5a (216, 242): Ohne Zeitraum beginnt die Liste beim noch offenen Vorjahr (Nachträge bis zum Abschluss), sonst bei
+        // „erfasst ab“; ein Zeitraum in einem früheren Schuljahr rechnet mit dessen „erfasst ab“. Abgeschlossene Schuljahre
+        // nur für den Admin. Die Zuständigkeit prüft NichtErfasstAsync je Tag (nur im eigenen Schuljahr).
+        var heute = KlassenbuchService.Heute();
+        var (erfassungAb, themaAb) = (w.ErfassungAb, w.ThemaAb);
+        if (von == null && bis == null)
+        {
+            if (await SchuljahrRechte.OffenesVorjahrAsync(_db, w) is { } vorjahr)
+                (erfassungAb, themaAb) = (vorjahr.ErfassungAb, vorjahr.ThemaAb);
+        }
+        else
+        {
+            (erfassungAb, themaAb) = await SchuljahrRechte.ErfassungAbAsync(_db, w, von ?? bis);
+        }
+        var pruefVon = von ?? (erfassungAb < themaAb ? erfassungAb : themaAb);
+        var pruefBis = bis ?? heute.AddDays(-1);
+        var (_, sperre) = await SchuljahrRechte.LesenZeitraumAsync(_db, u, pruefVon, pruefBis < pruefVon ? pruefVon : pruefBis);
+        if (sperre != null) return Fehler(sperre);
         string a = (ansicht ?? "ich").Trim().ToLowerInvariant();
         bool erlaubt = a switch
         {
@@ -86,8 +110,7 @@ public class FehlzeitenController : ControllerBase
         if (!erlaubt) return StatusCode(403, new { fehler = "Diese Übersicht steht dir nicht zur Verfügung." });
         string was = (art ?? "alle").Trim().ToLowerInvariant();
         if (was is not ("alle" or "anwesenheit" or "thema")) was = "alle";
-        var w = await WerteAsync();
-        var d = await FehlzeitenService.NichtErfasstAsync(_db, u, a, lehrer, klasse, w.ErfassungAb, w.ThemaAb, was, von, bis);
+        var d = await FehlzeitenService.NichtErfasstAsync(_db, u, a, lehrer, klasse, erfassungAb, themaAb, was, von, bis);
         // P6b (232): Daten über andere Lehrkräfte – „ich“ sind eigene Daten.
         if (a != "ich")
         {
@@ -122,6 +145,9 @@ public class FehlzeitenController : ControllerBase
             return StatusCode(403, new { fehler = "Diese Liste sieht nur die Lehrkraft des Unterrichts." });
 
         var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
+        var (uj, sperre) = await SchuljahrRechte.LesenZeitraumAsync(_db, u, v, b);   // P5a (216)
+        if (sperre != null) return Fehler(sperre);
+        u = uj;
         var liste = await FehlzeitenService.UnterrichtAsync(_db, u, unr, lehrer, v, b);
         if (liste == null) return NotFound(new { fehler = "Diesen Unterricht gibt es nicht." });
         int un = unr;
@@ -137,11 +163,16 @@ public class FehlzeitenController : ControllerBase
     {
         var u = await NutzerAsync();
         if (u == null) return Unauthorized();
+        var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
+        var (uj, sperre) = await SchuljahrRechte.LesenZeitraumAsync(_db, u, v, b);   // P5a (216, 219)
+        if (sperre != null) return Fehler(sperre);
+        var vorher = u;
+        u = uj;
         if (!u.IstAdmin && !(u.IstKlassenleitungOderKoordination
                              && KlassenbuchService.ZustaendigFuer(u.Zustaendig, new[] { klasse })))
-            return StatusCode(403, new { fehler = "Diese Liste sehen nur die Klassenleitung bzw. Stufenkoordination und die Verwaltung." });
+            return StatusCode(403, new { fehler = SchuljahrRechte.AnderesJahrText(vorher, new[] { klasse })
+                ?? "Diese Liste sehen nur die Klassenleitung bzw. Stufenkoordination und die Verwaltung." });
 
-        var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
         var d = await FehlzeitenService.KlasseAsync(_db, klasse, v, b);
         await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.FehlzeitenKlasse, LeseAnsichten.GruppenGegenstand(klasse),
             Gruppe: LeseAnsichten.Liste(new[] { klasse })));
@@ -155,9 +186,16 @@ public class FehlzeitenController : ControllerBase
     {
         var u = await NutzerAsync();
         if (u == null) return Unauthorized();
+        // P5a (216, 219): Schuljahr von heute (offene Fälle gelten für das laufende Schuljahr laut Kalender)
+        var (uj, sperre) = await SchuljahrRechte.LesenAsync(_db, u,
+            await SchuljahrRechte.JahrAmAsync(_db, KlassenbuchService.Heute()));
+        if (sperre != null) return Fehler(sperre);
+        var vorher = u;
+        u = uj;
         if (!u.IstAdmin && !(u.IstKlassenleitungOderKoordination
                              && KlassenbuchService.ZustaendigFuer(u.Zustaendig, new[] { klasse })))
-            return StatusCode(403, new { fehler = "Offene Fälle sehen nur die Klassenleitung bzw. Stufenkoordination und die Verwaltung." });
+            return StatusCode(403, new { fehler = SchuljahrRechte.AnderesJahrText(vorher, new[] { klasse })
+                ?? "Offene Fälle sehen nur die Klassenleitung bzw. Stufenkoordination und die Verwaltung." });
         var d = await FehlzeitenService.OffeneFaelleAsync(_db, klasse);
         await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.OffeneFaelle, LeseAnsichten.GruppenGegenstand(klasse),
             Gruppe: LeseAnsichten.Liste(new[] { klasse })));
@@ -172,6 +210,9 @@ public class FehlzeitenController : ControllerBase
         var u = await NutzerAsync();
         if (u == null) return Unauthorized();
         var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
+        var (uj, sperre) = await SchuljahrRechte.LesenZeitraumAsync(_db, u, v, b);   // P5a (216, 219)
+        if (sperre != null) return Fehler(sperre);
+        u = uj;
         var d = await FehlzeitenService.SchuelerAsync(_db, u, id, v, b, unr, lehrer);
         if (d == null) return NotFound(new { fehler = "Schüler nicht gefunden." });
         await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.FehlzeitenSchueler,
@@ -191,6 +232,10 @@ public class FehlzeitenController : ControllerBase
             return NotFound(new { fehler = "Diesem Konto ist kein Schüler zugeordnet." });
 
         var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
+        // P5a (216): Zeiträume eines abgeschlossenen Schuljahres sieht nur die Verwaltung – auch nicht der Schüler selbst.
+        var (_, sperre) = await SchuljahrRechte.LesenZeitraumAsync(_db,
+            new KbNutzer(konto.Benutzername, konto.Rolle, null, Array.Empty<string>()), v, b);
+        if (sperre != null) return Fehler(sperre);
         var d = await FehlzeitenService.SchuelerAsync(_db, null, sid, v, b, null, null);
         return d == null ? NotFound(new { fehler = "Diesem Konto ist kein Schüler zugeordnet." }) : Ok(d);
     }
@@ -229,16 +274,13 @@ public class FehlzeitenController : ControllerBase
             ? Ok(new { meldung = e.Meldung })
             : StatusCode(e.Status, new { fehler = e.Fehler });
 
-    /// <summary>Angemeldete Person samt Kürzel und Zuständigkeit – aus der Datenbank.</summary>
+    /// <summary>Angemeldete Person samt Kürzel und Zuständigkeit (mit Schuljahr, P5a) – aus der Datenbank.</summary>
     private async Task<KbNutzer?> NutzerAsync()
     {
         var id = Rollen.BenutzerId(User);
         if (id == null) return null;
         var b = await _db.Benutzer.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id.Value);
         if (b == null) return null;
-        return new KbNutzer(
-            b.Benutzername, b.Rolle,
-            string.IsNullOrWhiteSpace(b.LehrerKuerzel) ? null : b.LehrerKuerzel.Trim(),
-            KontenService.Zustaendigkeiten(b.Zustaendig));
+        return KlassenbuchService.NutzerAus(b, await _einst.AktuellesSchuljahrAsync(_db));
     }
 }

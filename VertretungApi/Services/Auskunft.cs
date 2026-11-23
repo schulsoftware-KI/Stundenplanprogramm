@@ -573,7 +573,9 @@ public static class Auskunft
         var extra = new List<(string, string)>();
         if (kuerzel != null) extra.Add(("Kürzel", kuerzel));
         if (lehrkraft != null) extra.Add(("Name laut SchILD", lehrkraft));
-        if (!string.IsNullOrWhiteSpace(k.Zustaendig)) extra.Add(("Zuständig für", string.Join(", ", KontenService.Zustaendigkeiten(k.Zustaendig))));
+        if (!string.IsNullOrWhiteSpace(k.Zustaendig))
+            extra.Add(("Zuständig für", string.Join(", ", KontenService.Zustaendigkeiten(k.Zustaendig)) +
+                (string.IsNullOrWhiteSpace(k.ZustaendigSchuljahr) ? "" : $" (Schuljahr {k.ZustaendigSchuljahr})")));   // P5a
         if (extra.Count > 0) a2.Paare(extra.ToArray());
         await KontoAbschnitteAsync(db, a2, k);
 

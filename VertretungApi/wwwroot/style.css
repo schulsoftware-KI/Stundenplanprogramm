@@ -1814,6 +1814,16 @@ main.klassenbuch > .hi-karte, main.fehlzeiten > .hi-karte { margin-top: 2px; }
 .ja-weitere { list-style: none; margin-left: -14px; font-style: italic; }
 .ja-ziele { display: flex; flex-wrap: wrap; gap: 0 12px; margin-top: 2px; }
 .ja-ziel { min-height: 44px; }
+/* P5a: Aktionen der Karte „Schuljahreswechsel“ und ihr Dialog */
+.ja-aktionen { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-top: 8px; }
+.ja-aktion { min-height: 44px; max-width: 100%; overflow-wrap: anywhere; text-align: left; }
+.ja-dialog .feld { margin: 10px 0 4px 0; }
+.ja-dialog #jaDWarnBox .feld { margin-top: 0; }
+.ja-dliste { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 0.9rem; line-height: 1.4; }
+.ja-dliste li { overflow-wrap: anywhere; }
+.ja-dialog textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 4.5rem; }
+#jaDZeichen { margin: 4px 0 0 0; }
+.ja-dialog .knopfreihe .hauptknopf, .ja-dialog .knopfreihe .textknopf { min-height: 44px; }
 
 /* P4b (210): Dialog „Fehlstunden für SchILD bereitstellen“ – Zahlen, Warnungen, Abholcode */
 .rw-dialog .art-wahl .schalter { min-height: 44px; }

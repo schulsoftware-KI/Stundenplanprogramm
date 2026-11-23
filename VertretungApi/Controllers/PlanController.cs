@@ -49,6 +49,11 @@ public class PlanController : ControllerBase
         if (string.IsNullOrWhiteSpace(dto.Schuljahr))
             return BadRequest("Schuljahr fehlt.");
 
+        // P5a (242): Vertretungen für Tage eines abgeschlossenen Schuljahres nimmt die API nicht mehr an.
+        if (await SchuljahrRechte.DesktopSperreAsync(_db, new[] { dto.Schuljahr, await SchuljahrRechte.JahrAmAsync(_db, dto.Datum) })
+            is string gesperrt)
+            return Conflict(new { fehler = $"{D(dto.Datum)}: {gesperrt}" });
+
         var tag = await _db.Tage.Include(t => t.Eintraege)
             .FirstOrDefaultAsync(t => t.Schuljahr == dto.Schuljahr && t.Datum == dto.Datum);
 
@@ -127,6 +132,8 @@ public class PlanController : ControllerBase
 
         var tag = await LadeTag(schuljahr, datum);
         if (tag == null) return Ok(Array.Empty<PlanEintragDto>());
+        // P5a (216): Tage eines abgeschlossenen Schuljahres sieht nur der Admin.
+        if (!admin && await SchuljahrRechte.IstAbgeschlossenAsync(_db, tag.Schuljahr)) return Ok(Array.Empty<PlanEintragDto>());
         // P6b (232): Admin sieht die Gründe einer anderen Lehrkraft – die eigenen Stunden stehen nicht im Leseprotokoll.
         if (admin && !string.Equals(Rollen.Kuerzel(User), kuerzel, StringComparison.OrdinalIgnoreCase))
             await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.VertretungenLehrkraft,
@@ -152,6 +159,9 @@ public class PlanController : ControllerBase
     {
         var tag = await LadeTag(schuljahr, datum);
         if (tag == null) return Ok(Array.Empty<PlanEintragOeffentlichDto>());
+        // P5a (216): Tage eines abgeschlossenen Schuljahres sieht nur der Admin.
+        if (!User.IsInRole(Rollen.Admin) && await SchuljahrRechte.IstAbgeschlossenAsync(_db, tag.Schuljahr))
+            return Ok(Array.Empty<PlanEintragOeffentlichDto>());
 
         var rel = tag.Eintraege.Where(e => e.Klassen
             .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)

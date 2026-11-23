@@ -121,7 +121,25 @@ public static class DatenbankStart
 
         var einstellungen = app.Services.GetRequiredService<Schuleinstellungen>();
         einstellungen.Verwerfen();
-        Aufraeumen.Ausfuehren(db, einstellungen.Lesen(db), log);
+        var werte = einstellungen.Lesen(db);
+
+        // P5a (219): Zuständigkeiten ohne Schuljahr (Konten von vor P5a) gelten wie bisher für das aktuelle Schuljahr – das
+        // wird einmal festgeschrieben, damit sie nach dem Wechsel nicht von selbst für das neue Schuljahr gelten.
+        try
+        {
+            int n = SchuljahrRechte.ZustaendigkeitenFestschreiben(db, werte.Schuljahr, "System",
+                "beim ersten Start mit P5a festgeschrieben – wie bisher das aktuelle Schuljahr");
+            if (n > 0)
+                log.LogInformation("Zuständigkeiten: {Anzahl} Konto/Konten ohne Schuljahr gelten für {Schuljahr} (Kontenprotokoll).",
+                    n, werte.Schuljahr);
+        }
+        catch (Exception ex)
+        {
+            log.LogError(ex, "Die Zuständigkeiten konnten nicht festgeschrieben werden – sie gelten weiter für das aktuelle " +
+                "Schuljahr. Abhilfe: bei PostgreSQL die Migration „Schuljahre“ erzeugen (README).");
+        }
+
+        Aufraeumen.Ausfuehren(db, werte, log);
         return true;
     }
 

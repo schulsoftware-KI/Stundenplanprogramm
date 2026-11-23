@@ -289,6 +289,9 @@ const HI_THEMEN = [
       "Mit „Alles | Anwesenheit | Thema“ filterst du, was fehlt.",
       "Antippen öffnet das Stundenblatt, „Zurück zur Liste“ führt zurück. „Gruppe fehlt“ heißt: Die Gruppe ist noch " +
         "nicht zusammengestellt.",
+      "**Nach dem Schuljahreswechsel:** Solange die Verwaltung das alte Schuljahr nicht abgeschlossen hat, kannst du dort " +
+        "noch nachtragen – den Zeitraum auf das alte Schuljahr stellen. Nach dem Abschluss ist es nur noch für die " +
+        "Verwaltung sichtbar.",
     ],
   },
   {
@@ -380,6 +383,8 @@ const HI_THEMEN = [
       "Außerdem kannst du Konten sperren und wieder entsperren.",
       "Der Filter **„Laut SchILD aktiv, gesperrt“** zeigt Konten, die nach einem Abgang gesperrt wurden, obwohl die " +
         "Schülerin bzw. der Schüler laut SchILD wieder da ist (Wiedereintritt). Passt das, „Entsperren“.",
+      "Deine Zuständigkeit gilt für **ein Schuljahr**. Nach dem Wechsel ins neue Schuljahr bleibt die Liste leer, bis die " +
+        "Verwaltung sie für das neue Jahr einträgt; die Daten des alten Jahres siehst du bis zu seinem Abschluss weiter.",
     ],
   },
 
@@ -400,6 +405,9 @@ const HI_THEMEN = [
         "steht unter Kontomenü → „Einstellungen“ → Datenschutz (Standard ein Jahr).",
       "**Downloads:** wer wann welche Datei mit Schülerdaten geladen hat.",
       "**SchILD:** Vorschläge für Klassenleitungen laut SchILD und die Liste der SchILD-Importe (siehe eigene Themen).",
+      "**Zuständigkeit je Schuljahr:** Klassenleitung und Stufenkoordination sind für ein Schuljahr zuständig (steht im " +
+        "Konto). Eine neue bzw. geänderte Zuständigkeit gilt für das aktuelle Schuljahr; eine unveränderte übernimmst du " +
+        "beim „Bearbeiten“ mit dem Haken „für das aktuelle Schuljahr“. Siehe „Jahresablauf“.",
       "Bei Lehrkräften steht der **Name laut SchILD** neben dem Kürzel (nur für dich und die Lehrkraft selbst sichtbar); " +
         "die Suche findet auch Namen. Filter **„Laut SchILD aktiv, gesperrt“**: nach einem Wiedereintritt entsperren. " +
         "Filter **„Name laut SchILD geändert“**: im Konto steht ein Vorschlag für den neuen Benutzernamen – " +
@@ -545,9 +553,30 @@ const HI_THEMEN = [
     // P4a (5.3a, Entscheidungen 205, 206)
     id: "jahresablauf", gruppe: "admin", titel: "Jahresablauf",
     inhalt: [
-      "Kontomenü → „Jahresablauf“: was zum Halbjahres- und (später) Schuljahreswechsel zu tun ist. Jede Karte und " +
+      "Kontomenü → „Jahresablauf“: was zum Halbjahres- und Schuljahreswechsel zu tun ist. Jede Karte und " +
         "jeder Punkt hat eine **Ampel**: grün erledigt, gelb zu tun, rot überfällig, grau nur ein Hinweis bzw. noch " +
-        "nicht dran. Hier geschieht **nichts von selbst** – die Knöpfe führen in den passenden Bereich.",
+        "nicht dran. Hier geschieht **nichts von selbst** – die Links führen in den passenden Bereich, die Knöpfe fragen " +
+        "vorher nach.",
+      { zwischen: "Schuljahreswechsel" },
+      "Die Karte erscheint **6 Wochen vor** dem letzten Schultag laut Kalender. Reihenfolge:",
+      { liste: [
+        "**Vorprüfung:** letzter Schultag vorbei? Offene Fehlstunden und Verspätungen, nicht erfasste Stunden, Rückweg nach " +
+          "SchILD für das 2. Halbjahr – nur Hinweise, sie sperren nichts.",
+        "**„Schuljahr … abschließen…“** (nach dem letzten Schultag): Danach ist das Klassenbuch des Jahres **nur noch lesbar** " +
+          "– auch für dich – und **nur für die Verwaltung sichtbar** (lesen, PDF, Archiv). Lehrkräfte, Klassenleitung, " +
+          "Stufenkoordination und Schüler sehen das Jahr nicht mehr, auch nicht im Plan. Vertretungen, Grundpläne und " +
+          "SchILD-Importe für das Jahr nimmt die App nicht mehr an.",
+        "**„Wieder öffnen…“** nur mit Begründung (steht im Protokoll der Einstellungen) – z. B. für Nachträge. Danach erneut " +
+          "abschließen.",
+        "**„Schuljahr … vorbereiten…“:** vorher im Desktop Kalender und Grundplan des neuen Jahres veröffentlichen. Der Knopf " +
+          "stellt „Aktuelles Schuljahr“ um und setzt „Anwesenheit/Thema erfasst ab“ und „2. Halbjahr ab“ des alten Jahres auf " +
+          "Standard (danach neu eintragen, wenn nötig). Das geht auch vor dem Abschluss: Bis dahin bleibt das alte Jahr für " +
+          "Nachträge offen.",
+        "**Zuständigkeiten** gelten je Schuljahr: Die Klassenleitung der 05A von 2026/27 sieht die alte 05A (bis zum " +
+          "Abschluss), aber nicht die neuen Fünftklässler, und betreut deren Schülerkonten nicht. Für das neue Jahr: Konten " +
+          "verwalten → Konto → „Bearbeiten“ (Haken „für das aktuelle Schuljahr“). Vorschläge aus SchILD kommen mit dem " +
+          "Jahreswechsel-Import.",
+      ] },
       { zwischen: "Halbjahreswechsel" },
       "Die Karte erscheint **4 Wochen vor** „2. Halbjahr ab“ (Einstellungen → Schuljahr) und bleibt bis zum Ende des " +
         "Schuljahres. Sie prüft:",

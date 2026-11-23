@@ -31,7 +31,11 @@ public record KontoDto(
     // ---- P6a (Entscheidungen 225–227) ----
     bool ZweiterFaktor = false,   // zweiter Faktor eingerichtet
     DateTime? ZweiterFaktorSeit = null, // UTC
-    bool FaktorFehlt = false);    // Pflicht für die Rolle, aber noch kein zweiter Faktor
+    bool FaktorFehlt = false,     // Pflicht für die Rolle, aber noch kein zweiter Faktor
+    // ---- P5a (Entscheidung 219) ----
+    string? ZustaendigSchuljahr = null,  // Schuljahr der Zuständigkeit (z. B. „2026/27“)
+    bool ZustaendigAnderesJahr = false,  // gilt nicht für das aktuelle Schuljahr (nur noch für Daten jenes Jahres)
+    string? AktuellesSchuljahr = null);  // „Aktuelles Schuljahr“ (für den Haken beim Ändern)
 
 public record KontenListeDto(IReadOnlyList<KontoDto> Konten, int Gesamt, bool Mehr);
 
@@ -54,7 +58,8 @@ public record KontoAendernDto(
     string? Benutzername,         // leer: bleibt wie bisher
     string? LehrerKuerzel,
     int? SchuelerId,
-    string? Zustaendig);
+    string? Zustaendig,
+    bool ZustaendigAktuellesSchuljahr = false);   // P5a (219): unveränderte Zuständigkeit für das aktuelle Schuljahr übernehmen
 
 /// <summary>Ergebnis von Anlegen/Zurücksetzen: das Startpasswort wird nur dieses eine Mal geliefert.</summary>
 public record StartPasswortDto(KontoDto Konto, string StartPasswort);

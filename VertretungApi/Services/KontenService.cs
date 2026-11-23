@@ -168,7 +168,9 @@ public static class KontenService
     {
         var teile = new List<string> { RollenText(u.Rolle) };
         if (!string.IsNullOrWhiteSpace(u.LehrerKuerzel)) teile.Add("Kürzel " + u.LehrerKuerzel);
-        if (!string.IsNullOrWhiteSpace(u.Zustaendig)) teile.Add("zuständig " + u.Zustaendig);
+        if (!string.IsNullOrWhiteSpace(u.Zustaendig))
+            teile.Add("zuständig " + u.Zustaendig +
+                      (string.IsNullOrWhiteSpace(u.ZustaendigSchuljahr) ? "" : $" ({u.ZustaendigSchuljahr})"));   // P5a (219)
         if (u.SchuelerId is int sid) teile.Add("Schüler-Id " + sid);
         return string.Join(", ", teile);
     }

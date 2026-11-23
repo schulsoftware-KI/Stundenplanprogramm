@@ -25,6 +25,8 @@ namespace VertretungApi.Controllers;
 /// Schüler sehen ausschließlich ihren eigenen Plan über /ich.
 /// P6b (232): Der Plan eines Schülers (/schueler/{id}, zeigt z. B. Religionskurse) steht im Leseprotokoll; Pläne von
 /// Lehrkräften, Klassen und Gruppen und der eigene Plan nicht.
+/// P5a (216, 219): Tage eines abgeschlossenen Schuljahres sieht nur der Admin (sonst „Schuljahr … abgeschlossen“); Thema und
+/// Hausaufgabe über die Zuständigkeit nur an Tagen ihres Schuljahres.
 /// </summary>
 [ApiController]
 [Route("api/woche")]
@@ -32,12 +34,17 @@ public class WocheController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly Leseprotokoll _lese;
+    private readonly Schuleinstellungen _einst;
 
-    public WocheController(AppDbContext db, Leseprotokoll lese)
+    public WocheController(AppDbContext db, Leseprotokoll lese, Schuleinstellungen einst)
     {
         _db = db;
         _lese = lese;
+        _einst = einst;
     }
+
+    /// <summary>P5a (216): abgeschlossene Schuljahre, deren Tage die angemeldete Person nicht sieht (Admin: keine).</summary>
+    private Task<IReadOnlySet<string>> GesperrtAsync() => SchuljahrRechte.GesperrtFuerAsync(_db, User.IsInRole(Rollen.Admin));
 
     private static DateOnly Heute() => KlassenbuchService.Heute();   // P4a: mit Testdatum
 
@@ -51,19 +58,22 @@ public class WocheController : ControllerBase
     [HttpGet("lehrer/{kuerzel}")]
     public async Task<IActionResult> Lehrer(string kuerzel, [FromQuery] DateOnly? datum, [FromQuery] int wochen = 1)
         => Ok(await WochenplanService.BerechneAsync(
-            _db, WochenZielArt.Lehrer, kuerzel, new[] { kuerzel }, datum ?? Heute(), wochen, null, await PersonalLeserAsync()));
+            _db, WochenZielArt.Lehrer, kuerzel, new[] { kuerzel }, datum ?? Heute(), wochen, null, await PersonalLeserAsync(),
+            gesperrt: await GesperrtAsync()));
 
     [Authorize(Policy = Rollen.PlanLesen)]
     [HttpGet("klasse/{klasse}")]
     public async Task<IActionResult> Klasse(string klasse, [FromQuery] DateOnly? datum, [FromQuery] int wochen = 1)
         => Ok(await WochenplanService.BerechneAsync(
-            _db, WochenZielArt.Klasse, klasse, new[] { klasse }, datum ?? Heute(), wochen, null, await PersonalLeserAsync()));
+            _db, WochenZielArt.Klasse, klasse, new[] { klasse }, datum ?? Heute(), wochen, null, await PersonalLeserAsync(),
+            gesperrt: await GesperrtAsync()));
 
     [Authorize(Policy = Rollen.PlanLesen)]
     [HttpGet("gruppe/{schluessel}")]
     public async Task<IActionResult> Gruppe(string schluessel, [FromQuery] DateOnly? datum, [FromQuery] int wochen = 1)
         => Ok(await WochenplanService.BerechneAsync(
-            _db, WochenZielArt.Gruppe, schluessel, new[] { schluessel }, datum ?? Heute(), wochen, null, await PersonalLeserAsync()));
+            _db, WochenZielArt.Gruppe, schluessel, new[] { schluessel }, datum ?? Heute(), wochen, null, await PersonalLeserAsync(),
+            gesperrt: await GesperrtAsync()));
 
     /// <summary>Individueller Plan eines Schülers aus seinen Lerngruppen (Klasse bzw. Kurse).</summary>
     [Authorize(Roles = Rollen.Personal)]
@@ -104,7 +114,8 @@ public class WocheController : ControllerBase
         var k = konto.LehrerKuerzel.Trim();
         var plan = await WochenplanService.BerechneAsync(
             _db, WochenZielArt.Lehrer, k, new[] { k }, datum ?? Heute(), wochen, null,
-            InhaltLeser.FuerPersonal(NutzerAus(konto)));
+            InhaltLeser.FuerPersonal(KlassenbuchService.NutzerAus(konto, await _einst.AktuellesSchuljahrAsync(_db))),
+            gesperrt: await GesperrtAsync());
         return Ok(new { Art = "lehrer", Lehrer = k, Plan = plan });
     }
 
@@ -119,7 +130,7 @@ public class WocheController : ControllerBase
         var fertig = await WochenplanService.FertigeGruppenAsync(_db);
         var plan = await WochenplanService.BerechneAsync(
             _db, WochenZielArt.Schueler, $"{s.Vorname} {s.Nachname}", gruppen, datum, wochen, fertig, leser,
-            werteAm: alle.Am);
+            werteAm: alle.Am, gesperrt: await GesperrtAsync());
 
         return new
         {
@@ -139,11 +150,6 @@ public class WocheController : ControllerBase
         if (id == null) return null;
         var b = await _db.Benutzer.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id.Value);
         if (b == null || b.Rolle == BenutzerRolle.Schueler) return null;
-        return InhaltLeser.FuerPersonal(NutzerAus(b));
+        return InhaltLeser.FuerPersonal(KlassenbuchService.NutzerAus(b, await _einst.AktuellesSchuljahrAsync(_db)));
     }
-
-    private static KbNutzer NutzerAus(Benutzer b) => new(
-        b.Benutzername, b.Rolle,
-        string.IsNullOrWhiteSpace(b.LehrerKuerzel) ? null : b.LehrerKuerzel.Trim(),
-        KontenService.Zustaendigkeiten(b.Zustaendig));
 }

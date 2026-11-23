@@ -457,6 +457,13 @@ public sealed class Schuleinstellungen
     public async Task<bool> GrundErfassenAsync(AppDbContext db, CancellationToken ct = default)
         => EinstellungsKatalog.AlsSchalter(Roh(await ZeilenAsync(db, ct), EinstellungsKatalog.GrundErfassen), true);
 
+    /// <summary>
+    /// P5a (219): „Aktuelles Schuljahr“ (Einstellung bzw. nach dem Datum) – nur aus dem Zwischenspeicher, ohne Kalender (bei jeder
+    /// Anfrage, die eine Zuständigkeit prüft).
+    /// </summary>
+    public async Task<string> AktuellesSchuljahrAsync(AppDbContext db, CancellationToken ct = default)
+        => Roh(await ZeilenAsync(db, ct), EinstellungsKatalog.Schuljahr) ?? EinstellungsKatalog.SchuljahrVon(KlassenbuchService.Heute());
+
     public FaktorPflichten FaktorPflichtAus(IReadOnlyDictionary<string, Einstellung> zeilen)
         => new(EinstellungsKatalog.AlsSchalter(Roh(zeilen, EinstellungsKatalog.FaktorPflichtAdmin), false),
                EinstellungsKatalog.AlsSchalter(Roh(zeilen, EinstellungsKatalog.FaktorPflichtLeitung), false),

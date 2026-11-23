@@ -111,6 +111,12 @@ public class StammdatenController : ControllerBase
             q = q.Where(l => l.Typ == t);
         if (!string.IsNullOrWhiteSpace(stufe))
             q = q.Where(l => l.Stufe == stufe);
+        // P5a (216): Lerngruppen abgeschlossener Schuljahre sieht nur der Admin.
+        if (!User.IsInRole(Rollen.Admin))
+        {
+            var zu = (await SchuljahrRechte.AbgeschlosseneAsync(_db)).ToList();
+            if (zu.Count > 0) q = q.Where(l => !zu.Contains(l.Schuljahr));
+        }
 
         var heute = KlassenbuchService.Heute();
         var liste = await q
@@ -139,6 +145,9 @@ public class StammdatenController : ControllerBase
     {
         var lg = await _db.Lerngruppen.FindAsync(id);
         if (lg == null) return NotFound();
+        // P5a (216)
+        if (!User.IsInRole(Rollen.Admin) && await SchuljahrRechte.IstAbgeschlossenAsync(_db, lg.Schuljahr))
+            return StatusCode(403, new { fehler = SchuljahrRechte.NurAdminText(lg.Schuljahr) });
 
         var liste = await _db.Zugehoerigkeiten
             .Where(z => z.LerngruppeId == id)

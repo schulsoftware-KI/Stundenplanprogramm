@@ -510,8 +510,8 @@
       </button>
     </div>
     <p class="kleingedruckt ohne-einzug">Was zum Halbjahres- und Schuljahreswechsel zu tun ist – mit Ampel: grün erledigt,
-      gelb zu tun, rot überfällig, grau nur ein Hinweis. Hier geschieht nichts von selbst; die Knöpfe führen in den
-      passenden Bereich.</p>
+      gelb zu tun, rot überfällig, grau nur ein Hinweis. Hier geschieht nichts von selbst: Die Links führen in den passenden
+      Bereich, die Knöpfe (Schuljahr abschließen, wieder öffnen, neues Schuljahr vorbereiten) fragen vorher nach.</p>
     <div id="jaKopf"></div>
     <p id="jaInfo" class="such-info" role="status"></p>
     <div id="jaKarten" class="ja-karten"></div>
@@ -960,6 +960,10 @@
         <input id="kfZustaendig" class="eingabe" type="text" list="kfGruppenListe" autocomplete="off"
                autocapitalize="characters" spellcheck="false" placeholder="z. B. 05A (mehrere mit Komma)" />
         <datalist id="kfGruppenListe"></datalist>
+        <!-- P5a (219): Zuständigkeit je Schuljahr – eine unveränderte bleibt in ihrem Schuljahr, außer mit diesem Haken -->
+        <p id="kfZustJahr" class="regel" hidden></p>
+        <label id="kfZustNeuBox" class="schalter gross" hidden><input id="kfZustNeu" type="checkbox" />
+          <span id="kfZustNeuText">für das aktuelle Schuljahr übernehmen</span></label>
       </div>
 
       <label class="feld" for="kfName">Benutzername</label>
@@ -1230,6 +1234,31 @@
       <button id="rwErzeugen" class="hauptknopf" type="button" disabled>Abholcode erzeugen</button>
       <button id="rwVerwerfen" class="textknopf" type="button" hidden>Code ungültig machen</button>
       <button id="rwSchliessen" class="textknopf" type="button">Schließen</button>
+    </div>
+  </dialog>
+
+  <!-- P5a (5.3b, Entscheidungen 215–217): Rückfrage der Aktionen im Jahresablauf (Schuljahr abschließen, wieder öffnen,
+       neues Schuljahr vorbereiten). Inhalt kommt von der API (409 „bestaetigen“) bzw. aus jahresablauf.js. -->
+  <dialog id="jaDialog" class="fenster ja-dialog" aria-labelledby="jaDTitel">
+    <h2 id="jaDTitel" class="karte-titel"></h2>
+    <p id="jaDText" class="kleingedruckt ohne-einzug"></p>
+    <div id="jaDWarnBox" class="cs-offen" role="note" hidden>
+      <p class="feld">Vorprüfung – nur Hinweise, keine Sperre</p>
+      <ul id="jaDWarnungen" class="ja-dliste"></ul>
+    </div>
+    <div id="jaDAendBox" hidden>
+      <p class="feld">Was sich ändert</p>
+      <ul id="jaDAenderungen" class="ja-dliste"></ul>
+    </div>
+    <div id="jaDGrundBox" hidden>
+      <label class="feld" for="jaDGrund">Begründung (steht im Protokoll)</label>
+      <textarea id="jaDGrund" class="eingabe" rows="3" maxlength="300" aria-describedby="jaDZeichen"></textarea>
+      <p id="jaDZeichen" class="kleingedruckt ohne-einzug"></p>
+    </div>
+    <p id="jaDFehler" class="fehler klein" role="alert" hidden></p>
+    <div class="knopfreihe">
+      <button id="jaDOk" class="hauptknopf" type="button">Bestätigen</button>
+      <button id="jaDAbbrechen" class="textknopf" type="button">Abbrechen</button>
     </div>
   </dialog>
 

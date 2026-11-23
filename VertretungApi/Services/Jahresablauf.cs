@@ -21,12 +21,13 @@ namespace VertretungApi.Services;
 //    6. Gruppenlisten, deren Schlüssel im Plan am Stichtag nicht mehr vorkommt (bleiben für die Stunden davor)
 //  P4b (210–213): Karte „Rückweg nach SchILD“ (immer sichtbar, Hinweis): Abholcode erzeugen (Knopf öffnet den Dialog in
 //  der App), bisherige Übertragungen im Schuljahr.
-//  P5 ergänzt die Karten „Schuljahreswechsel“ und „Archiv und Fristen“.
+//  P5a (215–217, 239–242): Karte „Schuljahreswechsel“ mit Jahresabschluss, Wiedereröffnen und „Neues Schuljahr
+//  vorbereiten“ – Services/JahresablaufSchuljahr.cs. P5c ergänzt „Archiv und Fristen“.
 //
 //  „Heute“ = Heute der API (Testdatum, 221). Keine Namen – nur Zahlen, Daten und Bezeichnungen.
 // =====================================================================
 
-public static class Jahresablauf
+public static partial class Jahresablauf
 {
     /// <summary>So viele Tage vor „2. Halbjahr ab“ erscheint die Karte „Halbjahreswechsel“.</summary>
     public const int VorlaufTage = 28;
@@ -52,6 +53,10 @@ public static class Jahresablauf
             await HalbjahrAsync(db, w, kal, heute, produktiv, akteur),
             await RueckwegKarteAsync(db, w, kal)
         };
+        // P5a: Karte „Schuljahreswechsel“ – oben, solange sie dran ist, sonst unten.
+        var schuljahr = await SchuljahrKarteAsync(db, w, heute, akteur);
+        if (schuljahr.Aktiv) karten.Insert(0, schuljahr);
+        else karten.Add(schuljahr);
         return new JaUebersichtDto(heute, Testdatum.Wert != null, w.Schuljahr, kal?.Start, kal?.Ende, karten);
     }
 
@@ -261,9 +266,11 @@ public static class Jahresablauf
     /// P4b: grün erst, wenn der Desktop eine vollständige Datei für das ganze 1. Halbjahr gemeldet hat; ein Abruf ohne Meldung
     /// bzw. eine Probedatei ist gelb (ob die Datei in SchILD eingelesen wurde, weiß die App nicht).
     /// </summary>
-    public static JaPunktDto RueckwegPunkt(IReadOnlyList<RueckwegStand> liste, DateOnly noetigAb, DateOnly bis)
+    /// <param name="halbjahr">P5a: „1. Halbjahr“, „2. Halbjahr“ bzw. „Schuljahr“ (Titel und Text).</param>
+    public static JaPunktDto RueckwegPunkt(IReadOnlyList<RueckwegStand> liste, DateOnly noetigAb, DateOnly bis,
+        string halbjahr = "1. Halbjahr")
     {
-        const string titel = "Rückweg nach SchILD für das 1. Halbjahr";
+        string titel = $"Rückweg nach SchILD für das {halbjahr}";
         var ziel = new[]
         {
             new JaZielDto("rueckweg", "Fehlstunden für SchILD bereitstellen…"),
@@ -279,9 +286,9 @@ public static class Jahresablauf
         }
         if (liste.Count > 0)
             return new JaPunktDto("rueckweg", titel, Gelb,
-                "Noch keine vollständige Datei für das ganze 1. Halbjahr gemeldet. Bisher: " +
+                $"Noch keine vollständige Datei für das ganze {halbjahr} gemeldet. Bisher: " +
                 string.Join(", ", liste.Take(5).Select(p => $"{ArtText(p.Art)} {D(p.Von)} – {D(p.Bis)}")) +
-                $". Für das ganze Halbjahr: {D(noetigAb)} – {D(bis)}, im Desktop ohne Auswahl von Klassen.", Ziele: ziel);
+                $". Für das ganze {halbjahr}: {D(noetigAb)} – {D(bis)}, im Desktop ohne Auswahl von Klassen.", Ziele: ziel);
         return new JaPunktDto("rueckweg", titel, Gelb,
             $"Noch nicht übertragen ({D(noetigAb)} – {D(bis)}): Abholcode erzeugen, im Desktop (Wocheneditor → „SchILD-Daten…“ → " +
             "Reiter „Rückweg“) abholen und die Datei schreiben. Vor der ersten echten Übertragung: SchILD sichern und eine " +

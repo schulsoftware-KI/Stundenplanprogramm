@@ -89,6 +89,12 @@ public class Benutzer
     // zurückgesetzt werden dürfen.
     public string? Zustaendig { get; set; }
 
+    // P5a (Entscheidungen 219, 242; Migration „Schuljahre“): Schuljahr, für das die Zuständigkeit gilt, z. B. „2026/27“.
+    // Eine Zuständigkeit greift nur bei Daten dieses Schuljahres (Klassenbuch, Fehlzeiten, Einträge, Downloads) und – für
+    // die Schülerkonten – nur, solange es das aktuelle Schuljahr ist. Gesetzt, sobald die Zuständigkeit gesetzt wird; ältere
+    // Konten ohne Wert bekommen beim ersten Start mit P5a das aktuelle Schuljahr (Kontenprotokoll).
+    public string? ZustaendigSchuljahr { get; set; }
+
     // Startpasswort bzw. vom Admin zurückgesetzt: Nach der Anmeldung ist nur das Ändern
     // des Passworts erlaubt (Program.cs sperrt alle übrigen API-Aufrufe).
     public bool MussPasswortAendern { get; set; }

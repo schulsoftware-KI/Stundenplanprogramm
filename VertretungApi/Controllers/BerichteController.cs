@@ -23,6 +23,8 @@ namespace VertretungApi.Controllers;
 /// „Downloads nur für die Verwaltung“ (Einstellungen → Datenschutz, seit P3; vorher „Berichte:NurAdmin“): nur Admin
 /// (Entscheidung 50).
 /// Jeder Download wird protokolliert (wer, wann, was, Zeitraum – ohne Inhalt).
+/// P5a (216, 219): Zeiträume eines abgeschlossenen Schuljahres lädt nur der Admin (PDF, CSV, Archiv); eine Zuständigkeit gilt
+/// nur für Zeiträume ihres Schuljahres.
 /// </summary>
 [ApiController]
 [Route("api/berichte")]
@@ -43,12 +45,18 @@ public class BerichteController : ControllerBase
     /// <summary>P3 (E-1): „Downloads nur für die Verwaltung“ aus den Schuleinstellungen (wirkt sofort).</summary>
     private async Task<bool> NurAdminAsync() => (await _einst.LesenAsync(_db)).BerichteNurAdmin;
 
+    private IActionResult Fehler(KbErgebnis e) => StatusCode(e.Status, new { fehler = e.Fehler });
+
     [HttpGet("unterrichte")]
     public async Task<IActionResult> Unterrichte([FromQuery] string? klasse)
     {
         var u = await NutzerAsync();
         if (u == null) return Unauthorized();
         if (string.IsNullOrWhiteSpace(klasse)) return BadRequest(new { fehler = "Die Klasse fehlt." });
+        // P5a (216, 219): Unterrichte laut heutigem Grundplan – Schuljahr von heute
+        var (uj, sperre) = await SchuljahrRechte.LesenAsync(_db, u, await SchuljahrRechte.JahrAmAsync(_db, KlassenbuchService.Heute()));
+        if (sperre != null) return Fehler(sperre);
+        u = uj;
         if (!BerichtService.DarfKlassenbuch(u, klasse))
             return StatusCode(403, new { fehler = "Das sehen nur die Klassenleitung bzw. Stufenkoordination und die Verwaltung." });
         return Ok(await BerichtService.UnterrichteAsync(_db, klasse));
@@ -63,10 +71,15 @@ public class BerichteController : ControllerBase
         if (u == null) return Unauthorized();
         if (!u.IstAdmin && await NurAdminAsync()) return Gesperrt();
         if (string.IsNullOrWhiteSpace(klasse)) return BadRequest(new { fehler = "Die Klasse fehlt." });
-        if (!BerichtService.DarfKlassenbuch(u, klasse))
-            return StatusCode(403, new { fehler = "Das Klassenbuch drucken die Klassenleitung bzw. Stufenkoordination und die Verwaltung." });
-
         var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
+        var (uj, sperre) = await SchuljahrRechte.LesenZeitraumAsync(_db, u, v, b);   // P5a (216, 219)
+        if (sperre != null) return Fehler(sperre);
+        var vorher = u;
+        u = uj;
+        if (!BerichtService.DarfKlassenbuch(u, klasse))
+            return StatusCode(403, new { fehler = SchuljahrRechte.AnderesJahrText(vorher, new[] { klasse })
+                ?? "Das Klassenbuch drucken die Klassenleitung bzw. Stufenkoordination und die Verwaltung." });
+
         var bericht = await BerichtService.KlassenbuchAsync(_db, u, klasse, v, b, schuelerEintraege);
         return await PdfAntwortAsync(u, bericht, "KlassenbuchPdf", bericht.Kopf.Titel);
     }
@@ -85,10 +98,13 @@ public class BerichteController : ControllerBase
         var info = await BerichtService.UnterrichtInfoAsync(_db, unr, lehrer);
         if (info == null) return NotFound(new { fehler = "Diesen Unterricht gibt es nicht." });
         var (fach, klassen) = info.Value;
+        var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
+        var (uj, sperre) = await SchuljahrRechte.LesenZeitraumAsync(_db, u, v, b);   // P5a (216, 219)
+        if (sperre != null) return Fehler(sperre);
+        u = uj;
         if (!BerichtService.DarfKursheft(u, lehrer, klassen))
             return StatusCode(403, new { fehler = "Das Kursheft drucken die Lehrkraft des Unterrichts, die Klassenleitung bzw. Stufenkoordination und die Verwaltung." });
 
-        var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
         var bericht = await BerichtService.KursheftAsync(_db, u, unr, lehrer, fach, klassen, v, b, schuelerEintraege);
         return await PdfAntwortAsync(u, bericht, "KursheftPdf",
             $"{bericht.Kopf.Titel} (UNr {unr}, {lehrer.Trim().ToUpperInvariant()})");
@@ -155,17 +171,21 @@ public class BerichteController : ControllerBase
     {
         var u = await NutzerAsync();
         if (u == null) return Unauthorized();
+        var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
+        var (uj, sperre) = await SchuljahrRechte.LesenZeitraumAsync(_db, u, v, b);   // P5a (216, 219)
+        if (sperre != null) return Fehler(sperre);
+        u = uj;
         var (gruppen, fehler) = await CsvGruppenAsync(u, klasse, alle);
         if (fehler != null) return fehler;
 
-        var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
         var bisEff = ExportService.BisHoechstensHeute(b);
         if (bisEff < v) return BadRequest(new { fehler = "Der Zeitraum liegt noch in der Zukunft." });
 
         // Nur zum Zählen: die Admin-Sicht von „nicht erfasst", gefiltert auf die oben geprüfte Klasse/Stufe
         // (bzw. ungefiltert bei „alle", das nur der Admin darf). Zurück geht allein die Anzahl.
         var zaehler = new KbNutzer(u.Name, BenutzerRolle.Admin, null, Array.Empty<string>());
-        var erfassungAb = (await _einst.LesenAsync(_db)).ErfassungAb;
+        // P5a: ein früheres Schuljahr mit seinem „Anwesenheit erfasst ab“
+        var (erfassungAb, _) = await SchuljahrRechte.ErfassungAbAsync(_db, await _einst.LesenAsync(_db), v);
         var ne = await FehlzeitenService.NichtErfasstAsync(_db, zaehler, "alle", null, alle ? null : gruppen![0],
             erfassungAb, erfassungAb, "anwesenheit", v, bisEff);
         return Ok(await ExportService.PruefenAsync(_db, gruppen!, v, bisEff, ne.Anzahl, erfassungAb));
@@ -178,10 +198,13 @@ public class BerichteController : ControllerBase
     {
         var u = await NutzerAsync();
         if (u == null) return Unauthorized();
+        var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
+        var (uj, sperre) = await SchuljahrRechte.LesenZeitraumAsync(_db, u, v, b);   // P5a (216, 219)
+        if (sperre != null) return Fehler(sperre);
+        u = uj;
         var (gruppen, fehler) = await CsvGruppenAsync(u, klasse, alle);
         if (fehler != null) return fehler;
 
-        var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
         var bisEff = ExportService.BisHoechstensHeute(b);
         if (bisEff < v) return BadRequest(new { fehler = "Der Zeitraum liegt noch in der Zukunft." });
 
@@ -304,16 +327,13 @@ public class BerichteController : ControllerBase
         await _db.SaveChangesAsync();
     }
 
-    /// <summary>Angemeldete Person samt Kürzel und Zuständigkeit – aus der Datenbank.</summary>
+    /// <summary>Angemeldete Person samt Kürzel und Zuständigkeit (mit Schuljahr, P5a) – aus der Datenbank.</summary>
     private async Task<KbNutzer?> NutzerAsync()
     {
         var id = Rollen.BenutzerId(User);
         if (id == null) return null;
         var b = await _db.Benutzer.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id.Value);
         if (b == null) return null;
-        return new KbNutzer(
-            b.Benutzername, b.Rolle,
-            string.IsNullOrWhiteSpace(b.LehrerKuerzel) ? null : b.LehrerKuerzel.Trim(),
-            KontenService.Zustaendigkeiten(b.Zustaendig));
+        return KlassenbuchService.NutzerAus(b, await _einst.AktuellesSchuljahrAsync(_db));
     }
 }

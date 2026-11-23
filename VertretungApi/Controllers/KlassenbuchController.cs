@@ -26,6 +26,8 @@ namespace VertretungApi.Controllers;
 /// Rechte siehe Services/KlassenbuchService.cs und Services/UnterrichtInhaltService.cs.
 /// P6b (232): Leseprotokoll für Stundenblatt, seinen Verlauf und die Gruppenliste (nur lesende Abrufe); (236) beim Speichern
 /// bekommen Stunden in einem Entschuldigungs-Zeitraum bei ausgeschaltetem „Grund … erfassen“ „ohne Angabe“.
+/// P5a (215, 216, 219, 242): Stunden und Gruppen eines abgeschlossenen Schuljahres sieht nur der Admin (nur lesbar); eine
+/// Zuständigkeit gilt nur für Stunden und Gruppen ihres Schuljahres (Services/SchuljahrRechte.cs).
 /// </summary>
 [ApiController]
 [Route("api/klassenbuch")]
@@ -98,6 +100,9 @@ public class KlassenbuchController : ControllerBase
 
         var g = await KlassenbuchService.GruppeAusGrundplanAsync(_db, schluessel);
         if (g == null) return NotFound(new { fehler = "Diese Gruppe steht nicht im aktuellen Stundenplan." });
+        var (uj, sperre) = await SchuljahrRechte.LesenAsync(_db, u, g.Schuljahr);   // P5a (216, 219)
+        if (sperre != null) return StatusCode(sperre.Status, new { fehler = sperre.Fehler });
+        u = uj;
         if (!KlassenbuchService.DarfGruppeSehen(u, g))
             return StatusCode(403, new { fehler = "Diese Gruppe dürfen nur ihre Lehrkräfte, die Klassenleitung bzw. Stufenkoordination und die Verwaltung sehen." });
         var d = await KlassenbuchService.GruppeAsync(_db, u, g);
@@ -116,6 +121,9 @@ public class KlassenbuchController : ControllerBase
 
         var g = await KlassenbuchService.GruppeAusGrundplanAsync(_db, schluessel);
         if (g == null) return NotFound(new { fehler = "Diese Gruppe steht nicht im aktuellen Stundenplan." });
+        var (uj, sperre) = await SchuljahrRechte.LesenAsync(_db, u, g.Schuljahr);   // P5a (216)
+        if (sperre != null) return StatusCode(sperre.Status, new { fehler = sperre.Fehler });
+        u = uj;
         if (!KlassenbuchService.IstGruppenLehrer(u, g))
             return StatusCode(403, new { fehler = "Die Gruppe dürfen nur ihre Lehrkräfte (laut Stundenplan) und die Verwaltung zusammenstellen." });
 
@@ -136,6 +144,9 @@ public class KlassenbuchController : ControllerBase
             return StatusCode(403, new { fehler = "Die Themenliste sieht nur die Lehrkraft des Unterrichts." });
 
         var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
+        var (uj, sperre) = await SchuljahrRechte.LesenZeitraumAsync(_db, u, v, b);   // P5a (216)
+        if (sperre != null) return StatusCode(sperre.Status, new { fehler = sperre.Fehler });
+        u = uj;
         var d = await UnterrichtInhaltService.ThemenAsync(_db, u, unr, lehrer, v, b);
         return d == null ? NotFound(new { fehler = "Diesen Unterricht gibt es nicht." }) : Ok(d);
     }
@@ -153,17 +164,14 @@ public class KlassenbuchController : ControllerBase
 
     // -----------------------------------------------------------------
 
-    /// <summary>Angemeldete Person samt Kürzel und Zuständigkeit – aus der Datenbank.</summary>
+    /// <summary>Angemeldete Person samt Kürzel und Zuständigkeit (mit Schuljahr, P5a) – aus der Datenbank.</summary>
     private async Task<KbNutzer?> NutzerAsync()
     {
         var id = Rollen.BenutzerId(User);
         if (id == null) return null;
         var b = await _db.Benutzer.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id.Value);
         if (b == null) return null;
-        return new KbNutzer(
-            b.Benutzername, b.Rolle,
-            string.IsNullOrWhiteSpace(b.LehrerKuerzel) ? null : b.LehrerKuerzel.Trim(),
-            KontenService.Zustaendigkeiten(b.Zustaendig));
+        return KlassenbuchService.NutzerAus(b, await _einst.AktuellesSchuljahrAsync(_db));
     }
 
     /// <summary>Person, Tag und Stunde laden; prüft Rechte und ob es ein Klassenbuch gibt.</summary>
@@ -183,10 +191,17 @@ public class KlassenbuchController : ControllerBase
         if (st == null)
             return (u, tag, null, NotFound(new { fehler = "Diese Stunde gibt es laut Plan nicht (mehr)." }));
 
+        // P5a (216, 219, 242): abgeschlossenes Schuljahr nur für den Admin; Zuständigkeit nur im eigenen Schuljahr.
+        var (uj, sperre) = await SchuljahrRechte.LesenAsync(_db, u, tag.Schuljahr);
+        if (sperre != null) return (u, tag, st, StatusCode(sperre.Status, new { fehler = sperre.Fehler }));
+        var vorher = u;
+        u = uj;
+
         if (!KlassenbuchService.DarfStunde(u, st))
             return (u, tag, st, StatusCode(403, new
             {
-                fehler = "Dieses Stundenblatt dürfen nur die unterrichtende bzw. vertretende Lehrkraft, " +
+                fehler = SchuljahrRechte.AnderesJahrText(vorher, st.Klassen) ??
+                         "Dieses Stundenblatt dürfen nur die unterrichtende bzw. vertretende Lehrkraft, " +
                          "die Klassenleitung bzw. Stufenkoordination und die Verwaltung öffnen."
             }));
 

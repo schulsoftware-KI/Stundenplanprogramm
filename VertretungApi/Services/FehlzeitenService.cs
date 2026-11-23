@@ -212,11 +212,22 @@ public static class FehlzeitenService
             w.Status, w.Minuten, w.Bewertung, null, null, null, null, false)));
 
     /// <summary>Klasse (Sek I) bzw. Stufe (Sek II) eines Schülers für Rechte und Anzeige.</summary>
-    private static async Task<(Schueler? S, string? Klasse)> SchuelerMitKlasseAsync(AppDbContext db, int id)
+    /// <param name="tag">P5a (242): Tag der Daten. Liegt er in einem anderen Schuljahr als heute, zählt die Klasse in jenem
+    /// Schuljahr (an diesem Tag) – sonst wie bisher die Klasse von heute.</param>
+    private static async Task<(Schueler? S, string? Klasse)> SchuelerMitKlasseAsync(AppDbContext db, int id, DateOnly? tag = null)
     {
         var s = await db.Schueler.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id);
         if (s == null) return (null, null);
         var kal = await WochenplanService.KalenderAsync(db, KlassenbuchService.Heute());
+        if (tag is DateOnly t)
+        {
+            var kalTag = await WochenplanService.KalenderAsync(db, t);
+            if (kalTag != null && kalTag.Schuljahr != kal?.Schuljahr)
+            {
+                var amTag = await KlassenbuchService.KlassenAsync(db, new List<int> { id }, kalTag.Schuljahr, t);
+                return (s, amTag.TryGetValue(id, out var kt) ? kt : null);
+            }
+        }
         var klassen = await KlassenbuchService.KlassenAsync(db, new List<int> { id }, kal?.Schuljahr ?? "");
         return (s, klassen.TryGetValue(id, out var k) ? k : null);
     }
@@ -445,7 +456,7 @@ public static class FehlzeitenService
     public static async Task<FzSchuelerDto?> SchuelerAsync(
         AppDbContext db, KbNutzer? u, int id, DateOnly von, DateOnly bis, int? unr, string? unterrichtLehrer)
     {
-        var (s, klasse) = await SchuelerMitKlasseAsync(db, id);
+        var (s, klasse) = await SchuelerMitKlasseAsync(db, id, bis);
         if (s == null) return null;
 
         bool leitung = u != null && IstLeitungFuer(u, klasse, s.Stufe);
@@ -557,13 +568,17 @@ public static class FehlzeitenService
     public static async Task<KbErgebnis> EntschuldigenAsync(AppDbContext db, KbNutzer u, int schuelerId, FzEntschuldigungNeuDto dto,
         bool grundErfassen = true)
     {
-        var (s, klasse) = await SchuelerMitKlasseAsync(db, schuelerId);
+        if (dto.Bis < dto.Von) return new KbErgebnis(400, "„Bis“ liegt vor „von“.");
+        // P5a (215, 219, 242): Schuljahre des Zeitraums – abgeschlossen = nur lesbar; Zuständigkeit nur in ihrem Schuljahr.
+        var jahre = await SchuljahrRechte.JahreAsync(db, dto.Von, dto.Bis);
+        if (await SchuljahrRechte.SchreibsperreAsync(db, jahre) is KbErgebnis gesperrt) return gesperrt;
+        u = u.FuerSchuljahre(jahre);
+        var (s, klasse) = await SchuelerMitKlasseAsync(db, schuelerId, dto.Von);
         if (s == null) return new KbErgebnis(404, "Schüler nicht gefunden.");
         if (!IstLeitungFuer(u, klasse, s.Stufe))
             return new KbErgebnis(403, "Zeiträume entschuldigen dürfen nur die Klassenleitung bzw. Stufenkoordination und die Verwaltung.");
         if (GrundAusEingabe(dto.Grund, grundErfassen) is not FehlGrund grund)
             return new KbErgebnis(400, GrundFehlt);
-        if (dto.Bis < dto.Von) return new KbErgebnis(400, "„Bis“ liegt vor „von“.");
         if (dto.Bis.DayNumber - dto.Von.DayNumber > 366) return new KbErgebnis(400, "Der Zeitraum ist länger als ein Jahr.");
 
         var jetzt = DateTime.UtcNow;
@@ -609,7 +624,11 @@ public static class FehlzeitenService
     {
         var e = await db.Entschuldigungen.FirstOrDefaultAsync(x => x.Id == id);
         if (e == null) return new KbErgebnis(404, "Entschuldigung nicht gefunden.");
-        var (s, klasse) = await SchuelerMitKlasseAsync(db, e.SchuelerId);
+        // P5a (215, 219): wie beim Eintragen
+        var jahre = await SchuljahrRechte.JahreAsync(db, e.Von, e.Bis);
+        if (await SchuljahrRechte.SchreibsperreAsync(db, jahre) is KbErgebnis gesperrt) return gesperrt;
+        u = u.FuerSchuljahre(jahre);
+        var (s, klasse) = await SchuelerMitKlasseAsync(db, e.SchuelerId, e.Von);
         if (s == null || !IstLeitungFuer(u, klasse, s.Stufe))
             return new KbErgebnis(403, "Entschuldigungen löschen dürfen nur die Klassenleitung bzw. Stufenkoordination und die Verwaltung.");
 
@@ -668,7 +687,12 @@ public static class FehlzeitenService
             grund = g;
         }
 
-        var (s, klasse) = await SchuelerMitKlasseAsync(db, a.SchuelerId);
+        // P5a (215, 219): Schuljahr der Stunde – abgeschlossen = nur lesbar; Zuständigkeit nur in ihrem Schuljahr.
+        var jahr = string.IsNullOrWhiteSpace(a.Lektion.Schuljahr)
+            ? await SchuljahrRechte.JahrAmAsync(db, a.Lektion.Datum) : a.Lektion.Schuljahr;
+        if (await SchuljahrRechte.SchreibsperreAsync(db, jahr) is KbErgebnis gesperrt) return gesperrt;
+        u = u.FuerSchuljahre(new[] { jahr });
+        var (s, klasse) = await SchuelerMitKlasseAsync(db, a.SchuelerId, a.Lektion.Datum);
         if (s == null) return new KbErgebnis(404, "Schüler nicht gefunden.");
         bool leitung = IstLeitungFuer(u, klasse, s.Stufe);
         bool kurslehrer = !leitung && IstKurslehrer(u, a.Lektion.GrundLehrer, a.Lektion.Klassen);
@@ -954,8 +978,9 @@ public static class FehlzeitenService
                 bool passt = ansicht switch
                 {
                     "ich" => u.Kuerzel != null && KlassenbuchService.Gleich(st.Lehrer, u.Kuerzel),
+                    // P5a (219, 242): Zuständigkeit nur an Tagen ihres Schuljahres
                     "zustaendig" => u.IstKlassenleitungOderKoordination
-                                    && KlassenbuchService.ZustaendigFuer(u.Zustaendig, st.Klassen),
+                                    && KlassenbuchService.ZustaendigFuer(u.ZustaendigIm(tag.Schuljahr), st.Klassen),
                     "alle" => u.IstAdmin
                               && (string.IsNullOrWhiteSpace(lehrer) || KlassenbuchService.Gleich(st.Lehrer, lehrer))
                               && (klasseFilter == null || KlassenbuchService.ZustaendigFuer(klasseFilter, st.Klassen)),

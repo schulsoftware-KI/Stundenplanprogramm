@@ -246,6 +246,7 @@ public static class UnterrichtInhaltService
         var schuljahr = await SchuljahrAsync(db, dto.Datum);
         if (schuljahr == null)
             return new KbErgebnis(404, "Für dieses Datum gibt es kein Schuljahr im Kalender.");
+        if (await SchuljahrRechte.SchreibsperreAsync(db, schuljahr) is KbErgebnis gesperrt) return gesperrt;   // P5a (215)
 
         string meldung = dto.Sichtbar
             ? "Schüler sehen die Hausaufgaben dieses Kurses."
@@ -308,8 +309,10 @@ public static class UnterrichtInhaltService
 
         var schuljahr = await SchuljahrAsync(db, null) ?? "";
         bool sichtbar = await SichtbarAsync(db, schuljahr, unr, l);
+        // P5a (215, Nachtrag P5a-b): im abgeschlossenen Schuljahr ist der Schalter nur lesbar (die API lehnt ihn mit 409 ab).
+        bool darfSichtbarkeit = DarfSichtbarkeit(u, l) && !await SchuljahrRechte.IstAbgeschlossenAsync(db, schuljahr);
 
-        return new KbThemenDto(titel, unr, l, von, bis, sichtbar, DarfSichtbarkeit(u, l),
+        return new KbThemenDto(titel, unr, l, von, bis, sichtbar, darfSichtbarkeit,
             zeilen.Select(x => new KbThemaZeileDto(
                     x.Datum, x.Stunde, x.GrundUNr, x.GrundLehrer, x.Lehrer, x.Status,
                     x.Klassen.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
@@ -354,7 +357,8 @@ public static class UnterrichtInhaltService
         var fertig = await WochenplanService.FertigeGruppenAsync(db);
         var plan = await WochenplanService.BerechneAsync(
             db, WochenZielArt.Schueler, $"{s.Vorname} {s.Nachname}", alle.Am(heute), heute.AddDays(-35), 6, fertig,
-            InhaltLeser.FuerSchueler(), alle.Am);
+            InhaltLeser.FuerSchueler(), alle.Am,
+            gesperrt: await SchuljahrRechte.AbgeschlosseneAsync(db));   // P5a (216): nichts aus abgeschlossenen Schuljahren
 
         var liste = plan.Tage
             .Where(t => t.Datum <= heute)

@@ -21,6 +21,8 @@ namespace VertretungApi.Controllers;
 ///   GET    api/eintraege/unterricht?unr=&amp;lehrer=&amp;von=&amp;bis=        Einträge eines Unterrichts (Lehrkraft selbst, Admin)
 /// Zeitraum ohne von/bis: das laufende Schuljahr. Rechte siehe Services/KlassenbuchEintragService.cs.
 /// P6b (232): Leseprotokoll für alle lesenden Abrufe (Stunde, Verlauf, Schüler, Klasse/Stufe, Unterricht).
+/// P5a (215, 216, 219, 242): Einträge eines abgeschlossenen Schuljahres sieht nur der Admin (nur lesbar); eine Zuständigkeit gilt
+/// nur für Einträge ihres Schuljahres (Services/SchuljahrRechte.cs).
 /// </summary>
 [ApiController]
 [Route("api/eintraege")]
@@ -29,12 +31,16 @@ public class EintraegeController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly Leseprotokoll _lese;
+    private readonly Schuleinstellungen _einst;
 
-    public EintraegeController(AppDbContext db, Leseprotokoll lese)
+    public EintraegeController(AppDbContext db, Leseprotokoll lese, Schuleinstellungen einst)
     {
         _db = db;
         _lese = lese;
+        _einst = einst;
     }
+
+    private IActionResult Fehler(KbErgebnis e) => StatusCode(e.Status, new { fehler = e.Fehler });
 
     [HttpGet("stunde")]
     public async Task<IActionResult> Stunde(
@@ -91,11 +97,19 @@ public class EintraegeController : ControllerBase
     {
         var u = await NutzerAsync();
         if (u == null) return Unauthorized();
-        var liste = await KlassenbuchEintragService.HistorieAsync(_db, u, id);
-        if (liste == null) return NotFound(new { fehler = "Diesen Eintrag gibt es nicht (mehr)." });
         // P6b (232): Schülereintrag → Einzelansicht des Schülers; Klasseneintrag → Lerngruppen der Stunde.
         var e = await _db.KlassenbuchEintraege.AsNoTracking().Where(x => x.Id == id)
-            .Select(x => new { x.SchuelerId, x.Lerngruppen, x.Klassen }).FirstOrDefaultAsync();
+            .Select(x => new { x.SchuelerId, x.Lerngruppen, x.Klassen, x.Schuljahr, x.Datum }).FirstOrDefaultAsync();
+        if (e != null)
+        {
+            // P5a (216, 219): Schuljahr des Eintrags
+            var jahr = string.IsNullOrWhiteSpace(e.Schuljahr) ? await SchuljahrRechte.JahrAmAsync(_db, e.Datum) : e.Schuljahr;
+            var (uj, sperre) = await SchuljahrRechte.LesenAsync(_db, u, jahr);
+            if (sperre != null) return Fehler(sperre);
+            u = uj;
+        }
+        var liste = await KlassenbuchEintragService.HistorieAsync(_db, u, id);
+        if (liste == null) return NotFound(new { fehler = "Diesen Eintrag gibt es nicht (mehr)." });
         await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.EintragVerlauf, $"Eintrag-Id {id}",
             SchuelerId: e?.SchuelerId,
             Gruppe: e == null || e.SchuelerId != null ? null
@@ -110,6 +124,9 @@ public class EintraegeController : ControllerBase
         var u = await NutzerAsync();
         if (u == null) return Unauthorized();
         var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
+        var (uj, sperre) = await SchuljahrRechte.LesenZeitraumAsync(_db, u, v, b);   // P5a (216, 219)
+        if (sperre != null) return Fehler(sperre);
+        u = uj;
         var d = await KlassenbuchEintragService.SchuelerAsync(_db, u, id, v, b, unr, lehrer);
         if (d == null) return NotFound(new { fehler = "Schüler nicht gefunden." });
         await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.EintraegeSchueler,
@@ -122,10 +139,15 @@ public class EintraegeController : ControllerBase
     {
         var u = await NutzerAsync();
         if (u == null) return Unauthorized();
+        var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
+        var (uj, sperre) = await SchuljahrRechte.LesenZeitraumAsync(_db, u, v, b);   // P5a (216, 219)
+        if (sperre != null) return Fehler(sperre);
+        var vorher = u;
+        u = uj;
         if (!u.IstAdmin && !(u.IstKlassenleitungOderKoordination
                              && KlassenbuchService.ZustaendigFuer(u.Zustaendig, new[] { klasse })))
-            return StatusCode(403, new { fehler = "Die Einträge einer Klasse bzw. Stufe sehen die Klassenleitung bzw. Stufenkoordination und die Verwaltung." });
-        var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
+            return StatusCode(403, new { fehler = SchuljahrRechte.AnderesJahrText(vorher, new[] { klasse })
+                ?? "Die Einträge einer Klasse bzw. Stufe sehen die Klassenleitung bzw. Stufenkoordination und die Verwaltung." });
         var d = await KlassenbuchEintragService.KlasseAsync(_db, u, klasse, v, b);
         await _lese.AufzeichnenAsync(User, new LeseZugriff(LeseAnsichten.EintraegeKlasse, LeseAnsichten.GruppenGegenstand(klasse),
             Gruppe: LeseAnsichten.Liste(new[] { klasse })));
@@ -142,6 +164,9 @@ public class EintraegeController : ControllerBase
         if (!u.IstAdmin && !KlassenbuchService.Gleich(u.Kuerzel, lehrer))
             return StatusCode(403, new { fehler = "Diese Liste sieht nur die Lehrkraft des Unterrichts." });
         var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
+        var (uj, sperre) = await SchuljahrRechte.LesenZeitraumAsync(_db, u, v, b);   // P5a (216)
+        if (sperre != null) return Fehler(sperre);
+        u = uj;
         var d = await KlassenbuchEintragService.UnterrichtAsync(_db, u, unr, lehrer, v, b);
         if (d == null) return NotFound(new { fehler = "Diesen Unterricht gibt es nicht." });
         int un = unr;
@@ -153,17 +178,14 @@ public class EintraegeController : ControllerBase
 
     // -----------------------------------------------------------------
 
-    /// <summary>Angemeldete Person samt Kürzel und Zuständigkeit – aus der Datenbank.</summary>
+    /// <summary>Angemeldete Person samt Kürzel und Zuständigkeit (mit Schuljahr, P5a) – aus der Datenbank.</summary>
     private async Task<KbNutzer?> NutzerAsync()
     {
         var id = Rollen.BenutzerId(User);
         if (id == null) return null;
         var b = await _db.Benutzer.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id.Value);
         if (b == null) return null;
-        return new KbNutzer(
-            b.Benutzername, b.Rolle,
-            string.IsNullOrWhiteSpace(b.LehrerKuerzel) ? null : b.LehrerKuerzel.Trim(),
-            KontenService.Zustaendigkeiten(b.Zustaendig));
+        return KlassenbuchService.NutzerAus(b, await _einst.AktuellesSchuljahrAsync(_db));
     }
 
     /// <summary>Person, Tag und Stunde laden; prüft Rechte und ob es ein Klassenbuch gibt (wie das Stundenblatt).</summary>
@@ -183,10 +205,17 @@ public class EintraegeController : ControllerBase
         if (st == null)
             return (u, tag, null, NotFound(new { fehler = "Diese Stunde gibt es laut Plan nicht (mehr)." }));
 
+        // P5a (216, 219, 242): abgeschlossenes Schuljahr nur für den Admin; Zuständigkeit nur im eigenen Schuljahr.
+        var (uj, sperre) = await SchuljahrRechte.LesenAsync(_db, u, tag.Schuljahr);
+        if (sperre != null) return (u, tag, st, Fehler(sperre));
+        var vorher = u;
+        u = uj;
+
         if (!KlassenbuchService.DarfStunde(u, st))
             return (u, tag, st, StatusCode(403, new
             {
-                fehler = "Einträge dieser Stunde sehen nur die unterrichtende bzw. vertretende Lehrkraft, " +
+                fehler = SchuljahrRechte.AnderesJahrText(vorher, st.Klassen) ??
+                         "Einträge dieser Stunde sehen nur die unterrichtende bzw. vertretende Lehrkraft, " +
                          "die Klassenleitung bzw. Stufenkoordination und die Verwaltung."
             }));
 

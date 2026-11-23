@@ -30,6 +30,7 @@ public class AppDbContext : DbContext
     public DbSet<EinstellungsProtokoll> EinstellungsProtokolle => Set<EinstellungsProtokoll>(); // P3 (E-1)
     public DbSet<AnmeldeProtokoll> AnmeldeProtokolle => Set<AnmeldeProtokoll>();  // P6a (228)
     public DbSet<LeseProtokoll> LeseProtokolle => Set<LeseProtokoll>();          // P6b (232), Tabelle seit P6a
+    public DbSet<SchuljahrDb> Schuljahre => Set<SchuljahrDb>();                  // P5a (214)
 
     // Grundplan + Kalender (Phase 2, Schritt 1)
     public DbSet<GrundplanVersion> GrundplanVersionen => Set<GrundplanVersion>();
@@ -99,6 +100,11 @@ public class AppDbContext : DbContext
         b.Entity<LeseProtokoll>().HasIndex(p => new { p.Tag, p.KontoId, p.Ansicht, p.SchuelerId, p.Gegenstand });
         b.Entity<LeseProtokoll>().HasIndex(p => p.SchuelerId);
         b.Entity<LeseProtokoll>().HasIndex(p => p.KontoId);
+
+        // P5a – 5.3b (Migration „Schuljahre“, Entscheidung 214): ein Eintrag je Schuljahr. Die Spalte
+        // Benutzer.ZustaendigSchuljahr (nullable) braucht keine Konfiguration.
+        b.Entity<SchuljahrDb>().ToTable("Schuljahre");
+        b.Entity<SchuljahrDb>().HasIndex(s => s.Schuljahr).IsUnique();
 
         // Phase 3.1: neue Tabelle. Die alte Phase-1A-Tabelle "Lektionen" (eine Lerngruppe je
         // Lektion, nie benutzt) bleibt in bestehenden Entwicklungs-DBs ungenutzt liegen.

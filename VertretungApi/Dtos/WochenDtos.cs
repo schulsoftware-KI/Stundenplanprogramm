@@ -20,7 +20,7 @@ public record WochenplanDto(
 public record WochenTagDto(
     DateOnly Datum,
     string WTag,                          // "Mo" … "Fr"
-    string Status,                        // Unterricht | Frei | AusserhalbSchuljahr | KeinGrundplan
+    string Status,                        // Unterricht | Frei | AusserhalbSchuljahr | KeinGrundplan | SchuljahrAbgeschlossen (P5a)
     string? Hinweis,                      // z. B. "Herbstferien"
     int? GrundplanVersionId,
     string? Grundplan,                    // z. B. "oT_1 (gültig ab 28.10.2026)"

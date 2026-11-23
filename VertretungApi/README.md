@@ -583,7 +583,8 @@ dotnet ef migrations add <Name> -o Data/Migrations
 (vergeben sind „Grundlinie“, – seit U-1a, Raum im Grundplan und Wechsel-Merker der Vertretungen –
 `U1a_RaumUndWechsel`, – seit 5.2b-1, Gültigkeit der Zugehörigkeiten und Felder für den SchILD-Import –
 `SchildImport` und – seit 5.2c-1, Kennung des Schlüssels im Importprotokoll, Klassenleitung, Tabelle `Lehrkraefte` –
-`SchildAbgleich`). Den Ordner `Data/Migrations` danach ins Repo übernehmen.
+`SchildAbgleich`, – seit P3 – `Einstellungen`, – seit P6a – `Datenschutz` und – seit P5a, Tabelle `Schuljahre` und
+`Benutzer.ZustaendigSchuljahr` – `Schuljahre`). Den Ordner `Data/Migrations` danach ins Repo übernehmen.
 Fehlt nach einer Modelländerung die Migration, bricht der Start mit „pending changes“ und einem Hinweis
 ab, statt mit unvollständigem Schema zu laufen. SQLite in der Entwicklung bleibt bei EnsureCreated +
 Schema-Nachrüstung und braucht keine Migrations.
@@ -1112,6 +1113,33 @@ Abholcodes nur im Arbeitsspeicher). API: `Controllers/RueckwegController.cs`, `S
   Klassen/Stufen und kürzerer Zeitraum. Übertragene Zeiträume: `schild_rueckweg.json` bzw. `schild_rueckweg_pseudo.json`
   neben der Plandatei (ohne Personendaten) – Warnung bei Überschneidung. Formatprofil: `Rueckweg` → `Datei`, `Kopf`
   (13 Spalten, erste „Nachname“ bzw. „Name“), `Zeichensatz` (leer = wie Profil bzw. Export).
+
+## Schuljahreswechsel: Jahresabschluss und neues Schuljahr (P5a, 5.3b)
+
+Entscheidungen 214–217, 219, 239–242 (`claude/5.3_Vorschlag.md` §7, §11). **Migration `Schuljahre`** (neue Tabelle
+`Schuljahre` – mit den Spalten für Archiv-Export und Löschen aus P5c – und Spalte `Benutzer.ZustaendigSchuljahr`). API:
+`Model/Schuljahre.cs`, `Services/SchuljahrRechte.cs`, `Services/JahresablaufSchuljahr.cs`, `Controllers/JahresablaufController.cs`;
+Prüfungen in den Diensten und Controllern von Klassenbuch, Einträgen, Fehlzeiten, Berichten, Wochenplan, Plan, Grundplan,
+Stammdaten und SchILD-Import; PWA: `jahresablauf.js`, `konten.js`, `hilfe.js`, `index.html`, `style.css`, `sw.js` (Cache v25).
+
+- **Karte „Schuljahreswechsel“** (Kontomenü → „Jahresablauf“, nur Admin; sichtbar ab 6 Wochen vor dem letzten Schultag):
+  Vorprüfung (letzter Schultag, offene Fehlstunden/Verspätungen, nicht erfasste Stunden, Rückweg 2. Halbjahr – nur
+  Warnungen), „Schuljahr … abschließen…“, „Wieder öffnen…“ (Begründung 10–300 Zeichen), „Schuljahr … vorbereiten…“,
+  Zuständigkeiten je Schuljahr. Jede Aktion mit Rückfrage (409 `bestaetigen`) und Eintrag im Protokoll der Einstellungen
+  („Jahresablauf“). `POST /api/jahresablauf/abschliessen` `{schuljahr, bestaetigt}`, `…/oeffnen` `{schuljahr, begruendung}`,
+  `…/neues-schuljahr` `{schuljahr, bestaetigt}` (das neue Jahr).
+- **Abgeschlossenes Schuljahr:** nur lesbar – auch für den Admin (409 „… ist abgeschlossen – nur noch lesbar“); nur der Admin
+  sieht es (lesen, PDF, CSV, Archiv) – alle anderen 403 bzw. im Plan „Schuljahr … abgeschlossen“. Vertretungen
+  (`plan/push`), Grundpläne (`grundplan/push`) und SchILD-Importe (Sperre „Schuljahr“) für das Jahr lehnt die API ab.
+  Ausgenommen: Löschfristen und „Vorhandene Gründe entfernen…“.
+- **Neues Schuljahr vorbereiten:** „Aktuelles Schuljahr“ → neues Jahr; „Anwesenheit/Thema erfasst ab“ und „2. Halbjahr ab“,
+  die nicht im neuen Jahr liegen, → Standard; das bisherige Jahr merkt sich seine Werte (Zeile in `Schuljahre`), „Nicht
+  erfasst“ und die CSV-Prüfung rechnen in einem früheren Schuljahr damit. Kalender und Grundplan des neuen Jahres kommen
+  vorher aus dem Desktop (fehlen sie: Warnung). Bis zum Abschluss bleibt das alte Jahr für Nachträge bearbeitbar (242).
+- **Zuständigkeit je Schuljahr (219, 242):** gilt nur für Daten ihres Schuljahres und – für Schülerkonten – nur im aktuellen
+  Schuljahr. Gesetzt beim Anlegen/Ändern (neue bzw. geänderte Zuständigkeit = aktuelles Schuljahr; Haken „… für das
+  aktuelle Schuljahr übernehmen“), in der Sammelanlage, bei den Vorschlägen aus SchILD und in `seed-konten`. Konten ohne
+  Schuljahr bekommen beim ersten Start mit P5a das aktuelle (Kontenprotokoll, Log „Zuständigkeiten: …“).
 
 ## Zugangsschutz (P6a, 5.4)
 

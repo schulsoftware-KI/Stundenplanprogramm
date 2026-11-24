@@ -6,7 +6,7 @@
 //    Anfragen mit Anmeldung (Authorization) landen nie im Cache.
 //  Neue Version = neuer Cache-Name; alte Caches werden beim Aktivieren gelöscht.
 
-const CACHE = "stundenplan-shell-v25";   // P5a (Schuljahreswechsel, Zuständigkeit je Schuljahr)
+const CACHE = "stundenplan-shell-v26";   // P5b-1 (Hilfe: Jahreswechsel-Import)
 const SHELL = [
   "./",
   "index.html",

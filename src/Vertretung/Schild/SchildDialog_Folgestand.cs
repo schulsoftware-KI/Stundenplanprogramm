@@ -13,6 +13,8 @@ namespace Stundenplan_V2.Vertretung
     /// <see cref="SchildFolgestand"/>. Das Log nennt nur Zahlen; Pseudo-Namen stehen nur im Fenster und in FOLGESTAND.txt.
     /// P4a (Entscheidung 207): oben die eigene Art „Abschnitt 2 (Halbjahreswechsel)“ – nur aus Abschnitt 1; die übrigen
     /// Häkchen gelten dann nicht (sie werden ausgegraut).
+    /// P5b-1 (Entscheidung 243): darunter die Art „Folgejahr (Schuljahreswechsel)“ mit zwei Varianten (Standard aus);
+    /// „Abschnitt 2“ und „Folgejahr“ schließen sich aus.
     /// </summary>
     public partial class SchildDialog
     {
@@ -39,7 +41,7 @@ namespace Stundenplan_V2.Vertretung
             BtnFolge.ToolTip = grund ??
                 "Erzeugt aus diesem Pseudo-Export einen neuen Ordner „…_Folge1“ mit typischen Änderungen (Abgänge, Klassen- und " +
                 "Kurswechsel, Namensänderung, Neuaufnahmen …) – zum Testen von Vorschau und Import. Seit P4a auch als " +
-                "„Abschnitt 2“ für den Halbjahreswechsel.";
+                "„Abschnitt 2“ für den Halbjahreswechsel, seit P5b-1 als „Folgejahr“ für den Schuljahreswechsel.";
         }
 
         private async void BtnFolge_Click(object sender, RoutedEventArgs e)
@@ -143,6 +145,33 @@ namespace Stundenplan_V2.Vertretung
                 chkAbschnitt2.IsEnabled = false;
                 chkAbschnitt2.ToolTip = $"Nur aus einem Export mit Abschnitt 1 (im Prüflauf gewählt: Abschnitt {abschnitt}).";
             }
+            chkAbschnitt2.Margin = new Thickness(0, 0, 0, 4);
+            // P5b-1 (243): eigene Art „Folgejahr“ – aus dem letzten Abschnitt des Jahres (1 oder 2)
+            var chkFolgejahr = Wahl("Folgejahr (Schuljahreswechsel): Jahr + 1, Abschnitt 1 in allen Dateien; Versetzung über die " +
+                                    "Folgeklasse laut Klassen.dat (10er → EF bis auf 2 Abgänge je Klasse, EF → Q1 → Q2, Q2 → Status 8), " +
+                                    "volle neue 05er, 3 Zugänge EF, 3 Wiederholer, 1 Abgang mit Status 9; neue Kurswahl und Gruppen " +
+                                    "auf demselben Plan; Klassenleitungen wandern mit, zwei Klassen tauschen. Die Häkchen darunter " +
+                                    "gelten dann nicht.", false);
+            chkFolgejahr.FontWeight = FontWeights.SemiBold;
+            var fjPanel = new StackPanel { Margin = new Thickness(22, 0, 0, 10) };
+            panel.Children.Add(fjPanel);
+            CheckBox FjWahl(string text)
+            {
+                var cb = new CheckBox
+                {
+                    Content = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap }, IsChecked = false,
+                    Margin = new Thickness(0, 0, 0, 2), IsEnabled = false
+                };
+                fjPanel.Children.Add(cb);
+                return cb;
+            }
+            var chkFjOhneQ2 = FjWahl("Abschlussjahrgang nicht im Export (Q2 fehlt ganz statt mit Status 8 – prüft: kein Teil-Export)");
+            var chkFjKlasse = FjWahl("eine ganze Klasse fehlt (prüft die Sperre – dieser Stand lässt sich nicht importieren)");
+            if (abschnitt is not (1 or 2))
+            {
+                chkFolgejahr.IsEnabled = false;
+                chkFolgejahr.ToolTip = $"Nur aus Abschnitt 1 oder 2 (im Prüflauf gewählt: Abschnitt {abschnitt}).";
+            }
             panel.Children.Add(new TextBlock { Text = "Änderungen:", Margin = new Thickness(0, 0, 0, 4) });
             var andere = new List<CheckBox>();
 
@@ -188,11 +217,15 @@ namespace Stundenplan_V2.Vertretung
                                     chkOhneId, chkVorname, chkNameKlasse, chkGleich, chkLeitung, chkLehrkraft });
             void Abschnitt2Anpassen()
             {
-                bool a2 = chkAbschnitt2.IsChecked == true;
-                foreach (var cb in andere) cb.IsEnabled = !a2;
+                bool a2 = chkAbschnitt2.IsChecked == true, fj = chkFolgejahr.IsChecked == true;
+                foreach (var cb in andere) cb.IsEnabled = !a2 && !fj;
+                chkFjOhneQ2.IsEnabled = fj;
+                chkFjKlasse.IsEnabled = fj;
             }
-            chkAbschnitt2.Checked += (_, __) => Abschnitt2Anpassen();
+            chkAbschnitt2.Checked += (_, __) => { chkFolgejahr.IsChecked = false; Abschnitt2Anpassen(); };
             chkAbschnitt2.Unchecked += (_, __) => Abschnitt2Anpassen();
+            chkFolgejahr.Checked += (_, __) => { chkAbschnitt2.IsChecked = false; Abschnitt2Anpassen(); };
+            chkFolgejahr.Unchecked += (_, __) => Abschnitt2Anpassen();
 
             var startZeile = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 2) };
             startZeile.Children.Add(new TextBlock { Text = "Startwert für den Zufall:", VerticalAlignment = VerticalAlignment.Center,
@@ -246,9 +279,14 @@ namespace Stundenplan_V2.Vertretung
                     Namensgleiche = chkGleich.IsChecked == true,
                     KlassenleitungWechselt = chkLeitung.IsChecked == true,
                     LehrkraftHeisstAnders = chkLehrkraft.IsChecked == true,
-                    Abschnitt2 = chkAbschnitt2.IsChecked == true && abschnitt == 1   // P4a (207)
+                    Abschnitt2 = chkAbschnitt2.IsChecked == true && abschnitt == 1,   // P4a (207)
+                    // P5b-1 (243)
+                    Folgejahr = chkFolgejahr.IsChecked == true && abschnitt is 1 or 2,
+                    FolgejahrOhneAbschluss = chkFjOhneQ2.IsChecked == true,
+                    FolgejahrKlasseFehlt = chkFjKlasse.IsChecked == true
                 };
-                if (!o.Abschnitt2 && !(o.Abgaenge || o.Klassenwechsel || o.Kurswechsel || o.Gruppenwechsel || o.Namensaenderung || o.Geburtsdatum
+                if (o.Folgejahr) o.Abschnitt2 = false;
+                if (!o.Abschnitt2 && !o.Folgejahr && !(o.Abgaenge || o.Klassenwechsel || o.Kurswechsel || o.Gruppenwechsel || o.Namensaenderung || o.Geburtsdatum
                       || o.Neuaufnahmen || o.FehltOhneAbgang || o.KlasseFehlt || o.Vorname || o.NameUndKlasse || o.Namensgleiche
                       || o.OhneSchildId || o.KlassenleitungWechselt || o.LehrkraftHeisstAnders))
                 {

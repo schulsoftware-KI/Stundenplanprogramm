@@ -572,6 +572,10 @@ const HI_THEMEN = [
           "stellt „Aktuelles Schuljahr“ um und setzt „Anwesenheit/Thema erfasst ab“ und „2. Halbjahr ab“ des alten Jahres auf " +
           "Standard (danach neu eintragen, wenn nötig). Das geht auch vor dem Abschluss: Bis dahin bleibt das alte Jahr für " +
           "Nachträge offen.",
+        "**Jahreswechsel-Import aus SchILD:** nach dem Vorbereiten im Desktop „SchILD-Daten…“ mit dem Export des neuen " +
+          "Schuljahres. Die Vorschau vergleicht mit dem Vorjahr: wer versetzt ist oder wiederholt, wer laut SchILD abgegangen " +
+          "ist (Abgang zum Ende des alten Schuljahres, Konto gesperrt) und wer im Export fehlt. Der Punkt wird grün, sobald " +
+          "der erste Import des neuen Jahres da ist.",
         "**Zuständigkeiten** gelten je Schuljahr: Die Klassenleitung der 05A von 2026/27 sieht die alte 05A (bis zum " +
           "Abschluss), aber nicht die neuen Fünftklässler, und betreut deren Schülerkonten nicht. Für das neue Jahr: Konten " +
           "verwalten → Konto → „Bearbeiten“ (Haken „für das aktuelle Schuljahr“). Vorschläge aus SchILD kommen mit dem " +

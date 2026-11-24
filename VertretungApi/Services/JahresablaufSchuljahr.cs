@@ -20,7 +20,8 @@ namespace VertretungApi.Services;
 //
 //  Punkte: 1. letzter Schultag · 2. offene Fehlstunden und Verspätungen · 3. nicht erfasste Stunden · 4. Rückweg nach SchILD
 //  für das 2. Halbjahr · 5. Jahresabschluss (Knopf „abschließen…“ bzw. „Wieder öffnen…“) · 6. neues Schuljahr vorbereiten
-//  (Knopf) · 7. Zuständigkeiten (Hinweis) · dazu weitere abgeschlossene Schuljahre (Knopf „Wieder öffnen…“).
+//  (Knopf) · 7. seit P5b-1 Jahreswechsel-Import aus SchILD (erster Import des neuen Jahres, aus dem Importprotokoll) ·
+//  8. Zuständigkeiten (Hinweis) · dazu weitere abgeschlossene Schuljahre (Knopf „Wieder öffnen…“).
 //  1.–4. sind die Vorprüfung (215): nur Warnungen, keine Sperre.
 //
 //  Aktionen (nur Admin, Rückfrage, Protokoll der Einstellungen mit Schlüssel „Jahresablauf“, ohne Namen von Schülern):
@@ -113,7 +114,8 @@ public static partial class Jahresablauf
     //  Karte
     // -----------------------------------------------------------------
 
-    private static async Task<JaKarteDto> SchuljahrKarteAsync(AppDbContext db, SchulWerte w, DateOnly heute, string akteur)
+    private static async Task<JaKarteDto> SchuljahrKarteAsync(AppDbContext db, SchulWerte w, DateOnly heute, bool produktiv,
+        string akteur)
     {
         const string titel = "Schuljahreswechsel";
         var zeilen = await db.Schuljahre.AsNoTracking().ToListAsync();
@@ -162,6 +164,7 @@ public static partial class Jahresablauf
             punkte.AddRange(await VorpruefungAsync(db, w, jahr, kal, zeile, heute, akteur));
         punkte.Add(AbschlussPunkt(jahr, kal, zeile, abgeschlossen, heute));
         punkte.Add(await NeuesJahrPunktAsync(db, w, stand, kalender, zeilen, kal, heute));
+        punkte.Add(await JahreswechselImportPunktAsync(db, stand.NeuesJahr, !produktiv));   // P5b-1 (218, 246)
         punkte.Add(await ZustaendigkeitPunktAsync(db, jahr, stand.NeuesJahr));
         punkte.AddRange(weiterePunkte);
 
@@ -375,8 +378,8 @@ public static partial class Jahresablauf
                     $"„Aktuelles Schuljahr“ ist {neu}, aber {string.Join(" und ", alt)} gehören noch zum bisherigen Schuljahr." +
                     vorbereitet + " " + desktop, Aktionen: aktion);
             return new JaPunktDto("neuesJahr", titel, kalNeu && planNeu ? Gruen : Gelb,
-                $"„Aktuelles Schuljahr“ ist {neu}.{vorbereitet} {desktop} Danach: Jahreswechsel-Import aus SchILD und Zuständigkeiten " +
-                "(kommen mit P5b).");
+                $"„Aktuelles Schuljahr“ ist {neu}.{vorbereitet} {desktop} Danach: Jahreswechsel-Import aus SchILD (Punkt darunter) " +
+                "und Zuständigkeiten.");
         }
 
         bool dran = kal != null && heute > kal.Letzter;
@@ -385,6 +388,38 @@ public static partial class Jahresablauf
             "„Anwesenheit/Thema erfasst ab“ und „2. Halbjahr ab“ des bisherigen Jahres auf Standard (mit Rückfrage, protokolliert). " +
             $"Ob {w.Schuljahr} vorher abgeschlossen ist, ist egal – bis zum Abschluss bleibt es für Nachträge bearbeitbar.",
             Aktionen: aktion);
+    }
+
+    // ---- Jahreswechsel-Import aus SchILD (P5b-1, 218, 246–248) ----
+
+    /// <summary>Erster SchILD-Import des neuen Schuljahres (dieser Art) aus dem Importprotokoll – grau, solange es keinen gibt.</summary>
+    private static async Task<JaPunktDto> JahreswechselImportPunktAsync(AppDbContext db, string neu, bool pseudo)
+    {
+        var liste = await db.SchildImportProtokolle.AsNoTracking()
+            .Where(x => x.Schuljahr == neu && x.IstPseudo == pseudo)
+            .OrderBy(x => x.Zeit).ThenBy(x => x.Id)
+            .Select(x => new { x.Id, x.Zeit, x.GiltAb, x.Neu, x.Klassenwechsel, x.Kurswechsel, x.Abgaenge })
+            .ToListAsync();
+        var erster = liste.Select(x => new ImportStand(x.Id, x.Zeit, x.GiltAb, x.Neu, x.Klassenwechsel, x.Kurswechsel, x.Abgaenge))
+            .FirstOrDefault();
+        return JahreswechselImportPunkt(neu, erster, liste.Count, pseudo);
+    }
+
+    public static JaPunktDto JahreswechselImportPunkt(string neu, ImportStand? erster, int anzahl, bool pseudo)
+    {
+        string titel = $"Jahreswechsel-Import aus SchILD {neu}";
+        var ziel = new[] { new JaZielDto("schildImporte", "SchILD-Importe") };
+        string art = pseudo ? " (Pseudodaten)" : "";
+        if (erster == null)
+            return new JaPunktDto("jahreswechselImport", titel, Grau,
+                $"Noch kein SchILD-Import für {neu}{art}. Nach „Schuljahr {neu} vorbereiten…“: in SchILD das neue Schuljahr " +
+                $"exportieren, dann im Desktop (Wocheneditor mit dem Schuljahr {neu}) „SchILD-Daten…“. Die Vorschau vergleicht " +
+                $"mit {Verschieben(neu, -1)}: versetzt, wiederholt, Abgänge, fehlt im Export.", Ziele: ziel);
+        var am = DateOnly.FromDateTime(DateTime.SpecifyKind(erster.Zeit, DateTimeKind.Utc).ToLocalTime());
+        return new JaPunktDto("jahreswechselImport", titel, Gruen,
+            $"Import Nr. {erster.Id} vom {D(am)}{art}, gilt ab {D(erster.GiltAb)}: neu {erster.Neu}, Abgänge {erster.Abgaenge}, " +
+            $"versetzt bzw. Klassenwechsel {erster.Klassenwechsel}." +
+            (anzahl > 1 ? $" Danach {Anzahl(anzahl - 1, "weiterer Import", "weitere Importe")}." : ""), Ziele: ziel);
     }
 
     // ---- Zuständigkeiten (219) ----
@@ -405,7 +440,8 @@ public static partial class Jahresablauf
                 ? "Keine Konten mit Zuständigkeit."
                 : $"Eine Zuständigkeit gilt nur für die Daten ihres Schuljahres: Wer für {jahr} zuständig ist, sieht nach dem Wechsel " +
                   $"nicht die Klassen von {neu} und betreut deren Schülerkonten nicht. Ändern: Konten verwalten → Konto → „Bearbeiten“ " +
-                  "(mit dem Haken „für das aktuelle Schuljahr“). Vorschläge aus SchILD für das neue Schuljahr kommen mit P5b.",
+                  "(mit dem Haken „für das aktuelle Schuljahr“). Vorschläge für das neue Schuljahr (laut SchILD bzw. Folgeklasse) " +
+                  "kommen mit P5b-2.",
             jeJahr.Count > 0 ? jeJahr : null,
             Ziele: new[] { new JaZielDto("konten", "Konten verwalten") });
     }

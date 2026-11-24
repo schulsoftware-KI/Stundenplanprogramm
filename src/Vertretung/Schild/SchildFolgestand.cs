@@ -54,6 +54,19 @@ namespace Stundenplan_V2.Vertretung
     //  anderen parallelen Sek-I-Gruppen (WP), 1 Abgang (Status 9) und 1 Neuaufnahme
     //  zum 2. Halbjahr (Status 2, Aufnahme 1. Februar). Nur aus Abschnitt 1.
     //
+    //  Seit P5b-1 (5.3b, Entscheidung 243): „Folgejahr (Schuljahreswechsel)“ – ebenfalls eine eigene Art. Jahr + 1,
+    //  Abschnitt 1 in Basis- und Leistungsdaten, Kurse.dat, Klassen.dat und KurseLehrkraefte.dat (Lehrkraefte.dat,
+    //  Faecher.dat, Jahrgaenge.dat bleiben byte-gleich). Versetzung über die Folgeklasse laut Klassen.dat (fehlt sie:
+    //  Jahrgang + 1, gleicher Buchstabe); 10x → EF bis auf 2 Abgänge je Klasse (Status 8); EF → Q1 → Q2; Q2 → Status 8.
+    //  Neue 05er mit vollen Klassen (so viele wie bisher), 3 Zugänge in die EF (Status 2, neue SchILD-IDs), 3 Wiederholer
+    //  (Sek I, verschiedene Jahrgänge), 1 Abgang mit Status 9 (Sek I). Die erste Sek-I-Klasse (meist 05A, Testkonto
+    //  „s05A“) bekommt keine dieser Rollen. Wer in Klasse bzw. Stufe X landet, bekommt die Leistungszeilen eines
+    //  bisherigen Schülers von X (gleichmäßig verteilt; jede Liste einer festen Zuordnung behält genug Teilnehmer, sonst
+    //  wird getauscht) – so bleibt die Zuordnung gleich, und die Gruppen mischen sich neu. Bisherige Abgänge (Status 8/9)
+    //  sind im neuen Export nicht mehr. Klassenleitungen wandern mit der Klasse, die neuen 05er bekommen die der
+    //  bisherigen 10er, zwei Klassen tauschen ihre Klassenleitung. Wahlweise: Abschlussjahrgang nicht im Export, eine
+    //  ganze Klasse fehlt.
+    //
     //  Damit die Zuordnung SchILD ↔ Plan gleich bleibt: nur feste Zuordnungen
     //  (eindeutig bzw. von Hand, nicht „gemeinsam“), jede Liste behält genug
     //  Teilnehmer (auch aus derselben Klasse), und neue Zeilen in den
@@ -89,6 +102,12 @@ namespace Stundenplan_V2.Vertretung
         public bool LehrkraftHeisstAnders { get; set; }
         // P4a (207): Folgestand „Abschnitt 2“ – eigene Art, die übrigen Häkchen gelten dann nicht
         public bool Abschnitt2 { get; set; }
+        // P5b-1 (243): Folgestand „Folgejahr“ (Schuljahreswechsel) – eigene Art; Varianten Standard aus
+        public bool Folgejahr { get; set; }
+        /// <summary>Der Abschlussjahrgang (Q2) fehlt ganz statt mit Status 8 (prüft: kein Teil-Export).</summary>
+        public bool FolgejahrOhneAbschluss { get; set; }
+        /// <summary>Eine ganze Klasse des neuen Jahres fehlt (prüft die Sperre „ohne Folgeklasse“).</summary>
+        public bool FolgejahrKlasseFehlt { get; set; }
     }
 
     public sealed class SchildFolgestandErgebnis
@@ -134,8 +153,55 @@ namespace Stundenplan_V2.Vertretung
         /// <summary>P4a (207): Folgestand „Abschnitt 2“ (Halbjahreswechsel).</summary>
         public bool Abschnitt2 { get; set; }
 
+        // ---- P5b-1 (243): Folgejahr ----
+        /// <summary>Schuljahr des Folgejahres („2027/28“); null = kein Folgejahr.</summary>
+        public string? Folgejahr { get; set; }
+        public string AusgangSchuljahr { get; set; } = "";
+        public int Versetzt { get; set; }
+        public int Wiederholt { get; set; }
+        /// <summary>Beurlaubte ohne Kurse (keine Zugehörigkeit im Vorjahr): die Vorschau zeigt nur „Jahrgang … → …“.</summary>
+        public int NurJahrgang { get; set; }
+        /// <summary>Abschlussjahrgang ohne Export (Variante): so viele fehlen zusätzlich (nicht vorausgewählt).</summary>
+        public int FehltAbschluss { get; set; }
+        /// <summary>Variante „eine Klasse fehlt“: Klasse des neuen Jahres und die Klasse des Vorjahres ohne Folgeklasse.</summary>
+        public string? FehlendeFolgeklasse { get; set; }
+        public string? OhneFolgeklasse { get; set; }
+        /// <summary>Versetzung je Klasse bzw. Stufe des Vorjahres: „05A → 06A (27)“.</summary>
+        public List<string> Versetzungen { get; } = new();
+
+        private string ErwartungFolgejahr()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"Folgejahr {Folgejahr} (Schuljahreswechsel aus {AusgangSchuljahr}): Vorher im Desktop den Kalender " +
+                          $"{Folgejahr} anlegen (Kalender → Schuljahr {Folgejahr} → neues Schuljahr), den Grundplan ab dem ersten " +
+                          $"Schultag {Folgejahr} veröffentlichen und in der App „Schuljahr {Folgejahr} vorbereiten…“. Im Prüflauf " +
+                          "Abschnitt 1 wählen; im Reiter „Zuordnung“ ggf. „Festlegungen aus dem Vorjahr übernehmen…“.");
+            sb.AppendLine($"Erwartet in der Vorschau (ungefähr, wenn genau „{Ausgangsordner}“ importiert ist): Schüler im Export " +
+                          $"{ImExport} · neu {Neu} · versetzt {Versetzt} · wiederholt {Wiederholt} · Abgang laut SchILD " +
+                          $"{AbgangLautSchild} · fehlt im Export {FehltImExport + FehltAbschluss}" +
+                          (FehltAbschluss > 0 ? $" (davon {FehltAbschluss} aus dem Abschlussjahrgang Q2)" : "") +
+                          $" · Klassenwechsel 0 · Kurs-/Gruppenwechsel 0 · Status bzw. Jahrgang geändert {NurJahrgang}" +
+                          (NurJahrgang > 0 ? " (beurlaubte Schüler ohne Kurse – ohne Zugehörigkeit im Vorjahr zählen sie nicht als " +
+                                             "„versetzt“, nur ihr Jahrgang ändert sich)" : "") + ".");
+            sb.AppendLine("„Ungefähr“: Schüler, deren „fehlt im Export“ früher nicht bestätigt wurde, kommen bei „fehlt im Export“ " +
+                          "dazu (z. B. aus Folgestand 1); Neuaufnahmen mit Status 0 aus früheren Folgeständen zählen bei „versetzt“.");
+            if (Versetzungen.Count > 0) sb.AppendLine("Versetzung: " + string.Join(", ", Versetzungen) + ".");
+            if (FehltAbschluss > 0)
+                sb.AppendLine($"Der Abschlussjahrgang fehlt ganz ({FehltAbschluss} Schüler) – das ist kein Teil-Export: Die Vorschau " +
+                              "darf nicht sperren; die Zeilen „fehlt im Export“ tragen den Hinweis „Abschlussjahrgang – vermutlich " +
+                              "Abschluss“ (Ansicht „fehlt im Export“ → „Alle in der Ansicht bestätigen“).");
+            if (FehlendeFolgeklasse != null)
+                sb.AppendLine($"Die Klasse {FehlendeFolgeklasse} fehlt ganz – von der Klasse {OhneFolgeklasse} des Vorjahres steht kein " +
+                              $"Schüler im Export: Die Vorschau muss sperren („… kein einziger Schüler im Export …: {OhneFolgeklasse}“); " +
+                              "dieser Stand lässt sich nicht importieren.");
+            if (KlassenleitungText != null)
+                sb.AppendLine($"Klassenleitungen (Klassen.dat): {KlassenleitungText}");
+            return sb.ToString().TrimEnd();
+        }
+
         public string ErwartungText()
         {
+            if (Folgejahr != null) return ErwartungFolgejahr();   // P5b-1 (243)
             var sb = new StringBuilder();
             if (Abschnitt2)
                 sb.AppendLine("Abschnitt 2 (Halbjahreswechsel): im Prüflauf „Abschnitt 2“ wählen; „Änderungen gelten ab“ = erster Tag " +
@@ -179,6 +245,7 @@ namespace Stundenplan_V2.Vertretung
         {
             var sb = new StringBuilder();
             sb.AppendLine($"Folgestand {Nummer} aus „{Ausgangsordner}“" + (Abschnitt2 ? " – Abschnitt 2 (Halbjahreswechsel)" : "") +
+                          (Folgejahr != null ? $" – Folgejahr {Folgejahr} (Schuljahreswechsel)" : "") +
                           " (nur Pseudodaten – keine echten Personen):");
             sb.AppendLine(Ordner);
             sb.AppendLine();
@@ -698,6 +765,12 @@ namespace Stundenplan_V2.Vertretung
                 Einlesen();
                 if (_personen.Count == 0)
                     throw new InvalidOperationException($"In {_ba.Name} stehen keine Schüler im Abschnitt {_jahr}/{_abschnitt}.");
+                // P5b-1 (243): Folgestand „Folgejahr“ – eigene Art (die übrigen Häkchen gelten nicht)
+                if (_opt.Folgejahr)
+                {
+                    RechneFolgejahr();
+                    return;
+                }
                 // P4a (207): Folgestand „Abschnitt 2“ – eigene Art (die übrigen Häkchen gelten nicht)
                 if (_opt.Abschnitt2)
                 {
@@ -1317,6 +1390,502 @@ namespace Stundenplan_V2.Vertretung
             }
 
             // ---------------------------------------------------------------
+            //  P5b-1 (243): Folgestand „Folgejahr“ (Schuljahreswechsel)
+            // ---------------------------------------------------------------
+
+            /// <summary>Ein Schüler im neuen Jahr – ein bisheriger (versetzt bzw. Wiederholer) oder ein neu aufgenommener.</summary>
+            private sealed class FjSchueler
+            {
+                public Person? Alt;                 // bisheriger Schüler (null = Neuaufnahme)
+                public string Gruppe = "";          // Klasse (Sek I) bzw. Stufe (Oberstufe) im neuen Jahr
+                public string VonGruppe = "";       // Klasse bzw. Stufe im Vorjahr (Neuaufnahme: leer)
+                public bool Wiederholt;
+                public bool Fehlt;                  // Variante „eine Klasse fehlt“: nicht im Export
+                public Person? Spender;             // Leistungszeilen (und bei Neuaufnahmen die Zeile der Basisdaten) wie dieser
+                public bool VollerSpender = true;   // false = nur so viele Zeilen wie bisher (extern, Status 6)
+                // nur Neuaufnahmen
+                public string Nachname = "", Vorname = "";
+                public DateOnly Geb;
+                public bool Weiblich;
+                public string Anzeige => Alt?.Anzeige ?? $"{Vorname} {Nachname}";
+            }
+
+            /// <summary>Klasse (Sek I) bzw. Stufe (Oberstufe) eines bisherigen Schülers.</summary>
+            private static string GruppeVon(Person p) => p.Oberstufe ? p.Stufe : p.Klasse;
+
+            private static bool IstSek1Klasse(string g) => g.Length >= 3 && char.IsDigit(g[0]) && char.IsDigit(g[1]);
+
+            private static bool GleicheStufe(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
+            private void RechneFolgejahr()
+            {
+                if (_abschnitt is not (1 or 2))
+                    throw new InvalidOperationException("Ein Folgejahr gibt es nur aus Abschnitt 1 oder 2 (dem letzten Abschnitt des " +
+                                                        $"Schuljahres) – gewählt ist Abschnitt {_abschnitt}.");
+                int neuJahr = _jahr + 1;
+                E.Folgejahr = $"{neuJahr}/{(neuJahr + 1) % 100:00}";
+                E.AusgangSchuljahr = $"{_jahr}/{(_jahr + 1) % 100:00}";
+                E.Uebersicht.Add($"Folgejahr {E.Folgejahr} (Schuljahreswechsel)");
+                var std = SchildProfil.Standard();
+
+                // ---- Klassen.dat: Folgeklasse und Klassenleitung ----
+                string klName = std.Fuer(SchildDateiArt.Klassen).Datei;
+                Roh? kl = _marker.Dateien.ContainsKey(klName) ? Lies(_ex.Ordner, klName) : null;
+                int kBez = -1, kFolge = -1, kLehrer = -1, kJ = -1, kA = -1;
+                var klZeile = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                var folgeLaut = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (kl != null)
+                {
+                    kBez = kl.SpPflicht("InternBez");
+                    kFolge = kl.Sp("Folgeklasse");
+                    kLehrer = kl.Sp("Klassenlehrer");
+                    kJ = kl.Sp("Jahr");
+                    kA = kl.Sp("Abschnitt");
+                    for (int zi = 0; zi < kl.Zeilen.Count; zi++)
+                    {
+                        var kz = kl.Zeilen[zi];
+                        if (!ImAbschnitt(kz, kJ, kA)) continue;
+                        string kn = SchildText.KlasseNorm(Roh.W(kz, kBez));
+                        if (kn.Length == 0 || !klZeile.TryAdd(kn, zi)) continue;
+                        string fk = SchildText.KlasseNorm(Roh.W(kz, kFolge));
+                        if (fk.Length > 0) folgeLaut[kn] = fk;
+                    }
+                }
+                else E.NichtMoeglich.Add($"{klName} fehlt – Versetzung nach Jahrgang + 1, Klassenleitungen unverändert.");
+
+                // ---- Spender je Klasse bzw. Stufe: bisherige Schüler mit Status 2 und Leistungsdaten ----
+                var spender = _personen.Where(q => q.Status == 2 && Leistungen(q.Key).Count > 0 && GruppeVon(q).Length > 0)
+                    .GroupBy(q => GruppeVon(q), StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(gr => gr.Key, gr => gr.OrderBy(q => q.Basis).ToList(), StringComparer.OrdinalIgnoreCase);
+                if (spender.Count == 0)
+                    throw new InvalidOperationException("Im Abschnitt gibt es keine Schüler mit Status 2 und Leistungsdaten – kein Folgejahr möglich.");
+                // Klasse und Jahrgang so, wie sie in der Datei stehen (vor allen Änderungen gemerkt)
+                var musterKlasse = spender.ToDictionary(kv => kv.Key, kv => Roh.W(_ba.Zeilen[kv.Value[0].Basis], bKl),
+                    StringComparer.OrdinalIgnoreCase);
+                var musterJg = spender.ToDictionary(kv => kv.Key, kv => Roh.W(_ba.Zeilen[kv.Value[0].Basis], bJg),
+                    StringComparer.OrdinalIgnoreCase);
+
+                string? Folge(string vonG)
+                {
+                    if (folgeLaut.TryGetValue(vonG, out var laut) && spender.ContainsKey(laut)) return laut;
+                    if (Oberstufe.Contains(vonG))
+                        return GleicheStufe(vonG, "EF") && spender.ContainsKey("Q1") ? "Q1"
+                             : GleicheStufe(vonG, "Q1") && spender.ContainsKey("Q2") ? "Q2" : null;
+                    if (!IstSek1Klasse(vonG)) return null;
+                    int jg = int.Parse(vonG[..2], CultureInfo.InvariantCulture);
+                    if (jg >= 10) return spender.ContainsKey("EF") ? "EF" : null;
+                    string praefix = (jg + 1).ToString("00", CultureInfo.InvariantCulture);
+                    string gleich = praefix + vonG[2..];
+                    if (spender.ContainsKey(gleich)) return gleich;
+                    var andere = spender.Keys.Where(q => IstSek1Klasse(q) && q.StartsWith(praefix, StringComparison.Ordinal))
+                        .OrderBy(q => q, StringComparer.Ordinal).ToList();
+                    if (andere.Count == 0) return null;
+                    int idx = char.ToUpperInvariant(vonG[2]) - 'A';
+                    return andere[((idx % andere.Count) + andere.Count) % andere.Count];
+                }
+
+                // ---- Rollen (feste Reihenfolge, Startwert): Abgänge Jahrgang 10, Wiederholer, Abgang mit Status 9 ----
+                var sek1Klassen = spender.Keys.Where(IstSek1Klasse).OrderBy(q => q, StringComparer.Ordinal).ToList();
+                string? ersteKlasse = sek1Klassen.FirstOrDefault();
+                var mitRolle = new HashSet<string>(StringComparer.Ordinal);
+                bool Waehlbar(Person kand) => kand.Status == 2 && kand.Zusatz.Length == 0 && !kand.Oberstufe && kand.Klasse != ersteKlasse
+                                              && !mitRolle.Contains(kand.Key) && Leistungen(kand.Key).Count > 0;
+
+                var abgang10 = new List<Person>();
+                foreach (var k10 in sek1Klassen.Where(q => q.StartsWith("10", StringComparison.Ordinal)))
+                {
+                    var auswahl = Gemischt(_personen.Where(q => q.Klasse == k10 && Waehlbar(q)).OrderBy(q => q.Basis)).Take(2).ToList();
+                    foreach (var ab10 in auswahl) { abgang10.Add(ab10); mitRolle.Add(ab10.Key); }
+                    if (auswahl.Count < 2) E.NichtMoeglich.Add($"Abgänge aus {k10}: nur {auswahl.Count} von 2 möglich.");
+                }
+                var wiederholer = new List<Person>();
+                foreach (var wjg in Gemischt(new[] { "06", "07", "08", "09" }))
+                {
+                    if (wiederholer.Count >= 3) break;
+                    var wdh = Zufall(_personen.Where(q => Waehlbar(q) && q.Jg == wjg).OrderBy(q => q.Basis).ToList());
+                    if (wdh == null) continue;
+                    wiederholer.Add(wdh);
+                    mitRolle.Add(wdh.Key);
+                }
+                if (wiederholer.Count < 3) E.NichtMoeglich.Add($"Wiederholer: nur {wiederholer.Count} von 3 möglich.");
+                var abgang9 = Zufall(_personen.Where(q => Waehlbar(q) && string.CompareOrdinal(q.Jg, "06") >= 0
+                                                          && string.CompareOrdinal(q.Jg, "09") <= 0).OrderBy(q => q.Basis).ToList())
+                              ?? Zufall(_personen.Where(q => Waehlbar(q)).OrderBy(q => q.Basis).ToList());
+                if (abgang9 != null) mitRolle.Add(abgang9.Key);
+                else E.NichtMoeglich.Add("Abgang mit Status 9: kein passender Schüler.");
+
+                // ---- Wohin jeder bisherige Schüler kommt ----
+                var neuesJahr = new List<FjSchueler>();
+                var abgehend = new List<(Person P, int Status)>();
+                var abgang10Keys = new HashSet<string>(abgang10.Select(q => q.Key), StringComparer.Ordinal);
+                var wiederholerKeys = new HashSet<string>(wiederholer.Select(q => q.Key), StringComparer.Ordinal);
+                int bisherWeg = 0, ohneZiel = 0;
+                foreach (var alt in _personen.ToList())
+                {
+                    if (alt.Status is 8 or 9) { Entferne(alt); bisherWeg++; continue; }   // bisherige Abgänge: nicht mehr im Export
+                    if (alt.Status is not (0 or 2 or 3 or 6)) continue;                    // Warteliste (1) bleibt, wie sie ist
+                    string von = GruppeVon(alt);
+                    if (abgang10Keys.Contains(alt.Key) || GleicheStufe(von, "Q2")) { abgehend.Add((alt, 8)); continue; }
+                    if (abgang9 != null && alt.Key == abgang9.Key) { abgehend.Add((alt, 9)); continue; }
+                    bool wdh = wiederholerKeys.Contains(alt.Key);
+                    string? ziel = wdh ? von : Folge(von);
+                    if (ziel == null || !spender.ContainsKey(ziel))
+                    {
+                        abgehend.Add((alt, 8));
+                        ohneZiel++;
+                        continue;
+                    }
+                    neuesJahr.Add(new FjSchueler { Alt = alt, Gruppe = ziel, VonGruppe = von, Wiederholt = wdh });
+                }
+                if (ohneZiel > 0)
+                    E.NichtMoeglich.Add($"{ohneZiel} Schüler ohne Folgeklasse (keine passende Klasse bzw. Stufe mit Schülern) – im " +
+                                        "Folgejahr mit Status 8.");
+
+                // ---- Neuaufnahmen: volle 05er (so viele wie bisher je Klasse), 3 Zugänge in die EF ----
+                var neu05 = new List<string>();
+                foreach (var k05 in sek1Klassen.Where(q => q.StartsWith("05", StringComparison.Ordinal)))
+                {
+                    int anzahl = _personen.Count(q => q.Klasse == k05 && q.Status is 0 or 2);
+                    int n05 = 0;
+                    for (int nr = 0; nr < anzahl; nr++)
+                        if (NeuerSchueler(k05, spender[k05]) is FjSchueler fn) { neuesJahr.Add(fn); n05++; }
+                    neu05.Add($"{k05} {n05}");
+                }
+                var zugaengeEf = new List<FjSchueler>();
+                if (spender.ContainsKey("EF"))
+                    for (int nr = 0; nr < 3; nr++)
+                        if (NeuerSchueler("EF", spender["EF"]) is FjSchueler fe) { neuesJahr.Add(fe); zugaengeEf.Add(fe); }
+                if (zugaengeEf.Count < 3) E.NichtMoeglich.Add($"Zugänge EF: nur {zugaengeEf.Count} von 3 möglich.");
+
+                // ---- Variante: eine ganze Klasse des neuen Jahres fehlt (alle kommen aus genau einer Klasse des Vorjahres) ----
+                if (_opt.FolgejahrKlasseFehlt)
+                {
+                    var mitRollenKlassen = new HashSet<string>(_personen.Where(q => mitRolle.Contains(q.Key)).Select(q => q.Klasse),
+                        StringComparer.OrdinalIgnoreCase);
+                    var wahl = neuesJahr.Where(q => IstSek1Klasse(q.Gruppe) && !q.Gruppe.StartsWith("05", StringComparison.Ordinal))
+                        .GroupBy(q => q.Gruppe, StringComparer.OrdinalIgnoreCase)
+                        .Where(gr => gr.All(q => q.Alt != null && !q.Wiederholt)
+                                     && gr.Select(q => q.VonGruppe).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1
+                                     && gr.First().VonGruppe != ersteKlasse && !mitRollenKlassen.Contains(gr.First().VonGruppe))
+                        .OrderBy(gr => gr.Key, StringComparer.Ordinal).LastOrDefault();
+                    if (wahl == null) E.NichtMoeglich.Add("Eine Klasse fehlt: keine passende Klasse gefunden.");
+                    else
+                    {
+                        foreach (var fjw in wahl) fjw.Fehlt = true;
+                        E.FehlendeFolgeklasse = wahl.Key;
+                        E.OhneFolgeklasse = wahl.First().VonGruppe;
+                    }
+                }
+
+                // ---- Leistungszeilen: gleichmäßig von den bisherigen Schülern der Zielgruppe ----
+                int getauscht = 0;
+                var nichtVoll = new List<string>();
+                foreach (var zielGruppe in neuesJahr.Where(q => !q.Fehlt && (q.Alt == null || q.Alt.Status is 0 or 2))
+                             .GroupBy(q => q.Gruppe, StringComparer.OrdinalIgnoreCase).OrderBy(gr0 => gr0.Key, StringComparer.Ordinal))
+                {
+                    var spenderListe = Gemischt(spender[zielGruppe.Key]);
+                    var ziele = Gemischt(zielGruppe);
+                    for (int zi = 0; zi < ziele.Count; zi++) ziele[zi].Spender = spenderListe[zi % spenderListe.Count];
+                    if (ziele.Count >= spenderListe.Count) continue;
+                    int t = Ausgleichen(ziele, spenderListe);
+                    if (t < 0) nichtVoll.Add(zielGruppe.Key);
+                    else getauscht += t;
+                }
+                foreach (var ext in neuesJahr.Where(q0 => !q0.Fehlt && q0.Alt?.Status == 6))
+                {
+                    ext.Spender = Zufall(spender[ext.Gruppe]);   // extern: Kurse wie ein Schüler der Stufe, nur so viele wie bisher
+                    ext.VollerSpender = false;
+                }
+                if (nichtVoll.Count > 0)
+                    E.NichtMoeglich.Add("Nicht jede Liste einer festen Zuordnung behält genug Teilnehmer in: " + string.Join(", ", nichtVoll) +
+                                        " – die Zuordnung kann sich dort ändern.");
+
+                // ---- Klassenleitungen (vor dem Schreiben: Herkunft der Klassen) ----
+                if (kl != null && kLehrer >= 0) KlassenleitungenFolgejahr(kl, kLehrer, klZeile, neuesJahr);
+
+                // ---- Schreiben ----
+                var aufnahme = new DateOnly(neuJahr, 8, 1);
+                foreach (var fj in neuesJahr)
+                {
+                    if (fj.Fehlt)
+                    {
+                        if (fj.Alt != null) { Entferne(fj.Alt); E.FehltImExport++; }
+                        continue;
+                    }
+                    if (fj.Alt != null) Versetzen(fj, musterKlasse[fj.Gruppe], musterJg[fj.Gruppe]);
+                    else Aufnehmen(fj, musterKlasse[fj.Gruppe], musterJg[fj.Gruppe], aufnahme);
+                }
+                int abgaenge8 = 0, abgaenge9 = 0;
+                foreach (var (ab, status) in abgehend)
+                {
+                    if (_opt.FolgejahrOhneAbschluss && GleicheStufe(GruppeVon(ab), "Q2")) { Entferne(ab); E.FehltAbschluss++; continue; }
+                    _ba.Setze(ab.Basis, bS, status.ToString(CultureInfo.InvariantCulture));
+                    foreach (int li in Leistungen(ab.Key)) _le.Entferne(li);
+                    if (status == 9) abgaenge9++;
+                    else abgaenge8++;
+                }
+
+                // Zuletzt: Jahr + 1, Abschnitt 1 in allen Dateien mit Jahr/Abschnitt (auch in den neuen Zeilen)
+                int nBa = JahrUmstellen(_ba, neuJahr), nLe = JahrUmstellen(_le, neuJahr), nWeitere = 0;
+                foreach (var art in new[] { SchildDateiArt.Kurse, SchildDateiArt.KurseLehrkraefte })
+                {
+                    string name = std.Fuer(art).Datei;
+                    if (!_marker.Dateien.ContainsKey(name)) continue;
+                    var r = Lies(_ex.Ordner, name);
+                    int n = JahrUmstellen(r, neuJahr);
+                    if (n == 0) continue;
+                    _weitere.Add(r);
+                    nWeitere += n;
+                }
+                if (kl != null)
+                {
+                    nWeitere += JahrUmstellen(kl, neuJahr);
+                    _kl = kl;
+                }
+
+                // ---- Ergebnis ----
+                var imExport = neuesJahr.Where(q => !q.Fehlt).ToList();
+                E.NurJahrgang = imExport.Count(q => q.Alt != null && !q.Wiederholt && q.Alt.Status == 3);
+                E.Versetzt = imExport.Count(q => q.Alt != null && !q.Wiederholt) - E.NurJahrgang;
+                E.Wiederholt = imExport.Count(q => q.Wiederholt);
+                E.Neu = imExport.Count(q => q.Alt == null);
+                E.AbgangLautSchild = abgaenge8 + abgaenge9;
+                E.ImExport = imExport.Count + E.AbgangLautSchild;
+                foreach (var vers in neuesJahr.Where(q => q.Alt != null)
+                             .GroupBy(q => (q.VonGruppe, q.Gruppe, q.Wiederholt))
+                             .OrderBy(gr0 => gr0.Key.VonGruppe, StringComparer.Ordinal).ThenBy(gr0 => gr0.Key.Gruppe, StringComparer.Ordinal))
+                    E.Versetzungen.Add($"{vers.Key.VonGruppe} → {vers.Key.Gruppe} ({vers.Count()}{(vers.Key.Wiederholt ? ", wiederholt" : "")})");
+
+                E.Aenderungen.Add($"Jahr {_jahr} → {neuJahr}, Abschnitt {_abschnitt} → 1 in {nBa} Zeilen der Basisdaten, {nLe} der " +
+                                  $"Leistungsdaten und {nWeitere} Zeilen von Kurse.dat, Klassen.dat bzw. KurseLehrkraefte.dat");
+                E.Aenderungen.Add($"Versetzt: {E.Versetzt} Schüler (Folgeklasse laut Klassen.dat bzw. Jahrgang + 1; 10er → EF, EF → Q1, " +
+                                  "Q1 → Q2) – Leistungsdaten wie ein bisheriger Schüler der neuen Klasse bzw. Stufe" +
+                                  (getauscht > 0 ? $" ({getauscht}× getauscht, damit jede feste Liste genug Teilnehmer behält)" : ""));
+                foreach (var w in wiederholer) E.Aenderungen.Add($"Wiederholer: {w.Anzeige} bleibt in {w.Klasse}");
+                if (abgang9 != null) E.Aenderungen.Add($"Abgang (Status 9): {abgang9.Anzeige} ({abgang9.Klasse})");
+                if (abgang10.Count > 0)
+                    E.Aenderungen.Add("Abgang nach Jahrgang 10 (Status 8): " +
+                                      string.Join(", ", abgang10.Select(q => $"{q.Anzeige} ({q.Klasse})")));
+                int q2 = abgehend.Count(q => GleicheStufe(GruppeVon(q.P), "Q2"));
+                E.Aenderungen.Add(_opt.FolgejahrOhneAbschluss
+                    ? $"Abschlussjahrgang Q2: fehlt ganz im Export ({q2} Schüler)"
+                    : $"Abschlussjahrgang Q2: {q2} Schüler mit Status 8 (Abschluss)");
+                if (neu05.Count > 0)
+                    E.Aenderungen.Add($"Neuaufnahmen Jahrgang 05 (Status 2, Aufnahme {D(aufnahme)}, neue SchILD-IDs; Kurse und Gruppen wie " +
+                                      $"bisherige 05er): {string.Join(", ", neu05)}");
+                if (zugaengeEf.Count > 0)
+                    E.Aenderungen.Add($"Zugänge EF (Status 2, Aufnahme {D(aufnahme)}): " + string.Join(", ", zugaengeEf.Select(q => q.Anzeige)));
+                if (bisherWeg > 0) E.Aenderungen.Add($"{bisherWeg} bisherige Abgänge (Status 8/9) sind im neuen Export nicht mehr enthalten");
+                if (E.FehlendeFolgeklasse != null)
+                    E.Aenderungen.Add($"Die ganze Klasse {E.FehlendeFolgeklasse} fehlt im Export ({E.FehltImExport} Schüler aus " +
+                                      $"{E.OhneFolgeklasse}) – prüft die Sperre „ohne Folgeklasse“.");
+
+                E.Uebersicht.Add($"{E.Versetzt} versetzt");
+                E.Uebersicht.Add($"{E.Wiederholt} Wiederholer");
+                E.Uebersicht.Add($"{abgaenge8} Abgänge Status 8, {abgaenge9} Status 9");
+                E.Uebersicht.Add($"{E.Neu} Neuaufnahmen");
+                if (E.FehltAbschluss > 0) E.Uebersicht.Add($"Abschlussjahrgang fehlt ({E.FehltAbschluss})");
+                if (E.FehlendeFolgeklasse != null) E.Uebersicht.Add($"Klasse {E.FehlendeFolgeklasse} fehlt ganz");
+            }
+
+            /// <summary>Neuer Schüler einer Gruppe: fiktiver Name, ein Jahr jünger als ein bisheriger Schüler der Gruppe.</summary>
+            private FjSchueler? NeuerSchueler(string gruppe, List<Person> vorbilder)
+            {
+                for (int versuch = 0; versuch < 200; versuch++)
+                {
+                    var vorbild = vorbilder[_rnd.Next(vorbilder.Count)];
+                    bool w = _rnd.Next(2) == 0;
+                    string vn = w ? SchildGenerator.VornamenW[_rnd.Next(SchildGenerator.VornamenW.Length)]
+                                  : SchildGenerator.VornamenM[_rnd.Next(SchildGenerator.VornamenM.Length)];
+                    string nn = SchildGenerator.Nachnamen[_rnd.Next(SchildGenerator.Nachnamen.Length)];
+                    var geb = vorbild.Geb.AddYears(1).AddDays(_rnd.Next(-150, 151));
+                    if (!NeuerSchluessel(nn, vn, geb)) continue;
+                    Merke(nn, vn, geb);
+                    return new FjSchueler { Gruppe = gruppe, Nachname = nn, Vorname = vn, Geb = geb, Weiblich = w };
+                }
+                return null;
+            }
+
+            /// <summary>
+            /// Weniger neue als bisherige Schüler einer Gruppe: unbenutzte Spender so eintauschen, dass jede Liste einer festen
+            /// Zuordnung (über Leistungsdaten) aus dieser Gruppe mindestens min(bisher, 2) Teilnehmer behält. Rückgabe: Anzahl der
+            /// Tausche, −1 = nicht ganz möglich.
+            /// </summary>
+            private int Ausgleichen(List<FjSchueler> ziele, List<Person> spenderListe)
+            {
+                var listen = spenderListe.ToDictionary(sp => sp.Key, sp => ZeilenVon(sp.Key).Where(u => UeberLeistung(u) && Fest(u)).ToList(),
+                    StringComparer.Ordinal);
+                var bisher = new Dictionary<SchildZuordnungZeile, int>();
+                foreach (var spd in spenderListe)
+                    foreach (var ul in listen[spd.Key]) bisher[ul] = (bisher.TryGetValue(ul, out var b0) ? b0 : 0) + 1;
+                var jetzt = new Dictionary<SchildZuordnungZeile, int>();
+                var benutzt = new Dictionary<string, int>(StringComparer.Ordinal);
+                void Zaehle(Person spz, int plus)
+                {
+                    benutzt[spz.Key] = (benutzt.TryGetValue(spz.Key, out var b1) ? b1 : 0) + plus;
+                    foreach (var uz in listen[spz.Key]) jetzt[uz] = (jetzt.TryGetValue(uz, out var j0) ? j0 : 0) + plus;
+                }
+                foreach (var zz in ziele) Zaehle(zz.Spender!, 1);
+                int Noetig(SchildZuordnungZeile un) => Math.Min(bisher[un], 2);
+                int Jetzt(SchildZuordnungZeile uj) => jetzt.TryGetValue(uj, out var j1) ? j1 : 0;
+                int tausche = 0;
+                for (int runde = 0; runde < 500; runde++)
+                {
+                    var luecke = bisher.Keys.FirstOrDefault(u => Jetzt(u) < Noetig(u));
+                    if (luecke == null) return tausche;
+                    var neuSp = spenderListe.FirstOrDefault(sp => (!benutzt.TryGetValue(sp.Key, out var b2) || b2 == 0)
+                                                                  && listen[sp.Key].Contains(luecke));
+                    if (neuSp == null) return -1;
+                    var neuListen = listen[neuSp.Key];
+                    // Abgeben darf nur, wer die Lücke nicht schon füllt und dessen übrige Listen danach noch genug haben.
+                    var weg = ziele.FirstOrDefault(zl => !listen[zl.Spender!.Key].Contains(luecke)
+                                                         && listen[zl.Spender!.Key].All(v => neuListen.Contains(v) || Jetzt(v) - 1 >= Noetig(v)));
+                    if (weg == null) return -1;
+                    Zaehle(weg.Spender!, -1);
+                    weg.Spender = neuSp;
+                    Zaehle(neuSp, 1);
+                    tausche++;
+                }
+                return -1;
+            }
+
+            /// <summary>Bisheriger Schüler im neuen Jahr: Klasse/Jahrgang, ggf. „#Klasse“, Status 0 → 2, Leistungszeilen wie der Spender.</summary>
+            private void Versetzen(FjSchueler fj, string klasseZelle, string jgZelle)
+            {
+                var alt = fj.Alt!;
+                // Der „#Klasse“-Zusatz am Nachnamen wandert mit der Klasse (Basis- und Lernplattform-Daten; Leistungsdaten unten).
+                if (alt.Zusatz.Length > 0 && !alt.Oberstufe && IstSek1Klasse(fj.Gruppe)
+                    && SchildText.KlasseNorm(alt.Zusatz) == alt.Klasse && !fj.Wiederholt)
+                {
+                    alt.Zusatz = fj.Gruppe;
+                    _ba.Setze(alt.Basis, bN, alt.NameFeld);
+                    if (_lp != null && _lpZeile.TryGetValue(alt.Key, out int ipz)) _lp.Setze(ipz, pN, alt.NameFeld);
+                }
+                _ba.Setze(alt.Basis, bKl, klasseZelle);
+                _ba.Setze(alt.Basis, bJg, jgZelle);
+                if (alt.Status == 0) _ba.Setze(alt.Basis, bS, "2");
+                var alte = Leistungen(alt.Key);
+                foreach (int li in alte) _le.Entferne(li);
+                if (fj.Spender == null) return;   // beurlaubt (Status 3): ohne Leistungsdaten
+                var zeilen = Leistungen(fj.Spender.Key);
+                if (!fj.VollerSpender) zeilen = zeilen.Take(Math.Max(1, alte.Count)).ToList();
+                if (zeilen.Count == 0) return;
+                int nach = alte.Count > 0 ? alte.Min() : zeilen.Max();
+                foreach (int li in zeilen) _le.Einfuegen(nach, AlsPerson(_le.Zeilen[li], alt));
+            }
+
+            /// <summary>Neuaufnahme: Zeile der Basisdaten nach dem Spender (Status 2), seine Leistungszeilen, neue SchILD-ID.</summary>
+            private void Aufnehmen(FjSchueler fj, string klasseZelle, string jgZelle, DateOnly aufnahme)
+            {
+                var vorlage = fj.Spender ?? throw new InvalidOperationException("Neuaufnahme ohne Spender.");
+                int einschulung = fj.Geb.Year + 6 + (fj.Geb.Month >= 7 ? 1 : 0);
+                _ba.Einfuegen(vorlage.Basis, Mit(_ba.Zeilen[vorlage.Basis], _ba.Kopf.Length,
+                    (bN, fj.Nachname), (bV, fj.Vorname), (bG, D(fj.Geb)), (bGe, fj.Weiblich ? "w" : "m"), (bS, "2"),
+                    (bAuf, D(aufnahme)), (bEin, einschulung.ToString(CultureInfo.InvariantCulture)), (bKl, klasseZelle),
+                    (bJg, jgZelle)));
+                var zeilen = Leistungen(vorlage.Key);
+                int nach = zeilen.Max();
+                foreach (int li in zeilen)
+                    _le.Einfuegen(nach, Mit(_le.Zeilen[li], _le.Kopf.Length, (lN, fj.Nachname), (lV, fj.Vorname), (lG, D(fj.Geb))));
+                if (_lp == null || _lp.Zeilen.Count == 0) return;
+                int ip = _lpZeile.TryGetValue(vorlage.Key, out int ipv) ? ipv : 0;
+                string ids = (++_maxId).ToString(CultureInfo.InvariantCulture);
+                _lp.Einfuegen(ip, Mit(_lp.Zeilen[ip], _lp.Kopf.Length, (pN, fj.Nachname), (pV, fj.Vorname), (pG, D(fj.Geb)),
+                                      (pId, ids), (pBen, "pseudo" + ids)));
+            }
+
+            /// <summary>
+            /// Klassenleitungen im Folgejahr (Klassen.dat): Sek I wandern mit der Klasse (Herkunft der Mehrheit), die neuen 05er
+            /// bekommen die der bisherigen 10er (gleicher Buchstabe, sonst der Reihe nach), die Stufen EF ← Q2, Q1 ← EF, Q2 ← Q1;
+            /// danach tauschen zwei Klassen desselben Jahrgangs (nicht die Lehrkraft mit Plan-Kürzel „L1“) ihre Klassenleitung.
+            /// </summary>
+            private void KlassenleitungenFolgejahr(Roh kl, int kLehrer, Dictionary<string, int> klZeile, List<FjSchueler> neuesJahr)
+            {
+                var alt = klZeile.ToDictionary(kv => kv.Key, kv => Roh.W(kl.Zeilen[kv.Value], kLehrer), StringComparer.OrdinalIgnoreCase);
+                var neu = new Dictionary<string, string>(alt, StringComparer.OrdinalIgnoreCase);
+                var herkunft = neuesJahr.Where(q => q.Alt != null && !q.Wiederholt && IstSek1Klasse(q.Gruppe))
+                    .GroupBy(q => q.Gruppe, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(gr => gr.Key, gr => gr.GroupBy(q => q.VonGruppe, StringComparer.OrdinalIgnoreCase)
+                        .OrderByDescending(h => h.Count()).ThenBy(h => h.Key, StringComparer.Ordinal).First().Key,
+                        StringComparer.OrdinalIgnoreCase);
+                int gewandert = 0;
+                foreach (var kla in alt.Keys.ToList())
+                {
+                    if (!IstSek1Klasse(kla) || kla.StartsWith("05", StringComparison.Ordinal)) continue;
+                    if (herkunft.TryGetValue(kla, out var herk) && alt.TryGetValue(herk, out var lk) && lk.Length > 0) { neu[kla] = lk; gewandert++; }
+                }
+                var zehner = alt.Keys.Where(q => IstSek1Klasse(q) && q.StartsWith("10", StringComparison.Ordinal))
+                    .OrderBy(q => q, StringComparer.Ordinal).ToList();
+                foreach (var k05 in alt.Keys.Where(q => IstSek1Klasse(q) && q.StartsWith("05", StringComparison.Ordinal))
+                             .OrderBy(q => q, StringComparer.Ordinal).ToList())
+                {
+                    string? von10 = zehner.FirstOrDefault(q => string.Equals(q[2..], k05[2..], StringComparison.OrdinalIgnoreCase))
+                                    ?? zehner.FirstOrDefault();
+                    if (von10 == null) continue;
+                    zehner.Remove(von10);
+                    if (alt[von10].Length > 0) { neu[k05] = alt[von10]; gewandert++; }
+                }
+                foreach (var (stufeNeu, stufeAlt) in new[] { ("EF", "Q2"), ("Q1", "EF"), ("Q2", "Q1") })
+                    if (neu.ContainsKey(stufeNeu) && alt.TryGetValue(stufeAlt, out var lks) && lks.Length > 0) neu[stufeNeu] = lks;
+
+                // Zwei Klassen desselben Jahrgangs tauschen (prüft in P5b-2 den Vorrang von Klassen.dat vor der Folgeklasse).
+                var fest = _zu.KuerzelFest;
+                bool IstL1(string krz) => fest.TryGetValue(krz, out var pk) && string.Equals(pk, "L1", StringComparison.OrdinalIgnoreCase);
+                var kandidaten = neu.Keys.Where(y => IstSek1Klasse(y) && !y.StartsWith("05", StringComparison.Ordinal)
+                                                     && !y.StartsWith("10", StringComparison.Ordinal) && neu[y].Length > 0
+                                                     && fest.ContainsKey(neu[y]) && !IstL1(neu[y]))
+                    .OrderBy(y => y, StringComparer.Ordinal).ToList();
+                var jahrgaenge = kandidaten.GroupBy(y => y[..2], StringComparer.Ordinal).Where(gr => gr.Count() >= 2)
+                    .OrderBy(gr => gr.Key, StringComparer.Ordinal).ToList();
+                string tausch = "";
+                if (jahrgaenge.Count > 0)
+                {
+                    var jg = jahrgaenge[_rnd.Next(jahrgaenge.Count)];
+                    var zwei = Gemischt(jg.OrderBy(y => y, StringComparer.Ordinal)).Take(2).OrderBy(y => y, StringComparer.Ordinal).ToList();
+                    (neu[zwei[0]], neu[zwei[1]]) = (neu[zwei[1]], neu[zwei[0]]);
+                    string PlanK(string krz) => fest.TryGetValue(krz, out var pk2) ? pk2 : krz;
+                    tausch = $"; getauscht: {zwei[0]} bekommt {PlanK(neu[zwei[0]])}, {zwei[1]} bekommt {PlanK(neu[zwei[1]])} (laut Folgeklasse " +
+                             "umgekehrt)";
+                }
+                else E.NichtMoeglich.Add("Klassenleitung tauschen: keine zwei Klassen eines Jahrgangs mit festem Plan-Kürzel.");
+                foreach (var (kz, zi) in klZeile)
+                    if (!string.Equals(neu[kz], alt[kz], StringComparison.Ordinal)) kl.Setze(zi, kLehrer, neu[kz]);
+                string? l1 = neu.Where(kv => IstSek1Klasse(kv.Key) && IstL1(kv.Value)).Select(kv => kv.Key).OrderBy(y => y, StringComparer.Ordinal)
+                    .FirstOrDefault();
+                string? l1Vorher = alt.Where(kv => IstSek1Klasse(kv.Key) && IstL1(kv.Value)).Select(kv => kv.Key).OrderBy(y => y, StringComparer.Ordinal)
+                    .FirstOrDefault();
+                E.KlassenleitungText = $"wandern mit der Klasse ({gewandert} Klassen; die neuen 05er von den bisherigen 10ern, Stufen " +
+                                       "EF ← Q2, Q1 ← EF, Q2 ← Q1)" + tausch +
+                                       (l1Vorher != null ? $"; L1 (Testkonto kl05A) leitet {l1Vorher} → {l1 ?? "keine Klasse"}" : "");
+                E.Aenderungen.Add($"Klassenleitungen ({kl.Name}): {E.KlassenleitungText}");
+            }
+
+            /// <summary>Jahr + 1 und Abschnitt 1 in den Zeilen des Ausgangsabschnitts (auch eingefügte Zeilen). Rückgabe: Anzahl.</summary>
+            private int JahrUmstellen(Roh r, int jahrNeu)
+            {
+                int iJ = r.Sp("Jahr"), iA = r.Sp("Abschnitt");
+                if (iJ < 0 && iA < 0) return 0;
+                string j = jahrNeu.ToString(CultureInfo.InvariantCulture);
+                bool Betroffen(string[] z) => (Roh.W(z, iJ).Length > 0 || Roh.W(z, iA).Length > 0) && ImAbschnitt(z, iJ, iA);
+                string[] Neu(string[] z) => Mit(z, r.Kopf.Length, (Roh.W(z, iJ).Length > 0 ? iJ : -1, j), (Roh.W(z, iA).Length > 0 ? iA : -1, "1"));
+                int n = 0;
+                for (int i = 0; i < r.Zeilen.Count; i++)
+                {
+                    if (r.Loesch.Contains(i) || !Betroffen(r.Zeilen[i])) continue;
+                    r.Zeilen[i] = Neu(r.Zeilen[i]);
+                    n++;
+                }
+                foreach (var liste in r.Danach.Values)
+                    for (int k = 0; k < liste.Count; k++)
+                    {
+                        if (!Betroffen(liste[k])) continue;
+                        liste[k] = Neu(liste[k]);
+                        n++;
+                    }
+                return n;
+            }
+
+            // ---------------------------------------------------------------
             //  5.2c-2: Klassenleitung und Namen der Lehrkräfte
             // ---------------------------------------------------------------
 
@@ -1433,8 +2002,8 @@ namespace Stundenplan_V2.Vertretung
                 {
                     ErzeugtAm = DateTime.Now.ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture),
                     Plan = _marker.Plan,
-                    Schuljahr = _marker.Schuljahr,
-                    Abschnitt = _opt.Abschnitt2 ? 2 : _marker.Abschnitt,   // P4a (207)
+                    Schuljahr = E.Folgejahr ?? _marker.Schuljahr,                                // P5b-1 (243)
+                    Abschnitt = E.Folgejahr != null ? 1 : _opt.Abschnitt2 ? 2 : _marker.Abschnitt,   // P4a (207)
                     Startwert = _marker.Startwert,
                     Zeichensatz = _marker.Zeichensatz,
                     Sek1Variante = _marker.Sek1Variante,

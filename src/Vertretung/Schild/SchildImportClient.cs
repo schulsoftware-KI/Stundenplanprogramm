@@ -131,6 +131,10 @@ namespace Stundenplan_V2.Vertretung
         public int LehrkraefteEntfernt { get; set; }
         public int PaarGruppen { get; set; }
         public int PaarGruppenMitVorschlag { get; set; }
+        // P5b-1 (246): Jahreswechsel – aktive Schüler aus dem Vorjahr, davon versetzt bzw. wiederholt
+        public int AusVorjahr { get; set; }
+        public int Versetzt { get; set; }
+        public int Wiederholt { get; set; }
     }
 
     /// <summary>Zeile der Vorschau (enthält Namen – bleibt im Fenster, nie im Bericht oder Log).</summary>
@@ -190,6 +194,8 @@ namespace Stundenplan_V2.Vertretung
         public string? KennungLetzterImport { get; set; }
         public string? Grundplan { get; set; }
         public DateOnly? GrundplanAb { get; set; }
+        /// <summary>P5b-1 (246): Jahreswechsel – Vorjahr, mit dem verglichen wurde (null = kein Jahreswechsel).</summary>
+        public string? Vorjahr { get; set; }
         public bool Gesperrt { get; set; }
         public List<SchildSperreDto> Sperren { get; set; } = new();
         public bool SeedEntfernenMoeglich { get; set; }

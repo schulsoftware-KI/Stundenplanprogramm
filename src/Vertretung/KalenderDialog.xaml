@@ -18,14 +18,19 @@
         </Grid.RowDefinitions>
 
         <TextBlock Grid.Row="0" Margin="0,0,0,10" TextWrapping="Wrap"
-                   Text="Legt die unterrichtsfreien Zeiten des Schuljahres fest. Diese bestimmen, an welchen Daten überhaupt Unterricht – und damit Vertretung und Zählung – stattfindet. Gesetzliche Feiertage werden berechnet, die NRW-Ferien aus 'ferien_nrw.json' neben dem Programm importiert. Bewegliche Ferientage, Studientage und sonstige freie Tage trägst du von Hand in die Tabelle ein (neue Zeile unten). Gespeichert wird in eine eigene Datei 'Vertretung_&lt;Schuljahr&gt;.xlsx' neben der Plandatei – die Plandatei selbst bleibt unberührt."/>
+                   Text="Legt die unterrichtsfreien Zeiten des Schuljahres fest. Diese bestimmen, an welchen Daten überhaupt Unterricht – und damit Vertretung und Zählung – stattfindet. Gesetzliche Feiertage werden berechnet, die NRW-Ferien aus 'ferien_nrw.json' neben dem Programm importiert. Bewegliche Ferientage, Studientage und sonstige freie Tage trägst du von Hand in die Tabelle ein (neue Zeile unten). Gespeichert wird in eine eigene Datei 'Vertretung_&lt;Schuljahr&gt;.xlsx' neben der Plandatei – die Plandatei selbst bleibt unberührt. Neues Schuljahr: im Feld 'Schuljahr' das neue Jahr eintragen – es entsteht eine eigene Datei (Vertretungsarten und Kompetenzen werden übernommen, Abwesenheiten und Vertretungen nicht); die Datei des alten Jahres bleibt. Wocheneditor und 'Vertretung erfassen' arbeiten mit der zuletzt gespeicherten bzw. mit 'Schuljahr öffnen' gewählten Datei."/>
 
         <!-- Kopf: Schuljahr, Start/Ende, Land (Zeile 1), Aktionen (Zeile 2) -->
         <StackPanel Grid.Row="1" Margin="0,0,0,10">
             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                 <TextBlock Text="Schuljahr:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                <!-- P5b-1 (244): anderes Schuljahr eintragen = neues Schuljahr anlegen (eigene Datei); „Schuljahr öffnen“ = vorhandene Datei -->
                 <TextBox x:Name="TxtSchuljahr" Width="90" VerticalAlignment="Center"
-                         Margin="0,0,16,0" ToolTip="z. B. 2026/27"/>
+                         Margin="0,0,6,0" LostKeyboardFocus="TxtSchuljahr_LostKeyboardFocus" KeyDown="TxtSchuljahr_KeyDown"
+                         ToolTip="z. B. 2026/27. Ein anderes Schuljahr ohne eigene Datei legt ein neues Schuljahr an (eigene Datei mit Vertretungsarten und Kompetenzen, ohne Abwesenheiten und Vertretungen)."/>
+                <Button x:Name="BtnSchuljahrOeffnen" Content="Schuljahr öffnen ▾" Padding="8,2" Margin="0,0,16,0"
+                        VerticalAlignment="Center" Click="BtnSchuljahrOeffnen_Click"
+                        ToolTip="Vorhandene Datei eines Schuljahres öffnen. Das gewählte Schuljahr ist danach das, mit dem Wocheneditor und „Vertretung erfassen“ arbeiten (die zuletzt gespeicherte Datei)."/>
 
                 <TextBlock Text="Erster Schultag:" VerticalAlignment="Center" Margin="0,0,6,0"/>
                 <DatePicker x:Name="DpStart" Width="130" VerticalAlignment="Center" Margin="0,0,16,0"/>

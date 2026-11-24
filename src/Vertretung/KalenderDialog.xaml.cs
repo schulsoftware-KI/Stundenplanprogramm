@@ -5,8 +5,10 @@ using System.Collections.Specialized;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using ClosedXML.Excel;
 using Microsoft.Win32;
 
@@ -24,6 +26,13 @@ namespace Stundenplan_V2.Vertretung
     /// Beim Speichern bleiben alle übrigen Inhalte der Vertretungsdatei
     /// (Vertretungsarten, Abwesenheiten, Vertretungen, Kompetenzen) erhalten;
     /// dieser Dialog ersetzt nur den Kalender-Teil.
+    ///
+    /// P5b-1 (Entscheidung 244): Ein anderes Schuljahr ohne eigene Datei legt ein
+    /// NEUES Schuljahr an – eigene Datei mit Vertretungsarten und Kompetenzen, ohne
+    /// Abwesenheiten und Vertretungen, leerer Kalender. Die Datei eines anderen
+    /// Jahres wird nie überschrieben. „Schuljahr öffnen“ lädt eine vorhandene Datei
+    /// und macht sie zur jüngsten – damit arbeiten Wocheneditor und „Vertretung
+    /// erfassen“ (wie bisher: die zuletzt geschriebene Vertretung_*.xlsx).
     /// </summary>
     public partial class KalenderDialog : Window
     {
@@ -36,6 +45,12 @@ namespace Stundenplan_V2.Vertretung
         private string _ferienQuellePfad = "";
         private readonly ObservableCollection<FreieZeitZeile> _zeilen = new();
         private bool _dirty = false;
+        // P5b-1 (244): Datei, aus der _daten stammt (null = noch nicht gespeichert), neues Schuljahr, Titel aus dem XAML
+        private string? _geladenPfad;
+        private bool _neuesJahr;
+        private bool _jahrPruefen;
+        private readonly string _titel;
+        private static readonly Regex DateiJahr = new(@"^Vertretung_(\d{4})_(\d{2})\.xlsx$", RegexOptions.IgnoreCase);
 
         /// <summary>Zeilen-Objekt für das DataGrid (editierbar, wird beim Speichern zurückgelesen).</summary>
         public class FreieZeitZeile
@@ -50,6 +65,7 @@ namespace Stundenplan_V2.Vertretung
         public KalenderDialog(string planPfad, Action<string>? log = null)
         {
             InitializeComponent();
+            _titel = Title;
             _planPfad = planPfad ?? "";
             _log = log;
             _ordner = string.IsNullOrWhiteSpace(_planPfad)
@@ -148,13 +164,20 @@ namespace Stundenplan_V2.Vertretung
                         $"({_ferienQuelle.Schuljahre.Count} Schuljahre). Jetzt importieren.");
         }
 
-        private void LadeDaten()
+        /// <param name="pfad">P5b-1: bestimmte Datei („Schuljahr öffnen“), sonst die jüngste.</param>
+        private void LadeDaten(string? pfad = null)
         {
-            string? vorhandene = FindeVorhandeneDatei();
+            string? vorhandene = pfad ?? FindeVorhandeneDatei();
+            _geladenPfad = null;
+            _neuesJahr = false;
 
             if (vorhandene != null)
             {
-                try { _daten = VertretungsStore.Laden(vorhandene); }
+                try
+                {
+                    _daten = VertretungsStore.Laden(vorhandene);
+                    _geladenPfad = vorhandene;
+                }
                 catch (Exception ex)
                 {
                     MessageBox.Show("Vorhandene Vertretungsdatei konnte nicht gelesen werden:\n\n" +
@@ -185,9 +208,198 @@ namespace Stundenplan_V2.Vertretung
                 _zeilen.Add(ZuZeile(fz));
 
             _dirty = false;
+            TitelSetzen();
             SetzeStatus(vorhandene != null
                 ? $"Geladen aus {Path.GetFileName(vorhandene)} – {_zeilen.Count} Einträge."
                 : "Neuer Kalender. Schuljahr und Schultage eintragen, dann importieren.");
+        }
+
+        private void TitelSetzen()
+            => Title = string.IsNullOrWhiteSpace(_daten.Schuljahr) ? _titel : $"{_titel} – {_daten.Schuljahr}";
+
+        // =====================================================
+        //  P5b-1 (244): Schuljahr wechseln, neues Schuljahr, Schuljahr öffnen
+        // =====================================================
+
+        private static bool Gleich(string? a, string? b)
+            => string.Equals((a ?? "").Trim(), (b ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
+
+        private static bool GleicherPfad(string? a, string? b)
+        {
+            if (a == null || b == null) return false;
+            try { return string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase); }
+            catch { return string.Equals(a, b, StringComparison.OrdinalIgnoreCase); }
+        }
+
+        /// <summary>Datei eines Schuljahres neben der Plandatei (Standardname), falls vorhanden.</summary>
+        private string? DateiVon(string schuljahr)
+        {
+            string p = Path.Combine(_ordner, VertretungsStore.StandardDateiname(schuljahr));
+            return File.Exists(p) ? p : null;
+        }
+
+        /// <summary>„Vertretung_2026_27.xlsx“ → „2026/27“ (sonst der Dateiname ohne Endung).</summary>
+        private static string JahrAusDatei(string pfad)
+        {
+            string name = Path.GetFileName(pfad);
+            var m = DateiJahr.Match(name);
+            return m.Success ? $"{m.Groups[1].Value}/{m.Groups[2].Value}" : Path.GetFileNameWithoutExtension(name);
+        }
+
+        private void TxtSchuljahr_LostKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e)
+        {
+            // Beim Schließen bzw. Speichern nicht vorher fragen (Speichern prüft selbst, Verwerfen verwirft).
+            if (ReferenceEquals(e.NewFocus, BtnSchliessen) || ReferenceEquals(e.NewFocus, BtnSpeichern)) return;
+            SchuljahrPruefen();
+        }
+
+        private void TxtSchuljahr_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key != Key.Enter) return;
+            e.Handled = true;
+            SchuljahrPruefen();
+        }
+
+        /// <summary>
+        /// Das Feld „Schuljahr“ nennt ein anderes Jahr als die geladene Datei: vorhandene Datei öffnen bzw. neues Schuljahr
+        /// anlegen (Rückfrage). false = abgebrochen bzw. eine andere Datei geöffnet (Speichern dann nicht fortsetzen).
+        /// </summary>
+        private bool SchuljahrPruefen()
+        {
+            if (_jahrPruefen) return false;
+            string neu = TxtSchuljahr.Text.Trim();
+            string alt = _daten.Schuljahr?.Trim() ?? "";
+            if (neu.Length == 0 || Gleich(neu, alt)) return true;
+            _jahrPruefen = true;
+            try
+            {
+                string? vorhanden = DateiVon(neu);
+                if (vorhanden != null && !GleicherPfad(vorhanden, _geladenPfad))
+                {
+                    if (MessageBox.Show(this,
+                            $"Für das Schuljahr {neu} gibt es schon die Datei {Path.GetFileName(vorhanden)} – sie wird nicht " +
+                            $"überschrieben.\n\nDiese Datei jetzt öffnen?" +
+                            (_dirty ? "\n\nUngespeicherte Änderungen am Kalender von " + (alt.Length > 0 ? alt : "bisher") +
+                                      " gehen dabei verloren." : ""),
+                            "Schuljahr", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+                        Oeffnen(vorhanden, nachfragen: false);
+                    else
+                        TxtSchuljahr.Text = alt;
+                    return false;
+                }
+                if (_geladenPfad == null || alt.Length == 0)
+                {
+                    // Noch keine Datei (neuer Kalender bzw. neues Schuljahr in Arbeit) bzw. Datei ohne Schuljahr: nur das Jahr ändern.
+                    _daten.Schuljahr = neu;
+                    _dirty = true;
+                    TitelSetzen();
+                    return true;
+                }
+                if (MessageBox.Show(this,
+                        $"Neues Schuljahr {neu} anlegen?\n\n" +
+                        $"Beim Speichern entsteht die Datei {VertretungsStore.StandardDateiname(neu)} – mit den Vertretungsarten und " +
+                        $"Kompetenzen aus {alt}, ohne Abwesenheiten und Vertretungen. Der Kalender beginnt leer: erster und letzter " +
+                        "Schultag eintragen, dann „Feiertage + NRW-Ferien importieren“.\n\n" +
+                        $"Die Datei von {alt} bleibt unverändert (zurück mit „Schuljahr öffnen“). Nach dem Speichern arbeiten " +
+                        $"Wocheneditor und „Vertretung erfassen“ mit {neu}." +
+                        (_dirty ? $"\n\nUngespeicherte Änderungen am Kalender von {alt} gehen verloren." : ""),
+                        "Neues Schuljahr", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                {
+                    TxtSchuljahr.Text = alt;
+                    return false;
+                }
+                NeuesSchuljahr(neu);
+                return true;
+            }
+            finally { _jahrPruefen = false; }
+        }
+
+        /// <summary>Neues Schuljahr (244): Arten und Kompetenzen übernehmen, Kalender leer, keine Abwesenheiten/Vertretungen.</summary>
+        private void NeuesSchuljahr(string neu)
+        {
+            string alt = _daten.Schuljahr;
+            var raster = _daten.Kalender.RasterTage.ToList();
+            _daten = new VertretungsDaten
+            {
+                Schuljahr = neu,
+                PlanDateiPfad = _planPfad,
+                Version = _daten.Version,
+                FerienQuellePfad = _daten.FerienQuellePfad,
+                Kalender = new SchuljahrKalender { Schuljahr = neu, RasterTage = raster },
+                Arten = _daten.Arten,
+                Kompetenzen = _daten.Kompetenzen
+            };
+            _geladenPfad = null;
+            _neuesJahr = true;
+            DpStart.SelectedDate = null;
+            DpEnde.SelectedDate = null;
+            _zeilen.Clear();
+            _dirty = true;
+            TitelSetzen();
+            SetzeStatus($"Neues Schuljahr {neu} (aus {alt}: {_daten.Arten.Count} Vertretungsarten, {_daten.Kompetenzen.Count} " +
+                        "Kompetenzen; ohne Abwesenheiten und Vertretungen). Ersten und letzten Schultag eintragen, „Feiertage + " +
+                        "NRW-Ferien importieren“, dann „Speichern und schließen“.");
+        }
+
+        private void BtnSchuljahrOeffnen_Click(object sender, RoutedEventArgs e)
+        {
+            string[] dateien;
+            try
+            {
+                dateien = Directory.GetFiles(_ordner, "Vertretung_*.xlsx")
+                    .OrderByDescending(x => JahrAusDatei(x), StringComparer.OrdinalIgnoreCase).ToArray();
+            }
+            catch { dateien = Array.Empty<string>(); }
+            var menue = new ContextMenu { PlacementTarget = BtnSchuljahrOeffnen };
+            if (dateien.Length == 0)
+                menue.Items.Add(new MenuItem { Header = "(keine Datei Vertretung_*.xlsx neben der Plandatei)", IsEnabled = false });
+            string? juengste = FindeVorhandeneDatei();
+            foreach (var f in dateien)
+            {
+                string datei = f;
+                var mi = new MenuItem
+                {
+                    Header = $"{JahrAusDatei(datei)}  ({Path.GetFileName(datei)}" +
+                             (GleicherPfad(datei, juengste) ? ", damit arbeiten Wocheneditor und „Vertretung erfassen“" : "") + ")",
+                    IsCheckable = false,
+                    IsChecked = GleicherPfad(datei, _geladenPfad)
+                };
+                mi.Click += (_, __) => Oeffnen(datei, nachfragen: true);
+                menue.Items.Add(mi);
+            }
+            BtnSchuljahrOeffnen.ContextMenu = menue;
+            menue.IsOpen = true;
+        }
+
+        /// <summary>
+        /// Öffnet die Datei eines Schuljahres und macht sie zur jüngsten (Änderungszeit = jetzt) – damit arbeiten
+        /// Wocheneditor und „Vertretung erfassen“ beim nächsten Öffnen (244). Der Inhalt bleibt unverändert.
+        /// </summary>
+        private void Oeffnen(string pfad, bool nachfragen)
+        {
+            if (nachfragen && _dirty &&
+                MessageBox.Show(this, "Die Änderungen am Kalender wurden noch nicht gespeichert und gehen verloren.\n\nTrotzdem " +
+                                      $"{JahrAusDatei(pfad)} öffnen?",
+                    "Schuljahr öffnen", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
+                return;
+            LadeDaten(pfad);
+            LadeFerienQuelle();
+            if (_geladenPfad == null) return;   // nicht lesbar (Meldung kam schon)
+            string sj = string.IsNullOrWhiteSpace(_daten.Schuljahr) ? JahrAusDatei(pfad) : _daten.Schuljahr;
+            try
+            {
+                File.SetLastWriteTimeUtc(pfad, DateTime.UtcNow);
+                _log?.Invoke($"Schuljahr {sj} geöffnet ({Path.GetFileName(pfad)}) – Wocheneditor und „Vertretung erfassen“ " +
+                             "arbeiten jetzt damit.");
+                SetzeStatus($"Schuljahr {sj} geöffnet ({Path.GetFileName(pfad)}, {_zeilen.Count} Einträge) – Wocheneditor und " +
+                            "„Vertretung erfassen“ arbeiten ab dem nächsten Öffnen damit.");
+            }
+            catch (Exception ex)
+            {
+                SetzeStatus($"Schuljahr {sj} geladen, aber nicht als aktuelles gemerkt ({ex.Message} – ist die Datei in Excel " +
+                            "geöffnet?). „Speichern und schließen“ merkt es.");
+                _dirty = true;
+            }
         }
 
         private string? FindeVorhandeneDatei()
@@ -326,6 +538,9 @@ namespace Stundenplan_V2.Vertretung
                     "Speichern", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
+            // P5b-1 (244): anderes Schuljahr → neues Schuljahr anlegen bzw. vorhandene Datei öffnen (Rückfrage)
+            if (!Gleich(schuljahr, _daten.Schuljahr) && !SchuljahrPruefen()) return;
+            schuljahr = TxtSchuljahr.Text.Trim();
 
             // Zeilen einlesen und validieren.
             var freie = new System.Collections.Generic.List<FreieZeit>();
@@ -371,6 +586,14 @@ namespace Stundenplan_V2.Vertretung
             _daten.Kalender.FreieZeiten = freie;
 
             string ziel = Path.Combine(_ordner, VertretungsStore.StandardDateiname(schuljahr));
+            // P5b-1 (244): nie die Datei eines anderen Schuljahres überschreiben
+            if (File.Exists(ziel) && !GleicherPfad(ziel, _geladenPfad))
+            {
+                MessageBox.Show($"Die Datei {Path.GetFileName(ziel)} gibt es schon – sie gehört zu einem anderen Stand und wird " +
+                                "nicht überschrieben. Zum Bearbeiten „Schuljahr öffnen“ wählen.",
+                    "Speichern", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
             try
             {
                 VertretungsStore.Speichern(_daten, ziel);
@@ -384,8 +607,14 @@ namespace Stundenplan_V2.Vertretung
             }
 
             _dirty = false;
-            _log?.Invoke($"Schuljahreskalender gespeichert: {Path.GetFileName(ziel)} " +
-                         $"({freie.Count} freie Zeiträume).");
+            _geladenPfad = ziel;
+            _log?.Invoke(_neuesJahr
+                ? $"Neues Schuljahr {schuljahr} angelegt: {Path.GetFileName(ziel)} ({freie.Count} freie Zeiträume; " +
+                  $"{_daten.Arten.Count} Vertretungsarten und {_daten.Kompetenzen.Count} Kompetenzen übernommen, ohne " +
+                  "Abwesenheiten und Vertretungen). Wocheneditor und „Vertretung erfassen“ arbeiten jetzt damit."
+                : $"Schuljahreskalender gespeichert: {Path.GetFileName(ziel)} " +
+                  $"({freie.Count} freie Zeiträume).");
+            _neuesJahr = false;
             Close();
         }
 

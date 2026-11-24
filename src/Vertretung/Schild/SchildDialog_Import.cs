@@ -82,9 +82,10 @@ namespace Stundenplan_V2.Vertretung
         internal const string KatFehlt = "fehltImExport";
         internal const string KatPaar = "dieselbePerson";        // 5.2c-1
         internal const string KatZuordnung = "zuordnung";        // 5.2c-1 (Neu-Zuordnung)
+        internal const string KatVersetzt = "versetzt";          // P5b-1 (246): Jahreswechsel
         private static readonly string[] KatReihenfolge =
         {
-            KatAbgang, KatFehlt, KatPaar, KatZuordnung, "neu", "zusammengefuehrt", "nameGeaendert", "klassenwechsel",
+            KatAbgang, KatFehlt, KatPaar, KatZuordnung, "neu", "zusammengefuehrt", "nameGeaendert", KatVersetzt, "klassenwechsel",
             "kurswechsel", "statusGeaendert"
         };
 
@@ -157,9 +158,17 @@ namespace Stundenplan_V2.Vertretung
             "und gibt ihnen die Prüfsummen des neuen Schlüssels. Namensgleiche stehen als Gruppe untereinander; „Vorschlag " +
             "übernehmen…“ hakt je Gruppe die Paare mit passendem Eintritt bzw. den meisten gemeinsamen Kursen an (nur, wo der " +
             "Vorschlag eindeutig ist) – bitte prüfen, dann „Vorschau berechnen“. Danach sofort „Schlüssel sichern…“.\n\n" +
+            "Jahreswechsel: Der erste Export des neuen Schuljahres (Wocheneditor und Kalender mit dem neuen Schuljahr, Grundplan " +
+            "ab dem ersten Schultag veröffentlicht, in der App „Schuljahr … vorbereiten…“) wird mit dem Vorjahr verglichen. " +
+            "„versetzt/wiederholt“ zeigt je Schüler eine Zeile („05A → 06A“, „07B → 07B (wiederholt)“) – mit Hinweis, wenn er " +
+            "anders versetzt ist als die meisten Mitschüler. Abgänge laut SchILD (Status 8/9) und bestätigte „fehlt im Export“ " +
+            "gelten zum Ende des alten Schuljahres; ihre Daten im alten Jahr bleiben. Fehlt der Abschlussjahrgang (Q2) ganz, " +
+            "ist das kein Teil-Export: Ansicht „fehlt im Export“ → „Alle in der Ansicht bestätigen“. Gesperrt wird, wenn von " +
+            "einer Klasse bzw. Stufe des alten Jahres kein einziger Schüler im Export steht.\n\n" +
             "Testen mit Pseudodaten: Nach dem Import eines Pseudo-Exports macht „Folgestand erzeugen…“ (unten) daraus einen " +
-            "neuen Ordner mit typischen Änderungen bis zum nächsten Export. Dann wie bei einem neuen Export: Prüflauf, Vorschau, " +
-            "Abgänge bestätigen, Importieren. Das Fenster nennt die Zahlen, die die Vorschau zeigen sollte.";
+            "neuen Ordner mit typischen Änderungen bis zum nächsten Export – seit P5b-1 auch das „Folgejahr“ (Schuljahreswechsel). " +
+            "Dann wie bei einem neuen Export: Prüflauf, Vorschau, Abgänge bestätigen, Importieren. Das Fenster nennt die Zahlen, " +
+            "die die Vorschau zeigen sollte.";
 
         internal static string KategorieText(string kategorie) => kategorie switch
         {
@@ -173,6 +182,7 @@ namespace Stundenplan_V2.Vertretung
             KatPaar => "dieselbe Person?",
             KatZuordnung => "Neu-Zuordnung",
             "zusammengefuehrt" => "zusammengeführt",
+            KatVersetzt => "versetzt/wiederholt",
             _ => kategorie
         };
 
@@ -762,6 +772,8 @@ namespace Stundenplan_V2.Vertretung
             ImZeigeVorschau(v, behalten);
             _log?.Invoke($"SchILD-Import: Vorschau ({art}, Abschnitt {erg.Abschnitt}, gilt ab {Dat(giltAb)}) – {v.Zahlen.ImExport} " +
                          $"Schüler, neu {v.Zahlen.Neu}, Klassenwechsel {v.Zahlen.Klassenwechsel}, Kurswechsel {v.Zahlen.Kurswechsel}, " +
+                         (v.Vorjahr != null ? $"Jahreswechsel ({v.Vorjahr}): versetzt {v.Zahlen.Versetzt}, wiederholt " +
+                                              $"{v.Zahlen.Wiederholt}, " : "") +
                          $"Abgang laut SchILD {v.Zahlen.AbgangLautSchild}, fehlt {v.Zahlen.FehltImExport}, " +
                          $"Paare {v.Zahlen.DieselbePerson + v.Zahlen.ZuordnungPaare} (angewendet " +
                          $"{v.Zahlen.Zusammengefuehrt + v.Zahlen.NeuZugeordnet})" + (_imNeuzuordnung ? ", Neu-Zuordnung" : "") +
@@ -938,6 +950,9 @@ namespace Stundenplan_V2.Vertretung
                     ? $"ACHTUNG: Im Wocheneditor ist der Plan „{_planInfo.Bezeichnung}“ gewählt – nicht der Grundplan.\n" : "") +
                 // P4a (206): Warnungen zum Halbjahr – mit „Ja“ wird trotzdem importiert
                 string.Concat(v.Warnungen.Select(w => "ACHTUNG: " + w + "\n")) +
+                (v.Vorjahr != null
+                    ? $"\nJAHRESWECHSEL (Vergleich mit {v.Vorjahr}): versetzt {zz.Versetzt} · wiederholt {zz.Wiederholt} · aus dem " +
+                      $"Vorjahr {zz.AusVorjahr} Schüler" : "") +
                 $"\nneu: {zz.Neu} · Name/Geburtsdatum geändert: {zz.NameGeaendert} · Klassenwechsel: {zz.Klassenwechsel} · " +
                 $"Kurs-/Gruppenwechsel: {zz.Kurswechsel} · Status/Jahrgang: {zz.StatusGeaendert}\n" +
                 $"Abgänge bestätigt: {bestaetigt.Count} von {kandidaten} (Schülerkonten, die gesperrt werden: {konten})\n" +
@@ -1025,7 +1040,9 @@ namespace Stundenplan_V2.Vertretung
                     TxtImBericht.Text = _imBericht;
                     var ez = ergebnis.Zahlen;
                     _log?.Invoke($"SchILD-Import ausgeführt (Protokoll Nr. {ergebnis.ProtokollId}, {art}, gilt ab " +
-                                 $"{Dat(ergebnis.GiltAb)}): neu {ez.Neu}, Name geändert {ez.NameGeaendert}, Klassenwechsel " +
+                                 $"{Dat(ergebnis.GiltAb)}): neu {ez.Neu}, Name geändert {ez.NameGeaendert}, " +
+                                 (ez.Versetzt + ez.Wiederholt > 0 ? $"versetzt {ez.Versetzt}, wiederholt {ez.Wiederholt}, " : "") +
+                                 "Klassenwechsel " +
                                  $"{ez.Klassenwechsel}, Kurswechsel {ez.Kurswechsel}, Abgänge bestätigt {ergebnis.AbgaengeBestaetigt}, " +
                                  $"übersprungen {ergebnis.Uebersprungen}, zusammengeführt {ez.Zusammengefuehrt}" +
                                  (neuzuordnung ? $", Neu-Zuordnung {ez.NeuZugeordnet} (Schlüssel {schluessel.Kennung})" : "") + ".");
@@ -1062,6 +1079,9 @@ namespace Stundenplan_V2.Vertretung
 
             if (fertig == null) return;
             MessageBox.Show(this, $"Import ausgeführt (Protokoll Nr. {fertig.ProtokollId}).\n\nneu: {fertig.Zahlen.Neu} · " +
+                                  // P5b-1 (246): Jahreswechsel – versetzt/wiederholt (im Protokoll bei „Klassenwechsel“)
+                                  (fertig.Zahlen.Versetzt + fertig.Zahlen.Wiederholt > 0
+                                      ? $"versetzt: {fertig.Zahlen.Versetzt} · wiederholt: {fertig.Zahlen.Wiederholt} · " : "") +
                                   $"Klassenwechsel: {fertig.Zahlen.Klassenwechsel} · Kurs-/Gruppenwechsel: {fertig.Zahlen.Kurswechsel}\n" +
                                   $"Abgänge bestätigt: {fertig.AbgaengeBestaetigt} · übersprungen: {fertig.Uebersprungen}" +
                                   (fertig.Zahlen.Zusammengefuehrt > 0 ? $"\nzusammengeführt: {fertig.Zahlen.Zusammengefuehrt}" : "") +

@@ -25,6 +25,9 @@ namespace VertretungApi.Controllers;
 //  (Einstellung bzw. 1. Februar) und den passenden Abschnitt; die Vorschau warnt (ohne Sperre), wenn Abschnitt und
 //  „Änderungen gelten ab“ nicht zum 2. Halbjahr passen bzw. zum 2. Halbjahr kein neuer Grundplan veröffentlicht ist.
 //
+//  P5b-1 (246–248): Jahreswechsel-Import – die Vorschau vergleicht Schüler ohne Zeile im Schuljahr mit dem Vorjahr
+//  („versetzt“, Abgänge zum Ende des Vorjahres); Warnung, wenn „Aktuelles Schuljahr“ noch das Vorjahr ist.
+//
 //  Abgleich und Schreiben: Services/SchildImportService.cs. Das Log nennt nur Zahlen.
 // =====================================================================
 
@@ -155,19 +158,23 @@ public class SchildController : ControllerBase
             return BadRequest(new { fehler = "Die Nutzlast ist unvollständig oder fehlerhaft.", details = fehler });
 
         var heute = KlassenbuchService.Heute();
-        var halbjahr = (await _einst.LesenAsync(_db)).HalbjahrAb;   // P4a (206): Einstellung „2. Halbjahr ab“
+        var werte = await _einst.LesenAsync(_db);
+        var halbjahr = werte.HalbjahrAb;   // P4a (206): Einstellung „2. Halbjahr ab“
         if (dto.Probelauf)
         {
-            var vorschau = await SchildImportService.BerechnenAsync(_db, dto, Produktiv, heute, halbjahr);
+            // P5b-1 (247): „Aktuelles Schuljahr“ für die Warnung beim Jahreswechsel
+            var vorschau = await SchildImportService.BerechnenAsync(_db, dto, Produktiv, heute, halbjahr, werte.Schuljahr);
             _log.LogInformation("SchILD-Import: Vorschau {Schuljahr}, Abschnitt {Abschnitt}, gilt ab {GiltAb} – {Anzahl} Schüler, " +
-                                "Paare {Paare}, Neu-Zuordnung {Neuzuordnung}, gesperrt {Gesperrt}, Warnungen {Warnungen}", dto.Schuljahr,
-                dto.Abschnitt, dto.GiltAb, vorschau.ImExport, vorschau.DieselbePerson + vorschau.ZuordnungPaare, dto.Neuzuordnung,
-                vorschau.Gesperrt, vorschau.Warnungen.Count);
+                                "Paare {Paare}, Neu-Zuordnung {Neuzuordnung}, gesperrt {Gesperrt}, Warnungen {Warnungen}; " +
+                                "Jahreswechsel {Vorjahr}: aus dem Vorjahr {AusVorjahr}, versetzt {Versetzt}, wiederholt {Wiederholt}",
+                dto.Schuljahr, dto.Abschnitt, dto.GiltAb, vorschau.ImExport, vorschau.DieselbePerson + vorschau.ZuordnungPaare,
+                dto.Neuzuordnung, vorschau.Gesperrt, vorschau.Warnungen.Count, vorschau.Vorjahr ?? "–", vorschau.AusVorjahr,
+                vorschau.Versetzt, vorschau.Wiederholt);
             return Ok(vorschau.Antwort(probelauf: true));
         }
 
         await using var tx = await _db.Database.BeginTransactionAsync();
-        var lauf = await SchildImportService.BerechnenAsync(_db, dto, Produktiv, heute, halbjahr);
+        var lauf = await SchildImportService.BerechnenAsync(_db, dto, Produktiv, heute, halbjahr, werte.Schuljahr);
         if (lauf.Gesperrt)
             return Conflict(lauf.Antwort(probelauf: true));
         if (!string.Equals(dto.Vorschau, lauf.VorschauPruefsumme, StringComparison.Ordinal))
@@ -195,12 +202,14 @@ public class SchildController : ControllerBase
                             "neu {Neu}, geändert {Geaendert}, Klassenwechsel {Klassen}, Kurswechsel {Kurse}, Abgänge {Abgaenge}, " +
                             "unverändert {Unveraendert}, übersprungen {Uebersprungen}, zusammengeführt {Zusammengefuehrt}, " +
                             "Neu-Zuordnung {Neuzuordnung} ({NeuZugeordnet}), Schlüssel {Kennung}; Klassenleitung erstmals " +
-                            "{KlNeu}, geändert {KlGeaendert}; Lehrkräfte-Namen neu {LkNeu}, geändert {LkGeaendert}, entfernt {LkWeg}",
+                            "{KlNeu}, geändert {KlGeaendert}; Lehrkräfte-Namen neu {LkNeu}, geändert {LkGeaendert}, entfernt {LkWeg}; " +
+                            "Jahreswechsel {Vorjahr}: versetzt {Versetzt}, wiederholt {Wiederholt} (im Protokoll bei Klassenwechsel)",
             protokoll.Id, protokoll.Schuljahr, protokoll.Abschnitt, protokoll.GiltAb, protokoll.IstPseudo ? "Pseudodaten" : "echte Daten",
             protokoll.Neu, protokoll.Geaendert, protokoll.Klassenwechsel, protokoll.Kurswechsel, protokoll.Abgaenge,
             protokoll.Unveraendert, protokoll.Uebersprungen, protokoll.Zusammengefuehrt, protokoll.NeuZuordnung,
             protokoll.NeuZugeordnet, protokoll.SchluesselKennung ?? "–", lauf.KlassenleitungNeu, lauf.KlassenleitungGeaendert,
-            lauf.LehrkraefteNeu, lauf.LehrkraefteGeaendert, lauf.LehrkraefteEntfernt);
+            lauf.LehrkraefteNeu, lauf.LehrkraefteGeaendert, lauf.LehrkraefteEntfernt, lauf.Vorjahr ?? "–", lauf.Versetzt,
+            lauf.Wiederholt);
         return Ok(lauf.ImportAntwort(protokoll));
     }
 

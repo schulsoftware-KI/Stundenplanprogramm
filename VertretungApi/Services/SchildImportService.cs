@@ -56,6 +56,22 @@ namespace VertretungApi.Services;
 //  Abschnitt 2 mit „gilt ab“ vor „2. Halbjahr ab“, Abschnitt 1 mit „gilt ab“ im 2. Halbjahr, Abschnitt 2 ab dem
 //  2. Halbjahr ohne eigenen Grundplan (dazu, wenn erkennbar: unbekannte Plan-Schlüssel = SchILD liefert schon die Kurse
 //  des 2. Halbjahres). Sie stehen in „warnungen“ und als „WARNUNG:“ im Bericht.
+//
+//  P5b-1 (5.3b, Entscheidungen 218, 246–248): Jahreswechsel-Import. Ein Schüler ist „aus dem Vorjahr“, wenn er im
+//  Vorjahr (Schuljahr − 1) Zugehörigkeiten hat und im Schuljahr der Nutzlast noch keine – das gilt bei jedem Import des
+//  neuen Jahres. Für ihn gilt:
+//  - erkannt (SchILD-ID bzw. Name + Geburtsdatum): EINE Zeile „versetzt“ („05A → 06A“, „07B → 07B (wiederholt)“) statt
+//    Klassenwechsel und Jahrgangswechsel; weicht das Ziel von der Mehrheit seiner Mitschüler ab, mit Hinweis. Im Protokoll
+//    zählen Versetzte und Wiederholer unter „Klassenwechsel“ (kein neues Feld); Bericht und Log trennen sie.
+//  - Abgang laut SchILD (8/9): vorausgewählt; Abgang zum Ende des Vorjahres laut Kalender (sonst Vortag von „gilt ab“);
+//    die Zugehörigkeiten des Vorjahres bleiben, wie sie sind.
+//  - nicht im Export: „fehlt im Export“ (nicht vorausgewählt), Abgang ebenfalls zum Ende des Vorjahres; der
+//    Abschlussjahrgang (Q2) mit Hinweis.
+//  - Teil-Export-Schutz: der Abschlussjahrgang zählt nicht mit; gesperrt wird, wenn mehr als ein Viertel fehlt oder eine
+//    Klasse bzw. Stufe des Vorjahres (außer Q2) keinen einzigen ihrer Schüler im Export hat (auch nicht mit Abgang).
+//  - „dieselbe Person?“ geht nur über die Teil-Prüfsummen (die Klasse des neuen Jahres gibt es in der Datenbank noch nicht);
+//    als „gleiche Klasse“ zählt dann die Klasse, in die die Mehrheit der Mitschüler versetzt ist.
+//  Warnung (keine Sperre), wenn „Aktuelles Schuljahr“ noch das Vorjahr ist; Hinweis, wenn das Vorjahr nicht abgeschlossen ist.
 // =====================================================================
 
 public static class SchildImportService
@@ -82,13 +98,18 @@ public static class SchildImportService
         public const string DieselbePerson = "dieselbePerson";
         public const string Zuordnung = "zuordnung";
         public const string Zusammengefuehrt = "zusammengefuehrt";
+        // P5b-1 (246): Jahreswechsel – versetzt bzw. wiederholt (eine Kategorie, der Text sagt „(wiederholt)“)
+        public const string Versetzt = "versetzt";
 
         public static readonly string[] Reihenfolge =
         {
             AbgangLautSchild, FehltImExport, DieselbePerson, Zuordnung, Neu, Zusammengefuehrt, NameGeaendert,
-            Klassenwechsel, Kurswechsel, StatusGeaendert
+            Versetzt, Klassenwechsel, Kurswechsel, StatusGeaendert
         };
     }
+
+    /// <summary>P5b-1 (248): Abschlussjahrgang – zählt beim Jahreswechsel nicht für den Teil-Export-Schutz.</summary>
+    public const string Abschlussstufe = "Q2";
 
     /// <summary>SchILD-Status → Status in der Datenbank (Entscheidung 80); null = nicht erlaubt.</summary>
     public static string? StatusText(int schildStatus) => schildStatus switch
@@ -219,10 +240,11 @@ public static class SchildImportService
 
     /// <summary>Rechnet Abgleich und Vorschau (schreibt nichts). Der Import ruft danach <see cref="SchildImportLauf.Schreiben"/>.</summary>
     /// <param name="halbjahrAb">P4a (206): Einstellung „2. Halbjahr ab“ (null = Standard 1. Februar).</param>
+    /// <param name="aktuellesSchuljahr">P5b-1 (247): Einstellung „Aktuelles Schuljahr“ (Warnung beim Jahreswechsel).</param>
     public static async Task<SchildImportLauf> BerechnenAsync(AppDbContext db, SchildImportDto dto, bool produktiv, DateOnly heute,
-        DateOnly? halbjahrAb = null)
+        DateOnly? halbjahrAb = null, string? aktuellesSchuljahr = null)
     {
-        var lauf = new SchildImportLauf(dto, produktiv, heute, halbjahrAb);
+        var lauf = new SchildImportLauf(dto, produktiv, heute, halbjahrAb, aktuellesSchuljahr);
         await lauf.RechnenAsync(db);
         return lauf;
     }
@@ -368,12 +390,23 @@ public sealed class SchildImportLauf
     private string? _letzteKennung;                                             // Kennung beim letzten Import dieser Art
     private readonly DateOnly? _halbjahrAb;                                     // P4a: Einstellung „2. Halbjahr ab“
 
-    public SchildImportLauf(SchildImportDto dto, bool produktiv, DateOnly heute, DateOnly? halbjahrAb = null)
+    // P5b-1 (246–248): Jahreswechsel – Schüler aus dem Vorjahr (Zugehörigkeiten nur in Schuljahr − 1)
+    private readonly string? _aktuell;                                          // Einstellung „Aktuelles Schuljahr“
+    private string _vj = "";                                                    // Vorjahr
+    private DateOnly _vjEnde;                                                   // Abgang beim Jahreswechsel
+    private DateOnly? _vjKalEnde;                                               // „Ende“ des Vorjahres laut Kalender
+    private readonly Dictionary<int, string> _vjGruppe = new();                 // Schüler-Id → Klasse bzw. Stufe im Vorjahr
+    private readonly HashSet<int> _ausVj = new();                               // aus dem Vorjahr (keine Zeile im Schuljahr)
+    private readonly Dictionary<string, string> _vjZiel = new(StringComparer.OrdinalIgnoreCase);   // Vorjahr → Mehrheit
+
+    public SchildImportLauf(SchildImportDto dto, bool produktiv, DateOnly heute, DateOnly? halbjahrAb = null,
+        string? aktuellesSchuljahr = null)
     {
         _dto = dto;
         _produktiv = produktiv;
         _heute = heute;
         _halbjahrAb = halbjahrAb;
+        _aktuell = SchildImportService.Leer(aktuellesSchuljahr);
         _giltAb = dto.GiltAb;
         _vortag = dto.GiltAb.AddDays(-1);
         _sj = dto.Schuljahr;
@@ -398,6 +431,10 @@ public sealed class SchildImportLauf
     // 5.2c-2: Klassenleitungen (erstmals eingetragen, geändert), Namen der Lehrkräfte; Gruppen der Neu-Zuordnung
     public int KlassenleitungNeu, KlassenleitungGeaendert, LehrkraefteNeu, LehrkraefteGeaendert, LehrkraefteEntfernt,
         LehrkraefteGesamt, PaarGruppen, PaarGruppenMitVorschlag;
+    // P5b-1 (246): Jahreswechsel – aktive Schüler aus dem Vorjahr, davon versetzt bzw. wiederholt (erkannt)
+    public int AusVorjahr, Versetzt, Wiederholt;
+    /// <summary>P5b-1: Vorjahr, mit dem verglichen wurde (null = kein Jahreswechsel).</summary>
+    public string? Vorjahr => AusVorjahr > 0 || Versetzt + Wiederholt > 0 ? _vj : null;
 
     public List<(string Schluessel, string Art, int Schueler)> Unbekannt { get; } = new();
     public List<(string Typ, string Schluessel)> NeueLerngruppen { get; } = new();
@@ -505,8 +542,17 @@ public sealed class SchildImportLauf
             .Select(p => p.SchluesselKennung).FirstOrDefaultAsync();
         // 5.2c-2 (193): Namen der Lehrkräfte dieser Art (werden mit Lehrkraefte.dat ganz ersetzt).
         var lehrkraefte = await db.Lehrkraefte.Where(l => l.IstPseudo == dto.Pseudo).ToListAsync();
+        // P5b-1 (246): Vorjahr – Lerngruppen, Zugehörigkeiten und Kalender von Schuljahr − 1 (nur lesen, nie ändern)
+        _vj = Jahresablauf.Verschieben(_sj, -1);
+        var vjLerngruppen = _vj == _sj ? new List<Lerngruppe>()
+            : await db.Lerngruppen.AsNoTracking().Where(l => l.Schuljahr == _vj).ToListAsync();
+        var vjZug = vjLerngruppen.Count == 0 ? new List<Zugehoerigkeit>()
+            : await db.Zugehoerigkeiten.AsNoTracking().Where(z => z.Schuljahr == _vj).ToListAsync();
+        var kalVj = vjZug.Count == 0 ? null : await db.Kalender.AsNoTracking().FirstOrDefaultAsync(k => k.Schuljahr == _vj);
+        _vjKalEnde = kalVj?.Ende;
+        _vjEnde = kalVj != null && kalVj.Ende < _giltAb ? kalVj.Ende : _vortag;
 
-        Stand = StandPruefsumme(version, schueler, lerngruppen, zug, protokolle, lehrkraefte);
+        Stand = StandPruefsumme(version, schueler, lerngruppen, zug, protokolle, lehrkraefte, vjLerngruppen, vjZug, _vjKalEnde);
         VorschauPruefsumme = SchildImportService.Sha(Stand + "|" + NutzlastPruefsumme(dto));
 
         if (dto.Pseudo && schueler.Any(s => !s.IstPseudo))
@@ -671,6 +717,13 @@ public sealed class SchildImportLauf
             }
         }
 
+        // ---- 6a. P5b-1 (246): Jahreswechsel – Schüler aus dem Vorjahr und die Klasse, in die die Mehrheit versetzt ist ----
+        VorjahrBestimmen(kandidaten, eingaenge, zugJe, vjLerngruppen, vjZug);
+        if (dto.Neuzuordnung && _ausVj.Count > 0)
+            Hinweise.Add($"Jahreswechsel: Die Neu-Zuordnung über Name + Klasse findet Schüler aus dem Vorjahr {_vj} kaum (die " +
+                         $"Klassen von {_sj} gibt es in der Datenbank noch nicht). Besser mit dem letzten Export von {_vj} neu " +
+                         "zuordnen und danach den Jahreswechsel-Import machen.");
+
         // ---- 6b. Paare (5.2c-1): „dieselbe Person?“ (186–188) bzw. Neu-Zuordnung über Name + Klasse (190) ----
         PaareBilden(eingaenge, kandidaten, vergeben, ZeilenVon, lgById);
 
@@ -747,6 +800,7 @@ public sealed class SchildImportLauf
         // ---- 8. Gefundene Schüler: Änderungen ermitteln ----
         var getroffen = new HashSet<int>();
         var neueZeilen = new List<SchildVorschauZeile>();
+        int abgangVj = 0;                                   // P5b-1: davon Abgänge von Schülern aus dem Vorjahr
         foreach (var e in eingaenge.Where(x => x.Treffer != null))
         {
             var s = e.Treffer!;
@@ -754,6 +808,8 @@ public sealed class SchildImportLauf
             var zeilen = ZeilenVon(s.Id);
             string statusAlt = string.IsNullOrEmpty(s.Status) ? "aktiv" : s.Status!;
             string altName = $"{s.Vorname} {s.Nachname}";
+            // P5b-1 (246): aus dem Vorjahr – Klasse bzw. Stufe im Vorjahr (sonst null)
+            string? vjGruppe = _ausVj.Contains(s.Id) ? _vjGruppe[s.Id] : null;
 
             // 5.2c-1 (190): bei der Neu-Zuordnung bekommt jeder zugeordnete Datensatz alle neuen Prüfsummen – auch ein
             // schon abgegangener und einer, dessen Abgang nicht bestätigt wird.
@@ -771,11 +827,15 @@ public sealed class SchildImportLauf
                 Zeilen.Add(new SchildVorschauZeile
                 {
                     Kategorie = SchildImportService.Kategorie.AbgangLautSchild, Id = s.Id, Name = Name(e.D),
-                    Klasse = KlasseAktuell(zeilen, lgById), Stufe = e.D.Stufe,
-                    Aenderung = $"Status {e.D.Status} laut SchILD" + (e.D.Status == 8 ? " (Abschluss)" : " (Abgang)"),
+                    Klasse = vjGruppe ?? KlasseAktuell(zeilen, lgById), Stufe = e.D.Stufe,
+                    // P5b-1 (247): beim Jahreswechsel zum Ende des Vorjahres (die Zugehörigkeiten des Vorjahres bleiben)
+                    Aenderung = vjGruppe != null
+                        ? (e.D.Status == 8 ? "Abschluss (Status 8)" : "Abgang (Status 9)") + $" – zum {D(_vjEnde)} (Ende {_vj})"
+                        : $"Status {e.D.Status} laut SchILD" + (e.D.Status == 8 ? " (Abschluss)" : " (Abgang)"),
                     Vorausgewaehlt = true, KontoWirdGesperrt = konten.Any(k => k.SchuelerId == s.Id && !k.Gesperrt)
                 });
-                AbgangVormerken(s, zeilen, konten, e.D);
+                AbgangVormerken(s, zeilen, konten, e.D, vjGruppe != null ? _vjEnde : null);
+                if (vjGruppe != null) abgangVj++;
                 continue;
             }
 
@@ -799,7 +859,7 @@ public sealed class SchildImportLauf
                 Merke(SchildImportService.Kategorie.StatusGeaendert, $"{StatusAnzeige(statusAlt)} → {StatusAnzeige(e.Status)}"
                     + (statusAlt == "abgang" && konten.Any(k => k.SchuelerId == s.Id && k.Gesperrt)
                         ? " (das Konto bleibt gesperrt – der Admin kann es entsperren)" : ""));
-            if (!Cmp.Equals(s.Stufe, e.D.Stufe))
+            if (!Cmp.Equals(s.Stufe, e.D.Stufe) && vjGruppe == null)   // P5b-1: beim Jahreswechsel steckt das in „versetzt“
                 Merke(SchildImportService.Kategorie.StatusGeaendert, $"Jahrgang {s.Stufe} → {e.D.Stufe}");
 
             DateOnly start = Start(e.D);
@@ -827,10 +887,24 @@ public sealed class SchildImportLauf
                 if (!Cmp.Equals(klAlt ?? "", klNeu ?? ""))
                 {
                     klasseGewechselt = true;
-                    Merke(SchildImportService.Kategorie.Klassenwechsel,
-                        $"{klAlt ?? "—"} → {klNeu ?? (e.Status == "extern" ? "— (extern, nur Kurse)" : "—")}"
-                        + (start > _giltAb ? $" ab {D(start)}" : ""));
+                    if (vjGruppe == null)   // P5b-1: beim Jahreswechsel steht das in „versetzt“
+                        Merke(SchildImportService.Kategorie.Klassenwechsel,
+                            $"{klAlt ?? "—"} → {klNeu ?? (e.Status == "extern" ? "— (extern, nur Kurse)" : "—")}"
+                            + (start > _giltAb ? $" ab {D(start)}" : ""));
                 }
+            }
+
+            // -- P5b-1 (246): Jahreswechsel – eine Zeile „versetzt“ bzw. „wiederholt“ (statt Klassen- und Jahrgangswechsel) --
+            bool wiederholt = false;
+            string? versetztHinweis = null;
+            if (vjGruppe != null)
+            {
+                string neuG = NeueGruppe(e);
+                wiederholt = Cmp.Equals(StufeVon(vjGruppe), StufeVon(neuG));
+                Merke(SchildImportService.Kategorie.Versetzt, $"{vjGruppe} → {neuG}" + (wiederholt ? " (wiederholt)" : "")
+                    + (e.KlasseUnbekannt ? " (Klasse nicht im Grundplan)" : "") + (start > _giltAb ? $" ab {D(start)}" : ""));
+                if (!wiederholt && _vjZiel.TryGetValue(vjGruppe, out var mehrheit) && !Cmp.Equals(mehrheit, neuG))
+                    versetztHinweis = $"abweichend: die meisten aus {vjGruppe} → {mehrheit}";
             }
 
             // -- Kurse und Gruppen (nur Zeilen aus SchILD; die Listen von Hand enden auf Gruppenebene) --
@@ -866,7 +940,7 @@ public sealed class SchildImportLauf
                 NeueZeile(s, ziel[p.Id], StartFuer(p));
                 if (!wechseltHeute.Contains(p.Id)) plus.Add(p.Schluessel);
             }
-            if (plus.Count + minus.Count > 0)
+            if (plus.Count + minus.Count > 0 && vjGruppe == null)   // P5b-1: aus dem Vorjahr – alle Kurse sind neu
                 Merke(SchildImportService.Kategorie.Kurswechsel,
                     string.Join(", ", plus.Select(k => "+ " + k).Concat(minus.Select(k => "– " + k)))
                     + (start > _giltAb && plus.Count > 0 ? $" (ab {D(start)})" : ""));
@@ -894,11 +968,16 @@ public sealed class SchildImportLauf
                     case SchildImportService.Kategorie.Klassenwechsel: Klassenwechsel++; break;
                     case SchildImportService.Kategorie.Kurswechsel: Kurswechsel++; break;
                     case SchildImportService.Kategorie.StatusGeaendert: StatusGeaendert++; break;
+                    case SchildImportService.Kategorie.Versetzt:
+                        if (wiederholt) Wiederholt++;
+                        else Versetzt++;
+                        break;
                 }
                 Zeilen.Add(new SchildVorschauZeile
                 {
                     Kategorie = kat, Id = s.Id, Name = Name(e.D), Klasse = e.Klasse?.Schluessel ?? klAlt, Stufe = e.D.Stufe,
-                    Aenderung = string.Join("; ", l)
+                    Aenderung = string.Join("; ", l),
+                    Hinweis = kat == SchildImportService.Kategorie.Versetzt ? versetztHinweis : null
                 });
             }
         }
@@ -935,30 +1014,59 @@ public sealed class SchildImportLauf
         // ---- 10. Fehlt im Export (nicht vorausgewählt, 80) ----
         var basis = kandidaten.Where(s => s.Status != "abgang" && ZeilenVon(s.Id).Any(OffenAb)).ToList();
         var fehlt = basis.Where(s => !getroffen.Contains(s.Id)).OrderBy(s => s.Nachname, Cmp).ThenBy(s => s.Vorname, Cmp).ToList();
+        // P5b-1 (246, 247): dazu die aktiven Schüler aus dem Vorjahr ohne Treffer – Abgang zum Ende des Vorjahres
+        var basisVj = kandidaten.Where(s => s.Status != "abgang" && _ausVj.Contains(s.Id)).ToList();
+        var fehltVj = basisVj.Where(s => !getroffen.Contains(s.Id)).OrderBy(s => s.Nachname, Cmp).ThenBy(s => s.Vorname, Cmp).ToList();
+        AusVorjahr = basisVj.Count;
+        bool AusAbschluss(int id) => _vjGruppe.TryGetValue(id, out var g) && Cmp.Equals(g, SchildImportService.Abschlussstufe);
         var fehltZeilen = new List<SchildVorschauZeile>();
-        foreach (var s in fehlt)
+        foreach (var s in fehlt.Concat(fehltVj))
         {
             FehltImExport++;
             var zeilen = ZeilenVon(s.Id);
-            string? klasse = KlasseAktuell(zeilen, lgById);
+            bool vj = _ausVj.Contains(s.Id);
+            string? klasse = vj ? _vjGruppe[s.Id] : KlasseAktuell(zeilen, lgById);
             var zeile = new SchildVorschauZeile
             {
                 Kategorie = SchildImportService.Kategorie.FehltImExport, Id = s.Id, Name = $"{s.Vorname} {s.Nachname}",
-                Klasse = klasse, Stufe = s.Stufe, Aenderung = "nicht im Export, kein Abgang gemeldet",
+                Klasse = klasse, Stufe = s.Stufe,
+                Aenderung = "nicht im Export, kein Abgang gemeldet" + (vj ? $" – bestätigt: Abgang zum {D(_vjEnde)} (Ende {_vj})" : ""),
                 Vorausgewaehlt = false, KontoWirdGesperrt = konten.Any(k => k.SchuelerId == s.Id && !k.Gesperrt)
             };
-            // 5.2c-1: nicht gewählte Paare („dieselbe Person?“ bzw. Neu-Zuordnung) als Hinweis.
-            if (_paarHinweiseDb.TryGetValue(s.Id, out var ph)) zeile.Hinweis = string.Join("; ", ph.Distinct());
+            // 5.2c-1: nicht gewählte Paare („dieselbe Person?“ bzw. Neu-Zuordnung) als Hinweis; P5b-1: Abschlussjahrgang.
+            var hinweise = new List<string>();
+            if (vj && AusAbschluss(s.Id)) hinweise.Add("Abschlussjahrgang – vermutlich Abschluss");
+            if (_paarHinweiseDb.TryGetValue(s.Id, out var ph)) hinweise.AddRange(ph.Distinct());
+            if (hinweise.Count > 0) zeile.Hinweis = string.Join("; ", hinweise);
             fehltZeilen.Add(zeile);
-            AbgangVormerken(s, zeilen, konten, null);
+            AbgangVormerken(s, zeilen, konten, null, vj ? _vjEnde : null);
         }
         Zeilen.AddRange(neueZeilen);
         Zeilen.AddRange(fehltZeilen);
 
-        // ---- 11. Schutz vor Teil-Export (80, 168) ----
-        if (basis.Count > 0 && fehlt.Count * 4 > basis.Count)
-            Sperre("TeilExport", $"{fehlt.Count} von {basis.Count} Schülern der Datenbank fehlen im Export (mehr als ein " +
-                                 "Viertel) – ist der Export vollständig? (Entscheidung 80)");
+        // ---- 11. Schutz vor Teil-Export (80, 168); P5b-1 (248): mit den Schülern aus dem Vorjahr, ohne den Abschlussjahrgang ----
+        int basisGesamt = basis.Count + basisVj.Count(s => !AusAbschluss(s.Id));
+        int fehltGesamt = fehlt.Count + fehltVj.Count(s => !AusAbschluss(s.Id));
+        if (basisGesamt > 0 && fehltGesamt * 4 > basisGesamt)
+            Sperre("TeilExport", $"{fehltGesamt} von {basisGesamt} Schülern der Datenbank fehlen im Export (mehr als ein " +
+                                 "Viertel" + (basisVj.Count > 0
+                                     ? $"; Schüler aus dem Vorjahr {_vj} eingerechnet, ohne den Abschlussjahrgang " +
+                                       SchildImportService.Abschlussstufe
+                                     : "") +
+                                 ") – ist der Export vollständig? (Entscheidung 80)");
+        if (basisVj.Count > 0)
+        {
+            // Eine Klasse bzw. Stufe des Vorjahres (außer dem Abschlussjahrgang), von der kein einziger Schüler im Export steht –
+            // auch nicht mit Abgang: Dann fehlt vermutlich ihre Folgeklasse im Export.
+            var imExportVj = new HashSet<string>(getroffen.Where(_vjGruppe.ContainsKey).Select(id => _vjGruppe[id]), Cmp);
+            var ohneFolge = basisVj.Where(s => !AusAbschluss(s.Id)).Select(s => _vjGruppe[s.Id]).Distinct(Cmp)
+                .Where(g => !imExportVj.Contains(g)).OrderBy(g => g, Cmp).ToList();
+            if (ohneFolge.Count > 0)
+                Sperre("TeilExport", $"Von {(ohneFolge.Count == 1 ? "dieser Klasse bzw. Stufe" : "diesen Klassen bzw. Stufen")} des " +
+                                     $"Vorjahres {_vj} steht kein einziger Schüler im Export (auch nicht mit Abgang): " +
+                                     $"{string.Join(", ", ohneFolge)} – fehlt eine ganze Klasse (Folgeklasse) im Export? " +
+                                     "(Entscheidung 80)");
+        }
         var exportKlassen = new HashSet<string>(eingaenge.Select(e => e.D.Klasse).Where(k => k != null).Select(k => k!), Cmp);
         var exportStufen = new HashSet<string>(eingaenge.Select(e => e.D.Stufe), Cmp);
         var basisIds = basis.Select(s => s.Id).ToHashSet();
@@ -991,8 +1099,32 @@ public sealed class SchildImportLauf
                 Hinweise.Add($"Seit dem {D(_giltAb)} sind schon {erfasst} Stunden erfasst. Ihre Listen richten sich nach dem " +
                              "Import; wer dort eine Anwesenheit hat, bleibt sichtbar.");
         }
-        if (_giltAb > _heute && AbgangLautSchild + FehltImExport > 0)
+        if (_giltAb > _heute && AbgangLautSchild + FehltImExport - abgangVj - fehltVj.Count > 0)
             Hinweise.Add($"Konten bestätigter Abgänge werden schon beim Import gesperrt; die Zugehörigkeiten enden am {D(_vortag)}.");
+        // P5b-1 (246–248): Jahreswechsel
+        if (basisVj.Count > 0)
+        {
+            Hinweise.Add($"Jahreswechsel: {basisVj.Count} Schüler aus dem Vorjahr {_vj} (dort Zugehörigkeiten, in {_sj} noch keine) – " +
+                         $"versetzt {Versetzt}, wiederholt {Wiederholt}, Abgang laut SchILD {abgangVj}, fehlt im Export " +
+                         $"{fehltVj.Count}. Ihre Klassen und Kurse in {_sj} gelten ab {D(_giltAb)}; bestätigte Abgänge gelten " +
+                         $"zum {D(_vjEnde)} (Ende {_vj}), ihre Zugehörigkeiten in {_vj} bleiben, wie sie sind. Bestätigte " +
+                         "Abgänge sperren das Schülerkonto.");
+            int ausAbschluss = fehltVj.Count(s => AusAbschluss(s.Id));
+            if (ausAbschluss > 0)
+                Hinweise.Add($"{ausAbschluss} Schüler des Abschlussjahrgangs {SchildImportService.Abschlussstufe} von {_vj} " +
+                             "fehlen im Export – vermutlich Abschluss. Sie zählen nicht für den Teil-Export-Schutz; bestätigen: " +
+                             "Ansicht „fehlt im Export“ → „Alle in der Ansicht bestätigen“ (bzw. einzeln).");
+            if (_vjKalEnde == null)
+                Hinweise.Add($"Für {_vj} gibt es keinen Kalender – Abgänge gelten deshalb zum {D(_vjEnde)} (Vortag von " +
+                             "„Änderungen gelten ab“).");
+            if (_aktuell != null && Cmp.Equals(_aktuell, _vj))
+                Warnungen.Add($"„Aktuelles Schuljahr“ ist in der App noch {_vj}. Für den Jahreswechsel zuerst in der App " +
+                              $"Kontomenü → „Jahresablauf“ → „Schuljahr {_sj} vorbereiten…“ – sonst gelten Schülerkonten, " +
+                              $"Zuständigkeiten und „Anwesenheit erfasst ab“ weiter für {_vj}.");
+            if (!await SchuljahrRechte.IstAbgeschlossenAsync(db, _vj))
+                Hinweise.Add($"{_vj} ist noch nicht abgeschlossen – das ist in Ordnung: Es bleibt für Nachträge bearbeitbar, bis " +
+                             "die Verwaltung es im Jahresablauf abschließt.");
+        }
         if (AbgangNichtInDatenbank > 0)
             Hinweise.Add($"{AbgangNichtInDatenbank} Schüler mit Abgang laut SchILD (Status 8/9) sind nicht in der Datenbank " +
                          "und werden nicht angelegt.");
@@ -1001,7 +1133,7 @@ public sealed class SchildImportLauf
                          "Zugehörigkeiten dazu bleiben unverändert.");
 
         int neueGruppen = neuAngelegt.Count(id => verwaltet[id].Typ == LerngruppeTyp.Gruppe);
-        if (kandidaten.Count > 0 && neueGruppen > 0)
+        if (basis.Count > 0 && neueGruppen > 0)   // P5b-1: nicht beim ersten Import eines Jahres (Listen ab „gilt ab“)
             Hinweise.Add($"{neueGruppen} Sek-I-Gruppen kommen neu aus SchILD; ihre Liste gilt ab Schuljahresbeginn (genauer: " +
                          "seit dem Eintritt in die jetzige Klasse), damit frühere Stunden nicht leer bleiben.");
         foreach (var id in verwaltet.Keys.Where(k => wechseltHeute.Contains(k) && !neuAngelegt.Contains(k))
@@ -1082,13 +1214,17 @@ public sealed class SchildImportLauf
         Func<int, List<Zugehoerigkeit>> zeilenVon, Dictionary<int, Lerngruppe> lgById)
     {
         bool neuZu = _dto.Neuzuordnung;
+        // P5b-1 (246): auch Schüler aus dem Vorjahr (ohne Zeile im Schuljahr) – nur über die Teil-Prüfsummen sicher
         var offeneDb = kandidaten.Where(s => !vergeben.Contains(s.Id)
-                                             && (neuZu || (s.Status != "abgang" && zeilenVon(s.Id).Any(OffenAb)))).ToList();
+                                             && (neuZu || (s.Status != "abgang"
+                                                           && (zeilenVon(s.Id).Any(OffenAb) || _ausVj.Contains(s.Id)))))
+            .ToList();
         var offeneEx = eingaenge.Where(e => e.Treffer == null && (neuZu || !e.Abgang)).ToList();
         if (offeneDb.Count == 0 || offeneEx.Count == 0) return;
 
         static string NameKey(string nach, string vor) => SchildImportService.NameNorm(nach) + "\n" + SchildImportService.NameNorm(vor);
-        var gruppeDb = offeneDb.ToDictionary(s => s.Id, s => (KlasseAktuell(zeilenVon(s.Id), lgById) ?? s.Stufe).Trim());
+        var gruppeDb = offeneDb.ToDictionary(s => s.Id, s => (KlasseAktuell(zeilenVon(s.Id), lgById)
+                                                              ?? (_ausVj.Contains(s.Id) ? _vjGruppe[s.Id] : null) ?? s.Stufe).Trim());
         string GruppeEx(Eingang e) => ((e.Status != "extern" ? e.D.Klasse : null) ?? e.D.Stufe).Trim();
 
         Dictionary<string, List<Schueler>> Index(Func<Schueler, string?> key)
@@ -1141,11 +1277,16 @@ public sealed class SchildImportLauf
                 if (s.ExtIdSchild != null && e.D.ExtIdSchild != null
                     && !string.Equals(s.ExtIdSchild, e.D.ExtIdSchild, StringComparison.Ordinal)) continue;
                 bool gleich = Cmp.Equals(gruppeDb[s.Id], gEx);
+                // P5b-1: aus dem Vorjahr zählt als „gleiche Klasse“ die Klasse, in die die Mehrheit der Mitschüler versetzt ist.
+                bool versetztWieMehrheit = !gleich && _ausVj.Contains(s.Id)
+                                           && _vjZiel.TryGetValue(gruppeDb[s.Id], out var zielVj) && Cmp.Equals(zielVj, gEx);
+                gleich = gleich || versetztWieMehrheit;
                 string signal = v1.Contains(s.Id) ? "gleicher Vorname und Geburtsdatum"
                               : n1.Contains(s.Id) ? "gleicher Nachname und Geburtsdatum"
                               : "gleicher Name in " + (e.D.Klasse != null ? "derselben Klasse" : "demselben Jahrgang") +
                                 ", anderes Geburtsdatum";
-                if (!gleich) signal += $", Klasse {gruppeDb[s.Id]} → {gEx}";
+                if (versetztWieMehrheit) signal += $", versetzt {gruppeDb[s.Id]} → {gEx} (Vorjahr {_vj})";
+                else if (!gleich) signal += $", Klasse {gruppeDb[s.Id]} → {gEx}";
                 paare.Add(new PaarKandidat(e, s, signal, v1.Contains(s.Id) || n1.Contains(s.Id), gleich, gruppeDb[s.Id]));
             }
         }
@@ -1512,7 +1653,7 @@ public sealed class SchildImportLauf
             IstPseudo = _dto.Pseudo,
             Neu = Neu,
             Geaendert = _geaenderteIds.Count,
-            Klassenwechsel = Klassenwechsel,
+            Klassenwechsel = Klassenwechsel + Versetzt + Wiederholt,   // P5b-1 (246): Versetzte zählen als Klassenwechsel
             Kurswechsel = Kurswechsel,
             Abgaenge = bestaetigt,
             Unveraendert = Unveraendert,
@@ -1567,7 +1708,11 @@ public sealed class SchildImportLauf
         lehrkraefteGeaendert = LehrkraefteGeaendert,
         lehrkraefteEntfernt = LehrkraefteEntfernt,
         paarGruppen = PaarGruppen,
-        paarGruppenMitVorschlag = PaarGruppenMitVorschlag
+        paarGruppenMitVorschlag = PaarGruppenMitVorschlag,
+        // P5b-1 (246): Jahreswechsel
+        ausVorjahr = AusVorjahr,
+        versetzt = Versetzt,
+        wiederholt = Wiederholt
     };
 
     /// <summary>Vorschau für den Desktop (Probelauf, Sperre oder veraltete Vorschau).</summary>
@@ -1583,6 +1728,7 @@ public sealed class SchildImportLauf
         kennungLetzterImport = _letzteKennung,
         grundplan = GrundplanBezeichnung,
         grundplanAb = GrundplanAb,
+        vorjahr = Vorjahr,       // P5b-1: Jahreswechsel (verglichen mit diesem Schuljahr), sonst null
         gesperrt = Gesperrt,
         sperren = Sperren,
         seedEntfernenMoeglich = SeedEntfernenMoeglich,
@@ -1640,6 +1786,8 @@ public sealed class SchildImportLauf
                          (_letzteKennung != null ? $" – bisher Kennung {_letzteKennung}, neu {_dto.Kennung}" : ""));
         foreach (var s in Sperren) b.AppendLine("GESPERRT: " + s.Text);
         foreach (var w in Warnungen) b.AppendLine("WARNUNG: " + w);   // P4a (206)
+        if (Vorjahr != null)   // P5b-1 (246)
+            b.AppendLine($"JAHRESWECHSEL: Vergleich mit dem Vorjahr {Vorjahr} – {AusVorjahr} Schüler aus dem Vorjahr");
         b.AppendLine($"Schüler im Export: {ImExport}");
         if (_dto.Neuzuordnung)
             b.AppendLine($"  neu zugeordnet (Name + Klasse): {NeuZugeordnet} (mögliche Paare: {ZuordnungPaare})");
@@ -1647,7 +1795,13 @@ public sealed class SchildImportLauf
             b.AppendLine($"  dieselbe Person? {DieselbePerson} Paare – zusammengeführt: {Zusammengefuehrt}");
         b.AppendLine($"  neu: {Neu}");
         b.AppendLine($"  Name bzw. Geburtsdatum geändert: {NameGeaendert}");
-        b.AppendLine($"  Klassenwechsel: {Klassenwechsel}");
+        if (Vorjahr != null)
+        {
+            b.AppendLine($"  versetzt: {Versetzt}");
+            b.AppendLine($"  wiederholt: {Wiederholt}");
+        }
+        b.AppendLine($"  Klassenwechsel: {Klassenwechsel}" + (Vorjahr != null ? " (im Protokoll mit „versetzt“ und " +
+                                                                               "„wiederholt“ zusammen)" : ""));
         b.AppendLine($"  Kurs-/Gruppenwechsel: {Kurswechsel}");
         b.AppendLine($"  Status bzw. Jahrgang geändert: {StatusGeaendert}");
         b.AppendLine($"  Abgang laut SchILD: {AbgangLautSchild}" + (p == null ? " (vorausgewählt)" : ""));
@@ -1727,16 +1881,19 @@ public sealed class SchildImportLauf
         }));
 
     /// <summary>Bestätigter Abgang (80, E): alle offenen Zeilen enden am Vortag, Status „abgang“, Konto gesperrt.</summary>
-    private void AbgangVormerken(Schueler s, List<Zugehoerigkeit> zeilen, List<Benutzer> konten, SchildSchuelerDto? dtoS)
+    /// <param name="abgangAm">P5b-1 (247): beim Jahreswechsel das Ende des Vorjahres (sonst der Vortag von „gilt ab“).</param>
+    private void AbgangVormerken(Schueler s, List<Zugehoerigkeit> zeilen, List<Benutzer> konten, SchildSchuelerDto? dtoS,
+        DateOnly? abgangAm = null)
     {
         var offen = zeilen.Where(OffenAb).ToList();
         var eigeneKonten = konten.Where(k => k.SchuelerId == s.Id).ToList();
+        var am = abgangAm ?? _vortag;
         _abgaenge[s.Id] = d =>
         {
             foreach (var z in offen) Beenden(d, z);
             if (dtoS != null) Identitaet(s, dtoS);
             s.Status = "abgang";
-            s.AbgangAm = _vortag;
+            s.AbgangAm = am;
             if (dtoS != null) s.ImportAm = _jetzt;
             foreach (var k in eigeneKonten.Where(konto => !konto.Gesperrt))
             {
@@ -1788,6 +1945,60 @@ public sealed class SchildImportLauf
 
     private static string Name(SchildSchuelerDto d) => $"{d.Vorname} {d.Nachname}";
 
+    // ----------------------------------------------------------------
+    //  P5b-1 (246): Jahreswechsel – Schüler aus dem Vorjahr
+    // ----------------------------------------------------------------
+
+    /// <summary>
+    /// Merkt sich je importiertem Schüler mit Zugehörigkeiten im Vorjahr dessen Klasse bzw. Stufe dort; „aus dem Vorjahr“ ist,
+    /// wer im Schuljahr der Nutzlast noch keine Zeile hat. Dazu je Klasse bzw. Stufe des Vorjahres die Klasse, in die die
+    /// Mehrheit der erkannten Schüler (ohne Abgänge) jetzt geht.
+    /// </summary>
+    private void VorjahrBestimmen(List<Schueler> kandidaten, List<Eingang> eingaenge, Dictionary<int, List<Zugehoerigkeit>> zugJe,
+        List<Lerngruppe> vjLerngruppen, List<Zugehoerigkeit> vjZug)
+    {
+        if (vjZug.Count == 0) return;
+        var vjLgById = vjLerngruppen.ToDictionary(l => l.Id);
+        var vjJe = vjZug.Where(z => vjLgById.ContainsKey(z.LerngruppeId)).GroupBy(z => z.SchuelerId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+        foreach (var s in kandidaten)
+        {
+            if (!vjJe.TryGetValue(s.Id, out var vjZeilen)) continue;
+            _vjGruppe[s.Id] = VorjahrGruppe(s, vjZeilen, vjLgById);
+            if (!zugJe.ContainsKey(s.Id)) _ausVj.Add(s.Id);
+        }
+        foreach (var vg in eingaenge.Where(x => x.Treffer != null && !x.Abgang && _ausVj.Contains(x.Treffer.Id))
+                     .GroupBy(x => _vjGruppe[x.Treffer!.Id], Cmp))
+        {
+            var mehrheit = vg.GroupBy(y => NeueGruppe(y), Cmp).OrderByDescending(y => y.Count()).ThenBy(y => y.Key, Cmp).First();
+            _vjZiel[vg.Key] = mehrheit.Key;
+        }
+    }
+
+    /// <summary>Klasse im Vorjahr (die zuletzt gültige Klassen-Zeile); Oberstufe: die Stufe der Kurse (meistens); sonst der Jahrgang.</summary>
+    private static string VorjahrGruppe(Schueler s, List<Zugehoerigkeit> zeilen, Dictionary<int, Lerngruppe> vjLgById)
+    {
+        var kl = zeilen.Where(z => vjLgById[z.LerngruppeId].Typ == LerngruppeTyp.Klasse)
+            .OrderByDescending(z => z.GueltigBis ?? DateOnly.MaxValue).ThenByDescending(z => z.GueltigVon ?? DateOnly.MinValue)
+            .FirstOrDefault();
+        if (kl != null) return vjLgById[kl.LerngruppeId].Bezeichnung.Trim();
+        string? stufe = zeilen.Where(z => vjLgById[z.LerngruppeId].Typ == LerngruppeTyp.Kurs)
+            .Select(z => vjLgById[z.LerngruppeId].Stufe.Trim().ToUpperInvariant()).Where(x => x.Length > 0)
+            .GroupBy(x => x, StringComparer.Ordinal).OrderByDescending(x => x.Count()).ThenBy(x => x.Key, StringComparer.Ordinal)
+            .Select(x => x.Key).FirstOrDefault();
+        return stufe ?? s.Stufe.Trim().ToUpperInvariant();
+    }
+
+    /// <summary>Klasse (Sek I) bzw. Stufe (Oberstufe, extern) eines Schülers im Export.</summary>
+    private static string NeueGruppe(Eingang e) => (e.Klasse?.Schluessel ?? e.D.Klasse ?? e.D.Stufe).Trim();
+
+    /// <summary>„07B“ → „07“, „EF“ → „EF“ (zum Erkennen von Wiederholern).</summary>
+    private static string StufeVon(string gruppe)
+    {
+        var g = gruppe.Trim().ToUpperInvariant();
+        return g.Length >= 2 && char.IsDigit(g[0]) && char.IsDigit(g[1]) ? g[..2] : g;
+    }
+
     private static string TypText(LerngruppeTyp t) => t switch
     {
         LerngruppeTyp.Klasse => "Klasse",
@@ -1807,8 +2018,10 @@ public sealed class SchildImportLauf
 
     /// <summary>Prüfsumme des Datenbankstands (78): Schüler, Lerngruppen (seit 5.2c-2 mit Klassenleitung) und
     /// Zugehörigkeiten des Schuljahrs, Grundplan, Importe, seit 5.2c-2 die Namen der Lehrkräfte dieser Art.</summary>
+    /// <remarks>P5b-1: mit Zugehörigkeiten im Vorjahr zusätzlich dessen Lerngruppen, Zeilen und Kalender-Ende (sonst wie bisher).</remarks>
     private static string StandPruefsumme(GrundplanVersion v, List<Schueler> schueler, List<Lerngruppe> lerngruppen,
-        List<Zugehoerigkeit> zug, List<SchildImportProtokoll> protokolle, List<Lehrkraft> lehrkraefte)
+        List<Zugehoerigkeit> zug, List<SchildImportProtokoll> protokolle, List<Lehrkraft> lehrkraefte,
+        List<Lerngruppe> vjLerngruppen, List<Zugehoerigkeit> vjZug, DateOnly? vjEnde)
     {
         var b = new StringBuilder();
         b.Append("V|").Append(v.Id).Append('|').Append(v.Erstellt.UtcTicks).Append('\n');
@@ -1829,6 +2042,17 @@ public sealed class SchildImportLauf
              .Append(SchildImportService.Iso(z.GueltigVon)).Append('|').Append(SchildImportService.Iso(z.GueltigBis)).Append('|')
              .Append(z.Quelle).Append('\n');
         b.Append("P|").Append(protokolle.Count).Append('|').Append(protokolle.Count == 0 ? 0 : protokolle.Max(p => p.Id));
+        if (vjZug.Count > 0)
+        {
+            b.Append("\nVK|").Append(SchildImportService.Iso(vjEnde)).Append('\n');
+            foreach (var l in vjLerngruppen.OrderBy(x => x.Id))
+                b.Append("VL|").Append(l.Id).Append('|').Append((int)l.Typ).Append('|').Append(l.Bezeichnung).Append('|')
+                 .Append(l.Stufe).Append('\n');
+            foreach (var z in vjZug.OrderBy(x => x.Id))
+                b.Append("VZ|").Append(z.Id).Append('|').Append(z.SchuelerId).Append('|').Append(z.LerngruppeId).Append('|')
+                 .Append(SchildImportService.Iso(z.GueltigVon)).Append('|').Append(SchildImportService.Iso(z.GueltigBis))
+                 .Append('\n');
+        }
         return SchildImportService.Sha(b.ToString());
     }
 

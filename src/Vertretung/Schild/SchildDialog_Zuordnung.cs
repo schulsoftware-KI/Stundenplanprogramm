@@ -20,6 +20,9 @@ namespace Stundenplan_V2.Vertretung
     /// Die Datei enthält keine Personendaten.
     /// Seit 5.2a-3: „⇄ gemeinsam mit …“ (Entscheidung 136) in „Festlegen auf“ und das Feld „Muster der
     /// Kursbezeichnung“ mit Vorschau (Entscheidung 137).
+    /// Seit P5b-1 (Entscheidung 245): Knopf „Festlegungen aus … übernehmen…“ – Kurs- und Gruppen-Festlegungen des Vorjahres,
+    /// deren Schlüssel (Jahrgang + Kursbezeichnung bzw. Klasse + Fach + Fachlehrer) im Export vorkommt und die für das Jahr des
+    /// Exports noch keine Festlegung haben. Sichtbar, wenn das Jahr des Exports weniger Festlegungen hat als das Vorjahr.
     /// </summary>
     public partial class SchildDialog
     {
@@ -375,7 +378,90 @@ namespace Stundenplan_V2.Vertretung
             TxtZuStatus.Text = (meldung != null ? meldung + " · " : "") +
                                $"Festlegungen: {datei} ({_zuordnung.Anzahl})" +
                                (_zuordnungGeaendert ? " · NICHT GESPEICHERT" : "");
+            ZuVorjahrAnzeigen();   // P5b-1 (245)
             ImAnzeigen();   // 5.2b-2b: Voraussetzung „Zuordnung gespeichert“
+        }
+
+        // =====================================================
+        //  P5b-1 (245): Festlegungen des Vorjahres übernehmen
+        // =====================================================
+
+        private static string JahrText(int jahr) => $"{jahr}/{(jahr + 1) % 100:00}";
+
+        /// <summary>Festlegungen (Kurse, Sek I ohne Kurs) des Vorjahres, deren Schlüssel im Export vorkommt und die im Jahr des
+        /// Exports noch keine Festlegung haben – je Schlüssel einmal.</summary>
+        private (List<SchildKursFestlegung> Kurse, List<SchildOhneKursFestlegung> Ohne) VorjahrFestlegungen()
+        {
+            var kurse = new List<SchildKursFestlegung>();
+            var ohne = new List<SchildOhneKursFestlegung>();
+            var z = _ergebnis?.Zuordnung;
+            if (z == null) return (kurse, ohne);
+            int jahr = z.Schuljahr, vorjahr = z.Schuljahr - 1;
+            var gesehen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var u in z.Zeilen)
+            {
+                if (u.Art == SchildZuordnungArt.OhneKurs)
+                {
+                    if (!gesehen.Add($"O|{SchildText.KlasseNorm(u.Klasse)}|{u.FachText}|{u.Fachlehrer}")) continue;
+                    if (_zuordnung.Ohne(jahr, u.Klasse, u.FachText, u.Fachlehrer) != null) continue;
+                    if (_zuordnung.Ohne(vorjahr, u.Klasse, u.FachText, u.Fachlehrer) is SchildOhneKursFestlegung fo) ohne.Add(fo);
+                }
+                else
+                {
+                    if (!gesehen.Add($"K|{u.JahrgangText}|{u.KursBez}")) continue;
+                    if (_zuordnung.Kurs(jahr, u.JahrgangText, u.KursBez) != null) continue;
+                    if (_zuordnung.Kurs(vorjahr, u.JahrgangText, u.KursBez) is SchildKursFestlegung fk) kurse.Add(fk);
+                }
+            }
+            return (kurse, ohne);
+        }
+
+        private void ZuVorjahrAnzeigen()
+        {
+            if (BtnZuVorjahr == null) return;
+            var z = _ergebnis?.Zuordnung;
+            if (z == null || _export == null) { BtnZuVorjahr.Visibility = Visibility.Collapsed; return; }
+            int jahr = z.Schuljahr;
+            int imJahr = _zuordnung.Kurse.Count(f => f.Schuljahr == jahr) + _zuordnung.OhneKurs.Count(f => f.Schuljahr == jahr);
+            int imVorjahr = _zuordnung.Kurse.Count(f => f.Schuljahr == jahr - 1) + _zuordnung.OhneKurs.Count(f => f.Schuljahr == jahr - 1);
+            var (kurse, ohne) = imVorjahr > imJahr ? VorjahrFestlegungen() : (new List<SchildKursFestlegung>(), new List<SchildOhneKursFestlegung>());
+            int n = kurse.Count + ohne.Count;
+            BtnZuVorjahr.Visibility = n > 0 ? Visibility.Visible : Visibility.Collapsed;
+            BtnZuVorjahr.Content = $"Festlegungen aus {JahrText(jahr - 1)} übernehmen…";
+            BtnZuVorjahr.IsEnabled = !_laeuft;
+            BtnZuVorjahr.ToolTip = $"{n} Festlegungen von Hand aus {JahrText(jahr - 1)} passen zu Kursen bzw. Gruppen dieses Exports " +
+                                   $"({JahrText(jahr)}) und haben hier noch keine Festlegung. Kürzel und Fächer gelten ohnehin über " +
+                                   "das Schuljahr hinaus.";
+        }
+
+        private void BtnZuVorjahr_Click(object sender, RoutedEventArgs e)
+        {
+            var z = _ergebnis?.Zuordnung;
+            if (z == null || _laeuft) return;
+            int jahr = z.Schuljahr;
+            var (kurse, ohne) = VorjahrFestlegungen();
+            int n = kurse.Count + ohne.Count;
+            if (n == 0) { ZuVorjahrAnzeigen(); return; }
+            var beispiele = kurse.Select(f => $"Kurs „{f.KursBez}“ ({f.Jahrgang}) → {(f.Plan ?? "keine Zuordnung")}" + (f.Gemeinsam ? " (gemeinsam)" : ""))
+                .Concat(ohne.Select(f => $"{f.Klasse} · {f.Fach} · {(f.Fachlehrer.Length > 0 ? f.Fachlehrer : "(ohne)")} → " +
+                                         (f.Plan ?? "keine Zuordnung")))
+                .ToList();
+            if (MessageBox.Show(this,
+                    $"{n} Festlegungen von Hand aus {JahrText(jahr - 1)} für {JahrText(jahr)} übernehmen?\n\n• " +
+                    string.Join("\n• ", beispiele.Take(15)) + (beispiele.Count > 15 ? $"\n• … und {beispiele.Count - 15} weitere" : "") +
+                    $"\n\nÜbernommen werden nur Kurse und Gruppen, die es in diesem Export gibt und die für {JahrText(jahr)} noch " +
+                    "keine Festlegung haben. Danach rechnet die Zuordnung neu – bitte kurz prüfen; gespeichert wird erst mit " +
+                    "„Zuordnungen speichern“.",
+                    "Festlegungen aus dem Vorjahr", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                return;
+            foreach (var fk in kurse)
+                _zuordnung.SetzeKurs(jahr, fk.Jahrgang, fk.KursBez, fk.Plan, false, gemeinsam: fk.Gemeinsam);
+            foreach (var fo in ohne)
+                _zuordnung.SetzeOhne(jahr, fo.Klasse, fo.Fach, fo.Fachlehrer, fo.Plan, false);
+            _log?.Invoke($"SchILD: {n} Festlegungen der Zuordnung aus {JahrText(jahr - 1)} für {JahrText(jahr)} übernommen " +
+                         $"({kurse.Count} Kurse, {ohne.Count} Sek I ohne Kurs) – noch nicht gespeichert.");
+            ZuordnungGeaendert(ZuSchluessel(DgZuordnung.SelectedItem));
+            ZeigeZuStatus($"{n} Festlegungen aus {JahrText(jahr - 1)} übernommen");
         }
 
         // =====================================================

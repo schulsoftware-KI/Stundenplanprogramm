@@ -1141,6 +1141,36 @@ Stammdaten und SchILD-Import; PWA: `jahresablauf.js`, `konten.js`, `hilfe.js`, `
   aktuelle Schuljahr übernehmen“), in der Sammelanlage, bei den Vorschlägen aus SchILD und in `seed-konten`. Konten ohne
   Schuljahr bekommen beim ersten Start mit P5a das aktuelle (Kontenprotokoll, Log „Zuständigkeiten: …“).
 
+## Jahreswechsel-Import, Folgejahr, Schuljahr im Desktop (P5b-1, 5.3b)
+
+Entscheidungen 218, 243–248, 252 (`claude/P5b_Vorschlag.md`). **Keine Migration.** API: `Services/SchildImportService.cs`,
+`Controllers/SchildController.cs`, `Services/JahresablaufSchuljahr.cs`, `Services/Jahresablauf.cs`; PWA: `hilfe.js`, `sw.js`
+(Cache v26); Desktop: `SchildFolgestand.cs`, `SchildDialog_Folgestand.cs`, `SchildDialog_Import.cs`, `SchildImportClient.cs`,
+`SchildDialog_Zuordnung.cs`, `SchildDialog.xaml`, `KalenderDialog.xaml(.cs)`.
+
+- **Jahreswechsel-Import:** Schüler mit Zugehörigkeiten im Vorjahr und noch keiner im Schuljahr der Nutzlast sind „aus dem
+  Vorjahr“ (bei jedem Import des neuen Jahres). Erkannte bekommen eine Zeile **„versetzt“** („05A → 06A“, „07B → 07B
+  (wiederholt)“, Hinweis bei Abweichung von der Mehrheit) statt Klassen- und Jahrgangswechsel; im Protokoll zählen sie unter
+  „Klassenwechsel“, Bericht und Log nennen `versetzt`/`wiederholt` getrennt (`zahlen.versetzt`, `zahlen.wiederholt`,
+  `zahlen.ausVorjahr`, Antwort `vorjahr`). Abgänge laut SchILD (8/9) und bestätigte „fehlt im Export“ gelten zum **Ende des
+  Vorjahres laut Kalender** (ohne Kalender: Vortag von „gilt ab“); die Zugehörigkeiten des Vorjahres bleiben. Teil-Export-
+  Schutz ohne den Abschlussjahrgang Q2 (dessen „fehlt“-Zeilen tragen einen Hinweis); gesperrt wird zusätzlich, wenn von einer
+  Klasse bzw. Stufe des Vorjahres kein einziger Schüler im Export steht. „Dieselbe Person?“ nur über die Teil-Prüfsummen (als
+  gleiche Klasse zählt die Klasse der Mehrheit). Warnung, wenn „Aktuelles Schuljahr“ noch das Vorjahr ist; Hinweis, wenn das
+  Vorjahr nicht abgeschlossen ist. Die Prüfsumme der Vorschau enthält dann auch die Zeilen des Vorjahres.
+- **Karte „Schuljahreswechsel“:** neuer Punkt „Jahreswechsel-Import aus SchILD …“ – grau ohne Import, grün mit Nummer, Datum,
+  neu, Abgänge und „versetzt bzw. Klassenwechsel“ des ersten Imports des neuen Jahres (Importprotokoll).
+- **Folgestand „Folgejahr“** (Desktop, nur Pseudodaten): Jahr + 1, Abschnitt 1; Versetzung über die Folgeklasse, 10er → EF
+  bis auf 2 Abgänge je Klasse (Status 8), Q2 → Status 8, volle neue 05er, 3 Zugänge EF, 3 Wiederholer, 1 Abgang Status 9;
+  Leistungszeilen gleichmäßig von bisherigen Schülern der Zielklasse/-stufe (Zuordnung bleibt gültig); Klassenleitungen
+  wandern mit, zwei Klassen tauschen; Varianten „Abschlussjahrgang nicht im Export“ und „eine ganze Klasse fehlt“.
+- **Desktop, Kalender:** ein anderes Schuljahr ohne eigene Datei legt ein neues Schuljahr an (eigene `Vertretung_<Jahr>.xlsx`
+  mit Vertretungsarten und Kompetenzen, ohne Abwesenheiten/Vertretungen); die Datei eines anderen Jahres wird nie
+  überschrieben; „Schuljahr öffnen ▾“ wählt eine vorhandene Datei (sie wird die jüngste – damit arbeiten Wocheneditor und
+  „Vertretung erfassen“).
+- **Desktop, Zuordnung:** Knopf „Festlegungen aus <Vorjahr> übernehmen…“ – Kurs- und Gruppen-Festlegungen des Vorjahres,
+  deren Schlüssel im Export vorkommt und die im Jahr des Exports noch keine Festlegung haben.
+
 ## Zugangsschutz (P6a, 5.4)
 
 Entscheidungen 224–231 (`claude/P6_Vorschlag.md` §2–§7). **Migration `Datenschutz`** (alle neuen Spalten und Tabellen

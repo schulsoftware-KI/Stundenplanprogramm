@@ -54,7 +54,7 @@ public static partial class Jahresablauf
             await RueckwegKarteAsync(db, w, kal)
         };
         // P5a: Karte „Schuljahreswechsel“ – oben, solange sie dran ist, sonst unten.
-        var schuljahr = await SchuljahrKarteAsync(db, w, heute, akteur);
+        var schuljahr = await SchuljahrKarteAsync(db, w, heute, produktiv, akteur);
         if (schuljahr.Aktiv) karten.Insert(0, schuljahr);
         else karten.Add(schuljahr);
         return new JaUebersichtDto(heute, Testdatum.Wert != null, w.Schuljahr, kal?.Start, kal?.Ende, karten);

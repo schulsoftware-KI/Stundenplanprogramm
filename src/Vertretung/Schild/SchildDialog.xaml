@@ -152,6 +152,9 @@
                     <DockPanel Grid.Row="5" Margin="0,8,0,0" LastChildFill="True">
                         <Button DockPanel.Dock="Left" x:Name="BtnZuVorschlaege" Content="Vorschläge übernehmen" Padding="10,3"
                                 Margin="0,0,6,0" IsEnabled="False" Click="BtnZuVorschlaege_Click"/>
+                        <!-- P5b-1 (245): Festlegungen von Hand aus dem Vorjahr übernehmen (nur Schlüssel im neuen Export ohne eigene Festlegung) -->
+                        <Button DockPanel.Dock="Left" x:Name="BtnZuVorjahr" Content="Festlegungen aus dem Vorjahr übernehmen…"
+                                Padding="10,3" Margin="0,0,6,0" Visibility="Collapsed" Click="BtnZuVorjahr_Click"/>
                         <Button DockPanel.Dock="Left" x:Name="BtnZuSpeichern" Content="Zuordnungen speichern" Padding="10,3"
                                 Margin="0,0,12,0" IsEnabled="False" Click="BtnZuSpeichern_Click"/>
                         <TextBlock x:Name="TxtZuStatus" VerticalAlignment="Center" Foreground="DimGray"

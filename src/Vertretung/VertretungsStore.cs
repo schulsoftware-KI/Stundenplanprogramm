@@ -53,6 +53,49 @@ namespace Stundenplan_V2.Vertretung
     {
         private const string TRENNER = ";";   // Trennzeichen in Klassenlisten
 
+        // =================================================================
+        //  P5b-2 (244, Nacharbeit F1): Arbeitsjahr – mit welcher Datei Wocheneditor und „Vertretung erfassen“ arbeiten
+        //
+        //  Bisher allein die zuletzt geschriebene Vertretung_*.xlsx. Das ist zerbrechlich: Ein noch offener Wocheneditor bzw.
+        //  „Vertretung erfassen“ eines anderen Jahres macht beim Speichern seine Datei wieder zur jüngsten (auch OneDrive kann
+        //  Zeitstempel ändern). Deshalb merkt sich der Kalender (Button 22) das gewählte Jahr in einer kleinen Textdatei neben
+        //  der Plandatei („Schuljahr öffnen“, Feld „Schuljahr“ + „öffnen? Ja“, Speichern). Fehlt sie bzw. ihre Datei: wie bisher.
+        // =================================================================
+
+        /// <summary>Merkdatei neben der Plandatei: enthält nur den Dateinamen, z. B. „Vertretung_2027_28.xlsx“.</summary>
+        public const string ArbeitsjahrDateiname = "Vertretung_Arbeitsjahr.txt";
+
+        /// <summary>Datei des Arbeitsjahres in <paramref name="ordner"/> (Merkdatei, sonst die jüngste Vertretung_*.xlsx) oder null.</summary>
+        public static string? ArbeitsDatei(string ordner)
+        {
+            try
+            {
+                string merk = Path.Combine(ordner, ArbeitsjahrDateiname);
+                if (File.Exists(merk))
+                {
+                    string name = File.ReadAllText(merk).Trim();
+                    if (name.Length > 0 && string.Equals(name, Path.GetFileName(name), StringComparison.Ordinal)
+                        && name.StartsWith("Vertretung_", StringComparison.OrdinalIgnoreCase)
+                        && name.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string pfad = Path.Combine(ordner, name);
+                        if (File.Exists(pfad)) return pfad;
+                    }
+                }
+                return Directory.GetFiles(ordner, "Vertretung_*.xlsx")
+                    .OrderByDescending(File.GetLastWriteTimeUtc)
+                    .FirstOrDefault();
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Merkt <paramref name="pfad"/> als Arbeitsjahr (Merkdatei im selben Ordner). Wirft bei Schreibfehlern.</summary>
+        public static void ArbeitsDateiMerken(string pfad)
+        {
+            string ordner = Path.GetDirectoryName(Path.GetFullPath(pfad)) ?? "";
+            File.WriteAllText(Path.Combine(ordner, ArbeitsjahrDateiname), Path.GetFileName(pfad) + Environment.NewLine);
+        }
+
         /// <summary>Standard-Dateiname, z.B. "Vertretung_2026_27.xlsx".</summary>
         public static string StandardDateiname(string schuljahr)
         {

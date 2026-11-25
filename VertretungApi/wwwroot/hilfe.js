@@ -407,7 +407,8 @@ const HI_THEMEN = [
       "**SchILD:** Vorschläge für Klassenleitungen laut SchILD und die Liste der SchILD-Importe (siehe eigene Themen).",
       "**Zuständigkeit je Schuljahr:** Klassenleitung und Stufenkoordination sind für ein Schuljahr zuständig (steht im " +
         "Konto). Eine neue bzw. geänderte Zuständigkeit gilt für das aktuelle Schuljahr; eine unveränderte übernimmst du " +
-        "beim „Bearbeiten“ mit dem Haken „für das aktuelle Schuljahr“. Siehe „Jahresablauf“.",
+        "beim „Bearbeiten“ mit dem Haken „für das aktuelle Schuljahr“. Zum Schuljahreswechsel alle auf einmal: Jahresablauf → " +
+        "„Zuständigkeiten für … übernehmen…“ (siehe „Jahresablauf“).",
       "Bei Lehrkräften steht der **Name laut SchILD** neben dem Kürzel (nur für dich und die Lehrkraft selbst sichtbar); " +
         "die Suche findet auch Namen. Filter **„Laut SchILD aktiv, gesperrt“**: nach einem Wiedereintritt entsperren. " +
         "Filter **„Name laut SchILD geändert“**: im Konto steht ein Vorschlag für den neuen Benutzernamen – " +
@@ -577,9 +578,13 @@ const HI_THEMEN = [
           "ist (Abgang zum Ende des alten Schuljahres, Konto gesperrt) und wer im Export fehlt. Der Punkt wird grün, sobald " +
           "der erste Import des neuen Jahres da ist.",
         "**Zuständigkeiten** gelten je Schuljahr: Die Klassenleitung der 05A von 2026/27 sieht die alte 05A (bis zum " +
-          "Abschluss), aber nicht die neuen Fünftklässler, und betreut deren Schülerkonten nicht. Für das neue Jahr: Konten " +
-          "verwalten → Konto → „Bearbeiten“ (Haken „für das aktuelle Schuljahr“). Vorschläge aus SchILD kommen mit dem " +
-          "Jahreswechsel-Import.",
+          "Abschluss), aber nicht die 06A von 2027/28, und betreut deren Schülerkonten nicht. Nach dem Jahreswechsel-Import: " +
+          "**„Zuständigkeiten für … übernehmen…“** – eine Zeile je Konto mit Häkchen. Vorausgewählt ist die Klassenleitung " +
+          "laut SchILD (Klassen.dat des neuen Jahres) bzw. sonst die **Folgeklasse**, in die mindestens die Hälfte der " +
+          "bisherigen Schüler gegangen ist (Stufenkoordination: die Folgestufe, z. B. Q1 → Q2). „**Entfällt**“ (z. B. Q2, " +
+          "Jahrgang 10 → Oberstufe) ist nicht angehakt – angehakt verliert das Konto die Zuständigkeit und wird Lehrkraft. " +
+          "Ohne Häkchen bleibt die Zuständigkeit beim alten Jahr (z. B. für Nachträge). Die Konten werden abgemeldet; alles " +
+          "steht im Kontenprotokoll. Sonderfälle: Konto → „Bearbeiten“ (Haken „für das aktuelle Schuljahr“).",
       ] },
       { zwischen: "Halbjahreswechsel" },
       "Die Karte erscheint **4 Wochen vor** „2. Halbjahr ab“ (Einstellungen → Schuljahr) und bleibt bis zum Ende des " +

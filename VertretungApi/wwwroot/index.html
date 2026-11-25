@@ -1262,6 +1262,22 @@
     </div>
   </dialog>
 
+  <!-- P5b-2 (249–251): Zuständigkeiten ins neue Schuljahr – eine Zeile je Konto, mit Häkchen -->
+  <dialog id="jzDialog" class="fenster ja-dialog jz-dialog" aria-labelledby="jzTitel">
+    <h2 id="jzTitel" class="karte-titel">Zuständigkeiten übernehmen</h2>
+    <p id="jzInfo" class="kleingedruckt ohne-einzug"></p>
+    <div id="jzAuswahl" class="jz-auswahl" hidden>
+      <button id="jzAlle" class="textknopf klein" type="button">Vorschläge anhaken</button>
+      <button id="jzKeine" class="textknopf klein" type="button">Keine</button>
+    </div>
+    <ul id="jzListe" class="jz-liste"></ul>
+    <p id="jzFehler" class="fehler klein" role="alert" hidden></p>
+    <div class="knopfreihe">
+      <button id="jzOk" class="hauptknopf" type="button" disabled>Übernehmen</button>
+      <button id="jzAbbrechen" class="textknopf" type="button">Abbrechen</button>
+    </div>
+  </dialog>
+
   <dialog id="inhaltDialog" class="fenster" aria-labelledby="idTitel">
     <p id="idWann" class="kb-wann"></p>
     <h2 id="idTitel" class="karte-titel"></h2>

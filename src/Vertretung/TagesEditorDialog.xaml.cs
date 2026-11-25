@@ -100,12 +100,8 @@ namespace Stundenplan_V2.Vertretung
 
         private void LadeDaten()
         {
-            try
-            {
-                _vertretungsPfad = Directory.GetFiles(_ordner, "Vertretung_*.xlsx")
-                    .OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault() ?? "";
-            }
-            catch { _vertretungsPfad = ""; }
+            // P5b-2 (F1): Arbeitsjahr laut Kalender (Merkdatei), sonst die jüngste Vertretung_*.xlsx
+            _vertretungsPfad = VertretungsStore.ArbeitsDatei(_ordner) ?? "";
 
             if (_vertretungsPfad.Length == 0)
             {

@@ -1061,8 +1061,8 @@ public sealed class SchildImportLauf
             var imExportVj = new HashSet<string>(getroffen.Where(_vjGruppe.ContainsKey).Select(id => _vjGruppe[id]), Cmp);
             var ohneFolge = basisVj.Where(s => !AusAbschluss(s.Id)).Select(s => _vjGruppe[s.Id]).Distinct(Cmp)
                 .Where(g => !imExportVj.Contains(g)).OrderBy(g => g, Cmp).ToList();
-            if (ohneFolge.Count > 0)
-                Sperre("TeilExport", $"Von {(ohneFolge.Count == 1 ? "dieser Klasse bzw. Stufe" : "diesen Klassen bzw. Stufen")} des " +
+            if (ohneFolge.Count > 0)   // P5b-2 (V2): eigene Art – der Desktop nennt dazu den passenden „Was tun?“-Satz
+                Sperre("OhneFolgeklasse", $"Von {(ohneFolge.Count == 1 ? "dieser Klasse bzw. Stufe" : "diesen Klassen bzw. Stufen")} des " +
                                      $"Vorjahres {_vj} steht kein einziger Schüler im Export (auch nicht mit Abgang): " +
                                      $"{string.Join(", ", ohneFolge)} – fehlt eine ganze Klasse (Folgeklasse) im Export? " +
                                      "(Entscheidung 80)");

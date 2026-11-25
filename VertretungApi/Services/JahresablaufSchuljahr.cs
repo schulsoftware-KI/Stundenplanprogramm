@@ -21,7 +21,9 @@ namespace VertretungApi.Services;
 //  Punkte: 1. letzter Schultag · 2. offene Fehlstunden und Verspätungen · 3. nicht erfasste Stunden · 4. Rückweg nach SchILD
 //  für das 2. Halbjahr · 5. Jahresabschluss (Knopf „abschließen…“ bzw. „Wieder öffnen…“) · 6. neues Schuljahr vorbereiten
 //  (Knopf) · 7. seit P5b-1 Jahreswechsel-Import aus SchILD (erster Import des neuen Jahres, aus dem Importprotokoll) ·
-//  8. Zuständigkeiten (Hinweis) · dazu weitere abgeschlossene Schuljahre (Knopf „Wieder öffnen…“).
+//  8. Zuständigkeiten (seit P5b-2 mit Knopf „Zuständigkeiten für … übernehmen…“ und Ampel – JahresablaufZustaendigkeit.cs) ·
+//  dazu weitere abgeschlossene Schuljahre (Knopf „Wieder öffnen…“); ist das Vorjahr schon abgeschlossen und noch ein Konto
+//  nur dafür zuständig, steht der Punkt „Zuständigkeiten“ für den Wechsel ins aktuelle Schuljahr bei diesen.
 //  1.–4. sind die Vorprüfung (215): nur Warnungen, keine Sperre.
 //
 //  Aktionen (nur Admin, Rückfrage, Protokoll der Einstellungen mit Schlüssel „Jahresablauf“, ohne Namen von Schülern):
@@ -135,6 +137,11 @@ public static partial class Jahresablauf
         var weitere = zeilen.Where(z => z.Status == SchuljahrStatus.Abgeschlossen && z.Schuljahr != jahr)
             .OrderByDescending(z => z.Schuljahr, StringComparer.Ordinal).ToList();
         var weiterePunkte = new List<JaPunktDto>();
+        // P5b-2 (249): Vorjahr schon abgeschlossen, aber noch Konten nur dafür zuständig → Punkt für den Wechsel ins aktuelle Jahr
+        string vorjahrAkt = Verschieben(w.Schuljahr, -1);
+        if (vorjahrAkt != w.Schuljahr && zu.Contains(vorjahrAkt)
+            && await ZustaendigkeitPunktAsync(db, w, vorjahrAkt, w.Schuljahr, nurWennOffen: true) is JaPunktDto zv)
+            weiterePunkte.Add(zv);
         if (weitere.Count > 0)
             weiterePunkte.Add(new JaPunktDto("abgeschlossen", "Abgeschlossene Schuljahre", Grau,
                 "Nur lesbar und nur für die Verwaltung sichtbar (Klassenbuch, PDF, Archiv).",
@@ -165,7 +172,7 @@ public static partial class Jahresablauf
         punkte.Add(AbschlussPunkt(jahr, kal, zeile, abgeschlossen, heute));
         punkte.Add(await NeuesJahrPunktAsync(db, w, stand, kalender, zeilen, kal, heute));
         punkte.Add(await JahreswechselImportPunktAsync(db, stand.NeuesJahr, !produktiv));   // P5b-1 (218, 246)
-        punkte.Add(await ZustaendigkeitPunktAsync(db, jahr, stand.NeuesJahr));
+        punkte.Add((await ZustaendigkeitPunktAsync(db, w, jahr, stand.NeuesJahr))!);   // P5b-2 (249)
         punkte.AddRange(weiterePunkte);
 
         string kopf = abgeschlossen
@@ -342,8 +349,8 @@ public static partial class Jahresablauf
         if (setzen && zust > 0)
             warnungen.Add($"{Anzahl(zust, "Konto", "Konten")} mit Zuständigkeit (Klassenleitung, Stufenkoordination) gelten weiter " +
                           $"nur für {bisher}: Diese Personen sehen die Daten von {bisher} (bis zum Abschluss), aber nicht die " +
-                          $"Klassen von {neu}, und betreuen keine Schülerkonten mehr. Für {neu} unter Konten verwalten ändern (der " +
-                          "Jahreswechsel-Import schlägt sie später vor).");
+                          $"Klassen von {neu}, und betreuen keine Schülerkonten mehr. Nach dem Jahreswechsel-Import: hier „Zuständigkeiten " +
+                          $"für {neu} übernehmen…“ (Vorschläge laut SchILD bzw. Folgeklasse).");
         return new Vorbereitung(aenderungen, warnungen, setzen, aufStandard);
     }
 
@@ -422,29 +429,7 @@ public static partial class Jahresablauf
             (anzahl > 1 ? $" Danach {Anzahl(anzahl - 1, "weiterer Import", "weitere Importe")}." : ""), Ziele: ziel);
     }
 
-    // ---- Zuständigkeiten (219) ----
-
-    private static async Task<JaPunktDto> ZustaendigkeitPunktAsync(AppDbContext db, string jahr, string neu)
-    {
-        var liste = await db.Benutzer.AsNoTracking()
-            .Where(b => b.Zustaendig != null && b.Zustaendig != ""
-                        && (b.Rolle == BenutzerRolle.Klassenlehrer || b.Rolle == BenutzerRolle.Stufenkoordination))
-            .Select(b => b.ZustaendigSchuljahr)
-            .ToListAsync();
-        var jeJahr = liste.GroupBy(j => string.IsNullOrWhiteSpace(j) ? "ohne Schuljahr" : j!)
-            .OrderBy(g => g.Key, StringComparer.Ordinal)
-            .Select(g => $"{g.Key}: {Anzahl(g.Count(), "Konto", "Konten")}")
-            .ToList();
-        return new JaPunktDto("zustaendig", "Zuständigkeiten (Klassenleitung, Stufenkoordination)", Grau,
-            liste.Count == 0
-                ? "Keine Konten mit Zuständigkeit."
-                : $"Eine Zuständigkeit gilt nur für die Daten ihres Schuljahres: Wer für {jahr} zuständig ist, sieht nach dem Wechsel " +
-                  $"nicht die Klassen von {neu} und betreut deren Schülerkonten nicht. Ändern: Konten verwalten → Konto → „Bearbeiten“ " +
-                  "(mit dem Haken „für das aktuelle Schuljahr“). Vorschläge für das neue Schuljahr (laut SchILD bzw. Folgeklasse) " +
-                  "kommen mit P5b-2.",
-            jeJahr.Count > 0 ? jeJahr : null,
-            Ziele: new[] { new JaZielDto("konten", "Konten verwalten") });
-    }
+    // ---- Zuständigkeiten (219) – seit P5b-2 mit Knopf und Ampel: JahresablaufZustaendigkeit.cs ----
 
     // -----------------------------------------------------------------
     //  Aktionen

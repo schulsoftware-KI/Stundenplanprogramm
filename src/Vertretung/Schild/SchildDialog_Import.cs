@@ -836,14 +836,20 @@ namespace Stundenplan_V2.Vertretung
             if (v.Gesperrt)
             {
                 text.Append("\n\nWas tun?");
+                var genannt = new HashSet<string>(StringComparer.Ordinal);   // P5b-2: jede Art nur einmal
                 foreach (var s in v.Sperren)
                 {
+                    if (!genannt.Add(s.Art)) continue;
                     if (s.Art == "SeedSchueler" && v.SeedEntfernenMoeglich)
                         text.Append("\n• Seed-Schüler: Knopf „Seed-Schüler entfernen…“ (nur Entwicklung), danach die Vorschau neu berechnen.");
                     else if (s.Art == "TeilExport")
                         text.Append("\n• Teil-Export: Fehlen fast alle Schüler, passt vermutlich der Schlüssel nicht (anderer Rechner " +
                                     "oder Windows-Benutzer) – „Schlüssel einlesen…“ mit der Sicherung. Sonst den Export vollständig " +
                                     "wiederholen (alle Klassen und Jahrgänge).");
+                    else if (s.Art == "OhneFolgeklasse")   // P5b-2 (V2)
+                        text.Append("\n• Eine ganze Klasse fehlt (von den genannten Klassen des Vorjahres ist niemand im Export): in " +
+                                    "SchILD den Export mit allen Klassen wiederholen und hier erneut prüfen. Ist die Klasse wirklich " +
+                                    "aufgelöst, stehen ihre Schüler mit ihrer neuen Klasse bzw. mit Abgang im Export.");
                     else if (s.Art == "GiltAb")
                         text.Append("\n• „Änderungen gelten ab“ später wählen (frühestens der Stichtag des letzten Imports).");
                     else if (s.Art == "UnbekannteSchluessel")

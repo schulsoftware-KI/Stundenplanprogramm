@@ -389,7 +389,8 @@ public class EinstellungenController : ControllerBase
                 int bleiben = await _db.Benutzer.CountAsync(b => b.Zustaendig != null && b.Zustaendig != "" && b.ZustaendigSchuljahr == altJahr);
                 hinweise.Add($"Aktuelles Schuljahr jetzt {neuJahr}. " + (bleiben > 0
                     ? $"{bleiben} Zuständigkeit(en) von Klassenleitung bzw. Stufenkoordination gelten weiter nur für {altJahr} – " +
-                      "für das neue Schuljahr unter Konten verwalten ändern. "
+                      "für das neue Schuljahr unter Konten verwalten ändern bzw. nach dem Jahreswechsel-Import im Jahresablauf " +
+                      "„Zuständigkeiten für … übernehmen…“. "
                     : "") +
                     "Für den Wechsel gibt es Kontomenü → „Jahresablauf“ → „Neues Schuljahr vorbereiten…“ (setzt auch die Daten des " +
                     "Schuljahres zurück).");

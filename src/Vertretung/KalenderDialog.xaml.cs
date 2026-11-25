@@ -33,6 +33,12 @@ namespace Stundenplan_V2.Vertretung
     /// Jahres wird nie überschrieben. „Schuljahr öffnen“ lädt eine vorhandene Datei
     /// und macht sie zur jüngsten – damit arbeiten Wocheneditor und „Vertretung
     /// erfassen“ (wie bisher: die zuletzt geschriebene Vertretung_*.xlsx).
+    ///
+    /// P5b-2 (Nacharbeit F1, V1): Das gewählte Jahr steht zusätzlich in der Merkdatei
+    /// „Vertretung_Arbeitsjahr.txt“ (VertretungsStore.ArbeitsDatei) – beim Öffnen über das
+    /// Dropdown, über das Feld „Schuljahr“ + „öffnen? Ja“ und beim Speichern. Erster und letzter
+    /// Schultag müssen im Schuljahr liegen (01.08.–31.07.): sonst kein Import, beim Speichern
+    /// eine Rückfrage.
     /// </summary>
     public partial class KalenderDialog : Window
     {
@@ -386,32 +392,63 @@ namespace Stundenplan_V2.Vertretung
             LadeFerienQuelle();
             if (_geladenPfad == null) return;   // nicht lesbar (Meldung kam schon)
             string sj = string.IsNullOrWhiteSpace(_daten.Schuljahr) ? JahrAusDatei(pfad) : _daten.Schuljahr;
-            try
+            // P5b-2 (F1): Arbeitsjahr in der Merkdatei (unabhängig von Zeitstempeln); dazu wie bisher die jüngste Datei.
+            string? fehler = null;
+            bool gemerkt = false;
+            try { VertretungsStore.ArbeitsDateiMerken(pfad); gemerkt = true; }
+            catch (Exception ex) { fehler = ex.Message; }
+            try { File.SetLastWriteTimeUtc(pfad, DateTime.UtcNow); gemerkt = true; }
+            catch (Exception ex) { fehler ??= ex.Message; }
+            if (gemerkt)
             {
-                File.SetLastWriteTimeUtc(pfad, DateTime.UtcNow);
                 _log?.Invoke($"Schuljahr {sj} geöffnet ({Path.GetFileName(pfad)}) – Wocheneditor und „Vertretung erfassen“ " +
                              "arbeiten jetzt damit.");
                 SetzeStatus($"Schuljahr {sj} geöffnet ({Path.GetFileName(pfad)}, {_zeilen.Count} Einträge) – Wocheneditor und " +
-                            "„Vertretung erfassen“ arbeiten ab dem nächsten Öffnen damit.");
+                            "„Vertretung erfassen“ arbeiten ab dem nächsten Öffnen damit (bereits offene Fenster erst schließen).");
             }
-            catch (Exception ex)
+            else
             {
-                SetzeStatus($"Schuljahr {sj} geladen, aber nicht als aktuelles gemerkt ({ex.Message} – ist die Datei in Excel " +
+                SetzeStatus($"Schuljahr {sj} geladen, aber nicht als aktuelles gemerkt ({fehler} – ist die Datei in Excel " +
                             "geöffnet?). „Speichern und schließen“ merkt es.");
                 _dirty = true;
             }
         }
 
-        private string? FindeVorhandeneDatei()
+        /// <summary>P5b-2 (F1): Datei des Arbeitsjahres (Merkdatei, sonst die jüngste).</summary>
+        private string? FindeVorhandeneDatei() => VertretungsStore.ArbeitsDatei(_ordner);
+
+        // =====================================================
+        //  P5b-2 (Nacharbeit V1): erster und letzter Schultag im Schuljahr
+        // =====================================================
+
+        private static readonly Regex SchuljahrForm = new(@"^(\d{4})/(\d{2})$");
+
+        /// <summary>„2027/28“ → 01.08.2027 – 31.07.2028; false bei anderer Form.</summary>
+        private static bool SchuljahrGrenzen(string schuljahr, out DateTime von, out DateTime bis)
         {
-            try
-            {
-                var treffer = Directory.GetFiles(_ordner, "Vertretung_*.xlsx")
-                    .OrderByDescending(File.GetLastWriteTimeUtc)
-                    .FirstOrDefault();
-                return treffer;
-            }
-            catch { return null; }
+            von = bis = default;
+            var m = SchuljahrForm.Match((schuljahr ?? "").Trim());
+            if (!m.Success) return false;
+            int a = int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
+            int b = int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture);
+            if ((a + 1) % 100 != b) return false;
+            von = new DateTime(a, 8, 1);
+            bis = new DateTime(a + 1, 7, 31);
+            return true;
+        }
+
+        /// <summary>Text, wenn erster bzw. letzter Schultag nicht im Schuljahr liegen – sonst null.</summary>
+        private static string? TageAusserhalb(string schuljahr, DateTime? start, DateTime? ende)
+        {
+            if (!SchuljahrGrenzen(schuljahr, out var von, out var bis)) return null;
+            var fehler = new System.Collections.Generic.List<string>();
+            if (start is DateTime s0 && (s0.Date < von || s0.Date > bis))
+                fehler.Add($"erste Schultag ({s0:dd.MM.yyyy})");
+            if (ende is DateTime e0 && (e0.Date < von || e0.Date > bis))
+                fehler.Add($"letzte Schultag ({e0:dd.MM.yyyy})");
+            return fehler.Count == 0 ? null
+                : $"Der {string.Join(" und der ", fehler)} {(fehler.Count == 1 ? "liegt" : "liegen")} nicht im Schuljahr " +
+                  $"{schuljahr} ({von:dd.MM.yyyy} – {bis:dd.MM.yyyy}).";
         }
 
         // Liest die im Stundenraster vorkommenden Wochentage aus dem Sheet "Lös"
@@ -462,6 +499,14 @@ namespace Stundenplan_V2.Vertretung
             if (ende < start)
             {
                 MessageBox.Show("Der letzte Schultag liegt vor dem ersten.",
+                    "Import", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            // P5b-2 (V1): sonst holt der Import Ferien und Feiertage aus zwei Schuljahren
+            if (TageAusserhalb(schuljahr, start, ende) is string ausserhalb)
+            {
+                MessageBox.Show(this, ausserhalb + "\n\nBitte zuerst die Daten korrigieren (Tippfehler im Jahr?) – sonst holt der " +
+                                "Import Ferien und Feiertage aus zwei Schuljahren.",
                     "Import", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
@@ -576,6 +621,22 @@ namespace Stundenplan_V2.Vertretung
                 });
             }
 
+            // P5b-2 (V1): erster/letzter Schultag bzw. freie Zeiten außerhalb des Schuljahres → Rückfrage (Standard „Nein“)
+            if (SchuljahrGrenzen(schuljahr, out var sjVon, out var sjBis))
+            {
+                var hinweise = new System.Collections.Generic.List<string>();
+                if (TageAusserhalb(schuljahr, DpStart.SelectedDate, DpEnde.SelectedDate) is string tage) hinweise.Add(tage);
+                var draussen = freie.Where(f => f.Bis.Date < sjVon || f.Von.Date > sjBis).OrderBy(f => f.Von).ToList();
+                if (draussen.Count > 0)
+                    hinweise.Add($"{draussen.Count} freie {(draussen.Count == 1 ? "Zeit liegt" : "Zeiten liegen")} ganz außerhalb des " +
+                                 $"Schuljahres, z. B. {draussen[0].Von:dd.MM.yyyy} {draussen[0].Bezeichnung}".TrimEnd() + ".");
+                if (hinweise.Count > 0 &&
+                    MessageBox.Show(this, string.Join("\n\n", hinweise) + "\n\nTrotzdem so speichern? (Meist ein Tippfehler im Jahr – " +
+                                          "dann „Nein“, korrigieren und die falschen Zeilen löschen.)",
+                        "Speichern", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
+                    return;
+            }
+
             // _daten (mit allen übrigen Sheets) beibehalten, nur Kalender/Meta ersetzen.
             _daten.Schuljahr = schuljahr;
             _daten.PlanDateiPfad = _planPfad;
@@ -608,6 +669,8 @@ namespace Stundenplan_V2.Vertretung
 
             _dirty = false;
             _geladenPfad = ziel;
+            try { VertretungsStore.ArbeitsDateiMerken(ziel); }   // P5b-2 (F1): damit arbeiten Wocheneditor und „Vertretung erfassen“
+            catch (Exception ex) { _log?.Invoke($"Arbeitsjahr nicht gemerkt ({ex.Message}) – es gilt die jüngste Datei."); }
             _log?.Invoke(_neuesJahr
                 ? $"Neues Schuljahr {schuljahr} angelegt: {Path.GetFileName(ziel)} ({freie.Count} freie Zeiträume; " +
                   $"{_daten.Arten.Count} Vertretungsarten und {_daten.Kompetenzen.Count} Kompetenzen übernommen, ohne " +

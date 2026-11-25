@@ -19,6 +19,10 @@ namespace VertretungApi.Controllers;
 //    POST api/jahresablauf/oeffnen         – { schuljahr, begruendung }: wieder öffnen (Begründung 10–300 Zeichen)
 //    POST api/jahresablauf/neues-schuljahr – { schuljahr (das neue), bestaetigt }: „Aktuelles Schuljahr“ umstellen,
 //                                            Daten des bisherigen Jahres auf Standard
+//  P5b-2 (219, 240, 249–251): Zuständigkeiten ins neue Schuljahr (nur „Aktuelles Schuljahr“, nach dem Jahreswechsel-Import):
+//    GET  api/jahresablauf/zustaendigkeiten – Vorschläge je Konto (laut SchILD, Folgeklasse/-stufe, entfällt, Hinweis)
+//    POST api/jahresablauf/zustaendigkeiten – { schuljahr, schluessel[] }: die angehakten übernehmen (nur, was noch genauso
+//                                            vorgeschlagen wird; Kontenprotokoll, Abmeldung auf allen Geräten)
 //  Antwort 200: { meldung, stand } mit der neuen Übersicht. Logik und Texte: Services/Jahresablauf*.cs.
 // =====================================================================
 
@@ -63,6 +67,14 @@ public class JahresablaufController : ControllerBase
     [HttpPost("neues-schuljahr")]
     public async Task<IActionResult> NeuesSchuljahr([FromBody] JaVorbereitenDto dto)
         => await AntwortAsync(await Jahresablauf.VorbereitenAsync(_db, _einst, dto?.Schuljahr, dto?.Bestaetigt == true, Ich, _log));
+
+    [HttpGet("zustaendigkeiten")]
+    public async Task<IActionResult> Zustaendigkeiten() => Ok(await Jahresablauf.ZustaendigkeitenAsync(_db, _einst));
+
+    [HttpPost("zustaendigkeiten")]
+    public async Task<IActionResult> ZustaendigkeitenUebernehmen([FromBody] JaZustaendigkeitenUebernehmenDto dto)
+        => await AntwortAsync(await Jahresablauf.ZustaendigkeitenUebernehmenAsync(_db, _einst, dto?.Schuljahr, dto?.Schluessel,
+            Ich, _log));
 
     private async Task<IActionResult> AntwortAsync(Jahresablauf.AktionErgebnis e)
     {

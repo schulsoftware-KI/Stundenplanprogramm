@@ -16,6 +16,11 @@
 //  „Wieder öffnen…“ (mit Begründung) und „Schuljahr … vorbereiten…“. Jede Aktion fragt zuerst die API (409 mit Vorprüfung
 //  und Änderungen) und zeigt das im Dialog jaDialog; erst „bestätigen“ führt sie aus. Danach kommt die neue Übersicht mit.
 //
+//  P5b-2 (219, 240, 249–251): Punkt „Zuständigkeiten“ mit Knopf „Zuständigkeiten für … übernehmen…“ → Dialog jzDialog: eine
+//  Zeile je Konto, das nur für das Vorjahr zuständig ist (laut SchILD bzw. Folgeklasse vorausgewählt, „entfällt“ nicht,
+//  Hinweise ohne Häkchen). „Übernehmen“ schickt die angehakten Schlüssel; die API übernimmt nur, was sie noch genauso
+//  vorschlägt. Ohne Namen von Schülern.
+//
 //  Keine Eingaben – beim Verlassen geht nichts verloren. Wird nach einstellungen.js und VOR hilfe.js/app.js
 //  geladen und nutzt deren Hilfen (h, el, state, senden, aktionsFehler, kurzDatum, appName, …) erst zur Laufzeit.
 //  Einstieg jahresablaufInit() aus start() in app.js. Alle Namen mit Präfix „ja…“ bzw. „jahresablauf…“.
@@ -49,6 +54,15 @@ const JA_AKTION_URL = { abschliessen: "api/jahresablauf/abschliessen", oeffnen: 
   vorbereiten: "api/jahresablauf/neues-schuljahr" };
 const JA_BEGRUENDUNG_MIN = 10;
 
+// P5b-2: Dialog „Zuständigkeiten übernehmen“
+const jaZk = {
+  nr: 0,
+  daten: null,            // Antwort von GET api/jahresablauf/zustaendigkeiten
+  laeuft: false,
+};
+
+const JA_ZK_ART = { schild: "laut SchILD", folge: "Folgeklasse", entfaellt: "entfällt", hinweis: "Hinweis" };
+
 const jaDarf = () => !!state.anmeldung && state.anmeldung.rolle === "Admin";
 const jahresablaufOffen = () => !el("jahresablauf").hidden;
 
@@ -62,6 +76,7 @@ function jahresablaufLeeren() {
   ja.daten = null;
   if (el("rwDialog").open) { jaRw.ohneNeuladen = true; jaRwZu(); }
   if (el("jaDialog").open) jaAkZu();
+  if (el("jzDialog").open) jaZkZu();
   el("jaKopf").replaceChildren();
   el("jaKarten").replaceChildren();
   el("jaInfo").textContent = "";
@@ -165,9 +180,9 @@ function jaPunkt(p) {
     type: "button", class: "textknopf klein ja-ziel", onclick: () => jaZiel(z.id),
   }, `${z.text} →`));
   // P5a: Aktionen mit Rückfrage
-  const aktionen = (p.aktionen || []).filter((a) => JA_AKTION_URL[a.id]).map((a) => h("button", {
+  const aktionen = (p.aktionen || []).filter((a) => JA_AKTION_URL[a.id] || a.id === "zustaendigkeiten").map((a) => h("button", {
     type: "button", class: `hauptknopf klein ja-aktion${a.gefahr ? " gefahr" : ""}`, "aria-haspopup": "dialog",
-    onclick: () => jaAktion(a),
+    onclick: () => (a.id === "zustaendigkeiten" ? jaZkOeffnen(a) : jaAktion(a)),
   }, a.text));
   return h("li", { class: `ja-punkt a-${JA_AMPEL[p.ampel] ? p.ampel : "grau"}` },
     h("div", { class: "ja-punkt-kopf" }, h("strong", { class: "ja-punkt-titel" }, p.titel), jaAmpel(p.ampel)),
@@ -294,6 +309,131 @@ async function jaAkAusfuehren() {
   } finally {
     jaAk.laeuft = false;
     el("jaDOk").disabled = false;
+  }
+}
+
+// ---------------------------------------------------------------------
+//  P5b-2: Zuständigkeiten ins neue Schuljahr (Liste mit Häkchen)
+// ---------------------------------------------------------------------
+
+function jaZkOeffnen(a) {
+  if (!jaDarf() || jaZk.laeuft) return;
+  jaZk.daten = null;
+  el("jzTitel").textContent = `Zuständigkeiten für ${a.schuljahr} übernehmen`;
+  el("jzInfo").textContent = "Lade die Vorschläge …";
+  el("jzListe").replaceChildren();
+  el("jzAuswahl").hidden = true;
+  el("jzOk").disabled = true;
+  el("jzOk").textContent = "Übernehmen";
+  fehlerIn("jzFehler", "");
+  dialogAuf(el("jzDialog"));
+  setTimeout(() => { try { el("jzAbbrechen").focus(); } catch { /* egal */ } }, 0);
+  jaZkLaden();
+}
+
+function jaZkZu() {
+  jaZk.nr++;
+  jaZk.daten = null;
+  dialogZu(el("jzDialog"));
+}
+
+async function jaZkLaden() {
+  const nr = ++jaZk.nr;
+  try {
+    const d = await senden("GET", "api/jahresablauf/zustaendigkeiten");
+    if (nr !== jaZk.nr) return;
+    jaZkZeigen(d);
+  } catch (f) {
+    if (nr !== jaZk.nr) return;
+    el("jzInfo").textContent = "";
+    const t = aktionsFehler(f);
+    if (t !== null) fehlerIn("jzFehler", t);
+  }
+}
+
+function jaZkZeigen(d) {
+  jaZk.daten = d;
+  el("jzTitel").textContent = `Zuständigkeiten für ${d.schuljahr} übernehmen`;
+  const zeilen = d.zeilen || [];
+  if (!d.moeglich) {
+    el("jzInfo").textContent = d.grund || "Im Moment nicht möglich.";
+    el("jzListe").replaceChildren();
+    el("jzAuswahl").hidden = true;
+    jaZkZaehlen();
+    return;
+  }
+  const teile = [`Konten, die nur für ${d.vorjahr} zuständig sind: ${zeilen.length}`,
+    `Klassen ${d.schuljahr}: ${d.klassenNeu}` + (d.klassenMitLeitung ? `, davon ${d.klassenMitLeitung} mit Klassenleitung laut SchILD` :
+      " (noch keine Klassenleitung laut SchILD)")];
+  if (d.uebernommenAm) teile.push(`zuletzt übernommen ${datumZeit(d.uebernommenAm)}` + (d.uebernommenVon ? ` von ${d.uebernommenVon}` : ""));
+  el("jzInfo").textContent = zeilen.length === 0
+    ? `Kein Konto ist mehr nur für ${d.vorjahr} zuständig – es gibt nichts zu übernehmen.`
+    : teile.join(" · ") + ". Ohne Häkchen bleibt die Zuständigkeit bei " + d.vorjahr +
+      " (z. B. für Nachträge). Angehakte Konten werden auf ihren Geräten abgemeldet.";
+  el("jzListe").replaceChildren(...zeilen.map(jaZkZeile));
+  el("jzAuswahl").hidden = !zeilen.some((z) => z.schluessel);
+  jaZkZaehlen();
+}
+
+function jaZkZeile(z) {
+  const id = `jzK_${z.kontoId}`;
+  const box = z.schluessel
+    ? h("input", { type: "checkbox", id, class: "jz-haken", "data-schluessel": z.schluessel, checked: z.vorausgewaehlt,
+      onchange: jaZkZaehlen })
+    : h("span", { class: "jz-ohne", "aria-hidden": "true" });
+  return h("li", { class: `jz-zeile jz-${z.art}` },
+    box,
+    h("label", { class: "jz-inhalt", for: z.schluessel ? id : null },
+      h("span", { class: "jz-kopf" },
+        h("strong", null, z.konto),
+        ` · ${z.rolle}` + (z.kuerzel ? ` (${z.kuerzel})` : ""),
+        h("span", { class: `marke jz-art jz-art-${z.art}` },
+          z.art === "folge" && z.rolle === "Stufenkoordination" ? "Folgestufe" : JA_ZK_ART[z.art] || z.art),
+        z.gesperrt ? h("span", { class: "marke gesperrt" }, "gesperrt") : null),
+      h("span", { class: "jz-text" }, z.text),
+      h("span", { class: "jz-aenderung" }, "Änderung: " + z.aenderung)));
+}
+
+function jaZkHaken() {
+  return Array.from(el("jzListe").querySelectorAll("input.jz-haken"));
+}
+
+function jaZkZaehlen() {
+  const haken = jaZkHaken();
+  const n = haken.filter((x) => x.checked).length;
+  el("jzOk").textContent = n ? `Übernehmen (${n})` : "Übernehmen";
+  el("jzOk").disabled = jaZk.laeuft || n === 0;
+}
+
+/** „Vorschläge anhaken“: wie beim Öffnen (laut SchILD und Folgeklasse, ohne gesperrte); „Keine“: alle aus. */
+function jaZkAuswahl(alle) {
+  const d = jaZk.daten;
+  if (!d) return;
+  const vor = new Set((d.zeilen || []).filter((z) => z.vorausgewaehlt).map((z) => z.schluessel));
+  for (const x of jaZkHaken()) x.checked = alle && vor.has(x.dataset.schluessel);
+  jaZkZaehlen();
+}
+
+async function jaZkUebernehmen() {
+  const d = jaZk.daten;
+  if (!d || jaZk.laeuft) return;
+  const schluessel = jaZkHaken().filter((x) => x.checked).map((x) => x.dataset.schluessel);
+  if (schluessel.length === 0) return;
+  jaZk.laeuft = true;
+  el("jzOk").disabled = true;
+  fehlerIn("jzFehler", "");
+  try {
+    const r = await senden("POST", "api/jahresablauf/zustaendigkeiten", { schuljahr: d.schuljahr, schluessel });
+    jaZk.laeuft = false;
+    jaZkZu();
+    if (r && r.meldung) toast(r.meldung);
+    if (r && r.stand && jahresablaufOffen()) jaRender(r.stand);
+  } catch (f) {
+    const t = aktionsFehler(f);
+    if (t !== null) fehlerIn("jzFehler", t);
+  } finally {
+    jaZk.laeuft = false;
+    if (el("jzDialog").open) jaZkZaehlen();
   }
 }
 
@@ -521,4 +661,11 @@ function jahresablaufInit() {
   el("jaDGrund").addEventListener("input", jaAkZeichen);
   el("jaDialog").addEventListener("close", () => { jaAk.aktion = null; });
   hintergrundSchliesst(el("jaDialog"), () => { if (!jaAk.laeuft) jaAkZu(); });
+  // P5b-2
+  el("jzOk").addEventListener("click", jaZkUebernehmen);
+  el("jzAbbrechen").addEventListener("click", () => { if (!jaZk.laeuft) jaZkZu(); });
+  el("jzAlle").addEventListener("click", () => jaZkAuswahl(true));
+  el("jzKeine").addEventListener("click", () => jaZkAuswahl(false));
+  el("jzDialog").addEventListener("close", () => { jaZk.nr++; jaZk.daten = null; });
+  hintergrundSchliesst(el("jzDialog"), () => { if (!jaZk.laeuft) jaZkZu(); });
 }

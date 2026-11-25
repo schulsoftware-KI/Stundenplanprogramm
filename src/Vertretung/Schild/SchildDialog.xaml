@@ -255,7 +255,8 @@
                                     <DataGridTemplateColumn Header="Bestätigen" Width="72" SortMemberPath="Bestaetigt">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
-                                                <CheckBox HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                <!-- P5b-2: ClickMode „Press“ – ein Klick genügt (sonst markiert der erste Klick nur die Zeile) -->
+                                                <CheckBox HorizontalAlignment="Center" VerticalAlignment="Center" ClickMode="Press"
                                                           Visibility="{Binding BestaetigenSichtbar}"
                                                           IsChecked="{Binding Bestaetigt, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                           ToolTip="Abgang bestätigen: Zugehörigkeiten enden am Vortag von „gilt ab“, das Schülerkonto wird gesperrt. Bei Paaren („dieselbe Person?“, Neu-Zuordnung): zusammenführen bzw. zuordnen – danach „Vorschau berechnen“."/>

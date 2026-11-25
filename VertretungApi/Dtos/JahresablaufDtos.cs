@@ -64,3 +64,39 @@ public sealed record JaRueckfrageDto(
     string Knopf);                           // Text des Bestätigungsknopfs
 
 public sealed record JaAktionErgebnisDto(string Meldung, JaUebersichtDto Stand);
+
+// ---- P5b-2 (219, 240, 249–251): Zuständigkeiten ins neue Schuljahr ----
+
+/// <summary>
+/// Ein Vorschlag je Konto. Art: "schild" (Klassenleitung laut Klassen.dat des neuen Jahres) · "folge" (Folgeklasse bzw.
+/// Folgestufe aus der Mehrheit der bisherigen Schüler) · "entfaellt" (keine Folgeklasse – angehakt: Rolle Lehrkraft) ·
+/// "hinweis" (kein Häkchen, z. B. die Folgeklasse leitet laut SchILD jemand anderes). Schlüssel leer = kein Häkchen.
+/// Keine Namen von Schülern – nur Klassen, Stufen und Zahlen.
+/// </summary>
+public sealed record JaZustaendigkeitDto(
+    string Schluessel,
+    string Art,
+    int KontoId,
+    string Konto,                            // Benutzername
+    string? Kuerzel,
+    string Rolle,                            // „Klassenleitung“ bzw. „Stufenkoordination“
+    string Bisher,                           // „05A“ (im Vorjahr)
+    string? Neu,                             // „06A“ bzw. null (entfällt, Hinweis)
+    string Text,                             // Begründung je Eintrag („05A → 06A – Folgeklasse (27 von 28 Schülern)“)
+    string Aenderung,                        // was „Übernehmen“ am Konto ändert
+    bool Vorausgewaehlt,
+    bool Gesperrt);
+
+public sealed record JaZustaendigkeitenDto(
+    string Vorjahr,
+    string Schuljahr,                        // das neue (= „Aktuelles Schuljahr“)
+    bool Moeglich,
+    string? Grund,                           // warum (noch) nicht möglich
+    int KlassenNeu,                          // Klassen des neuen Jahres
+    int KlassenMitLeitung,                   // davon mit Klassenleitung laut SchILD (Klassen.dat)
+    IReadOnlyList<JaZustaendigkeitDto> Zeilen,
+    DateTime? UebernommenAm,                 // UTC – zuletzt übernommen (Zeile in „Schuljahre“)
+    string? UebernommenVon);
+
+/// <summary>„Übernehmen“: die angehakten Schlüssel (aus GET) für das neue Schuljahr.</summary>
+public sealed record JaZustaendigkeitenUebernehmenDto(string? Schuljahr, IReadOnlyList<string>? Schluessel);

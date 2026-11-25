@@ -139,13 +139,7 @@ namespace Stundenplan_V2.Vertretung
 
         private string? FindeVertretungsdatei()
         {
-            try
-            {
-                return Directory.GetFiles(_ordner, "Vertretung_*.xlsx")
-                    .OrderByDescending(File.GetLastWriteTimeUtc)
-                    .FirstOrDefault();
-            }
-            catch { return null; }
+            return VertretungsStore.ArbeitsDatei(_ordner);   // P5b-2 (F1): Arbeitsjahr laut Kalender, sonst die jüngste
         }
 
         private void SperreEingabe()

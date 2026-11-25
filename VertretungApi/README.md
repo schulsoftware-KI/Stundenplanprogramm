@@ -1171,6 +1171,32 @@ Entscheidungen 218, 243–248, 252 (`claude/P5b_Vorschlag.md`). **Keine Migratio
 - **Desktop, Zuordnung:** Knopf „Festlegungen aus <Vorjahr> übernehmen…“ – Kurs- und Gruppen-Festlegungen des Vorjahres,
   deren Schlüssel im Export vorkommt und die im Jahr des Exports noch keine Festlegung haben.
 
+## Zuständigkeiten ins neue Schuljahr (P5b-2, 5.3b)
+
+Entscheidungen 219, 240, 249–251 (`claude/P5b_Vorschlag.md` §6). **Keine Migration** (die Spalten `ZustaendigkeitenAm/-Von`
+stehen seit P5a in `Schuljahre`). API: `Services/JahresablaufZustaendigkeit.cs` (neu), `Services/JahresablaufSchuljahr.cs`,
+`Controllers/JahresablaufController.cs`, `Dtos/JahresablaufDtos.cs`; PWA: `jahresablauf.js`, `index.html`, `style.css`,
+`hilfe.js`, `sw.js` (Cache v27).
+
+- `GET api/jahresablauf/zustaendigkeiten` (Admin): eine Zeile je Konto (Klassenleitung, Stufenkoordination), das nur für das
+  Vorjahr des aktuellen Schuljahres zuständig ist – Art `schild` (Klassenleitung laut `Klassen.dat` des neuen Jahres, Vorrang),
+  `folge` (Folgeklasse bzw. Folgestufe: mindestens die Hälfte der bisherigen Schüler ist jetzt dort), `entfaellt` (keine
+  Folgeklasse, z. B. Q2 bzw. Jahrgang 10 → Oberstufe) oder `hinweis` (kein Häkchen, z. B. die Folgeklasse leitet laut SchILD
+  jemand anderes). Bisherige Schüler = letzte Klassen-Zeile im Vorjahr (Oberstufe: Stufe der Kurse), die bis zum letzten
+  Schultag reicht. Ohne Namen von Schülern.
+- `POST api/jahresablauf/zustaendigkeiten` `{ schuljahr, schluessel[] }`: übernimmt nur, was noch genauso vorgeschlagen wird;
+  setzt Zuständigkeit und `ZustaendigSchuljahr` (bzw. bei `entfaellt` Rolle Lehrkraft ohne Zuständigkeit), neuer
+  Sicherheitsstempel, Kontenprotokoll je Konto, `Schuljahre.ZustaendigkeitenAm/-Von` des neuen Jahres, Protokoll der
+  Einstellungen („Jahresablauf“, nur Zahlen). Nur für „Aktuelles Schuljahr“, nicht für ein abgeschlossenes.
+- Karte „Schuljahreswechsel“, Punkt „Zuständigkeiten“: grau vor dem Vorbereiten bzw. ohne Klassen des neuen Jahres; gelb,
+  solange Konten nur für das Vorjahr zuständig sind (Knopf „Zuständigkeiten für … übernehmen…“); grün, wenn keine mehr übrig
+  sind bzw. nach dem Übernehmen (mit Datum und Person). Ist das Vorjahr schon abgeschlossen, steht der Punkt bei den
+  weiteren Punkten der Karte, solange noch ein Konto nur dafür zuständig ist.
+- Nacharbeit P5b-1: Desktop-Kalender merkt das Arbeitsjahr in `Vertretung_Arbeitsjahr.txt` neben der Plandatei (Wocheneditor
+  und „Vertretung erfassen“ lesen sie; ohne sie die jüngste Datei); erster/letzter Schultag außerhalb des Schuljahres → kein
+  Import, Rückfrage beim Speichern; Sperre „ohne Folgeklasse“ hat die eigene Art `OhneFolgeklasse` mit eigenem „Was tun?“;
+  Kästchen „Bestätigen“ im Reiter „Import“ mit einem Klick.
+
 ## Zugangsschutz (P6a, 5.4)
 
 Entscheidungen 224–231 (`claude/P6_Vorschlag.md` §2–§7). **Migration `Datenschutz`** (alle neuen Spalten und Tabellen

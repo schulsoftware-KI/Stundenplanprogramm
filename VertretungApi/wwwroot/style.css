@@ -1824,6 +1824,22 @@ main.klassenbuch > .hi-karte, main.fehlzeiten > .hi-karte { margin-top: 2px; }
 .ja-dialog textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 4.5rem; }
 #jaDZeichen { margin: 4px 0 0 0; }
 .ja-dialog .knopfreihe .hauptknopf, .ja-dialog .knopfreihe .textknopf { min-height: 44px; }
+/* P5b-2: Zuständigkeiten übernehmen (eine Zeile je Konto) */
+.jz-auswahl { display: flex; flex-wrap: wrap; gap: 0 12px; margin: 6px 0 2px 0; }
+.jz-auswahl .textknopf { min-height: 44px; }
+.jz-liste { list-style: none; margin: 4px 0 0 0; padding: 0; display: grid; gap: 0; max-height: 55vh; overflow-y: auto; }
+.jz-zeile { display: grid; grid-template-columns: 28px 1fr; gap: 0 8px; align-items: start; padding: 10px 4px 10px 0;
+  border-top: 1px solid var(--linie); }
+.jz-haken { width: 22px; height: 22px; margin: 2px 0 0 2px; accent-color: var(--akzent); }
+.jz-ohne { width: 22px; }
+.jz-inhalt { display: grid; gap: 3px; min-height: 28px; cursor: pointer; overflow-wrap: anywhere; }
+.jz-hinweis .jz-inhalt { cursor: default; }
+.jz-kopf .marke { margin-left: 6px; }
+.jz-text, .jz-aenderung { font-size: 0.9rem; line-height: 1.4; }
+.jz-aenderung { color: var(--leise); }
+.marke.jz-art-schild, .marke.jz-art-folge { background: var(--vertretung); }
+.marke.jz-art-entfaellt { background: var(--verlegung); }
+.marke.jz-art-hinweis { background: var(--frei); }
 
 /* P4b (210): Dialog „Fehlstunden für SchILD bereitstellen“ – Zahlen, Warnungen, Abholcode */
 .rw-dialog .art-wahl .schalter { min-height: 44px; }

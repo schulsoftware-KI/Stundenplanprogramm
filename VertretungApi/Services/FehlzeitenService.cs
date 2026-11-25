@@ -305,22 +305,25 @@ public static class FehlzeitenService
     /// Klasse gehörte (ohne Angabe: heute).
     /// </summary>
     internal static async Task<(List<int> Ids, bool IstStufe)> KlassenSchuelerAsync(
-        AppDbContext db, string klasse, DateOnly? von = null, DateOnly? bis = null)
+        AppDbContext db, string klasse, DateOnly? von = null, DateOnly? bis = null, string? schuljahr = null)
     {
-        var (zeiten, istStufe) = await KlassenZeitenAsync(db, klasse, von, bis);
+        var (zeiten, istStufe) = await KlassenZeitenAsync(db, klasse, von, bis, schuljahr);
         return (zeiten.Keys.ToList(), istStufe);
     }
 
     /// <summary>
     /// Wie <see cref="KlassenSchuelerAsync"/>, dazu je Schüler die Zeiträume der Klassenzugehörigkeit
     /// (von–bis, leer = offen). Bei einer Stufe: ein offener Zeitraum je Schüler.
+    /// P5c-1 (Archiv-Export): mit <paramref name="schuljahr"/> nur Klassen dieses Schuljahres; eine Stufe nach den
+    /// Zugehörigkeiten des Schuljahres (Kurse der Stufe) statt nach der Stufe von heute.
     /// </summary>
     internal static async Task<(Dictionary<int, List<(DateOnly? Von, DateOnly? Bis)>> Zeiten, bool IstStufe)>
-        KlassenZeitenAsync(AppDbContext db, string klasse, DateOnly? von = null, DateOnly? bis = null)
+        KlassenZeitenAsync(AppDbContext db, string klasse, DateOnly? von = null, DateOnly? bis = null, string? schuljahr = null)
     {
         string k = klasse.Trim();
         var heute = KlassenbuchService.Heute();
-        var lgIds = (await db.Lerngruppen.AsNoTracking().Where(l => l.Typ == LerngruppeTyp.Klasse).ToListAsync())
+        var lgIds = (await db.Lerngruppen.AsNoTracking()
+                .Where(l => l.Typ == LerngruppeTyp.Klasse && (schuljahr == null || l.Schuljahr == schuljahr)).ToListAsync())
             .Where(l => KlassenbuchService.Gleich(l.Bezeichnung, k))
             .Select(l => l.Id)
             .ToList();
@@ -336,10 +339,42 @@ public static class FehlzeitenService
         }
 
         string gross = k.ToUpperInvariant();
-        var ids = await db.Schueler.AsNoTracking()
-            .Where(x => x.Stufe.ToUpper() == gross)
-            .Select(x => x.Id).ToListAsync();
+        var ids = schuljahr != null
+            ? await db.Zugehoerigkeiten.AsNoTracking()
+                .Where(z => z.Schuljahr == schuljahr && z.Lerngruppe!.Typ == LerngruppeTyp.Kurs
+                            && z.Lerngruppe.Stufe.ToUpper() == gross)
+                .GueltigIm(von ?? heute, bis ?? heute)
+                .Select(z => z.SchuelerId).Distinct().ToListAsync()
+            : await db.Schueler.AsNoTracking()
+                .Where(x => x.Stufe.ToUpper() == gross)
+                .Select(x => x.Id).ToListAsync();
         return (ids.ToDictionary(i => i, _ => new List<(DateOnly? Von, DateOnly? Bis)> { (null, null) }), true);
+    }
+
+    /// <summary>
+    /// P5c-1 (Archiv-Export): Klassen und Oberstufen-Stufen eines Schuljahres – Klassen (Lerngruppen vom Typ Klasse) und
+    /// die Stufen EF, Q1, Q2 der Kurse dieses Schuljahres; Sek-I-Klassen zuerst (wie AlleKlassenUndStufenAsync).
+    /// </summary>
+    internal static async Task<List<string>> KlassenUndStufenDesJahresAsync(AppDbContext db, string schuljahr)
+    {
+        var namen = await db.Lerngruppen.AsNoTracking()
+            .Where(l => l.Typ == LerngruppeTyp.Klasse && l.Schuljahr == schuljahr)
+            .Select(l => l.Bezeichnung)
+            .ToListAsync();
+        var stufen = await db.Lerngruppen.AsNoTracking()
+            .Where(l => l.Typ == LerngruppeTyp.Kurs && l.Schuljahr == schuljahr)
+            .Select(l => l.Stufe)
+            .Distinct()
+            .ToListAsync();
+        return namen
+            .Concat(stufen.Where(st => OberstufenStufen.Contains((st ?? "").Trim(), Cmp)))
+            .Select(x => (x ?? "").Trim().ToUpperInvariant())
+            .Where(x => x.Length > 0)
+            .Distinct(Cmp)
+            .OrderBy(x => char.IsDigit(x[0]) ? 0 : 1)
+            .ThenBy(x => Array.FindIndex(OberstufenStufen, o => Cmp.Equals(o, x)))
+            .ThenBy(x => x, Cmp)
+            .ToList();
     }
 
     /// <summary>Nur Zeilen aus der Zeit, in der der Schüler zur Klasse gehörte (5.2b-1).</summary>
@@ -353,17 +388,20 @@ public static class FehlzeitenService
         => istStufe ? $"Stufe {klasse.Trim().ToUpperInvariant()}" : $"Klasse {klasse.Trim().ToUpperInvariant()}";
 
     /// <summary>Alle Schüler einer Klasse bzw. Stufe mit ihren Summen und Soll-Stunden.</summary>
-    public static async Task<FzListeDto> KlasseAsync(AppDbContext db, string klasse, DateOnly von, DateOnly bis)
+    /// <param name="schuljahr">P5c-1 (Archiv-Export): Klassen und Stufen dieses Schuljahres; die Spalte „Klasse“ nennt
+    /// dann auch bei einer Stufe die Stufe des Schuljahres.</param>
+    public static async Task<FzListeDto> KlasseAsync(AppDbContext db, string klasse, DateOnly von, DateOnly bis,
+        string? schuljahr = null)
     {
         string k = klasse.Trim();
-        var (zeiten, istStufe) = await KlassenZeitenAsync(db, k, von, bis);
+        var (zeiten, istStufe) = await KlassenZeitenAsync(db, k, von, bis, schuljahr);
         var ids = zeiten.Keys.ToList();
 
         var zeilen = ids.Count == 0
             ? new List<Zeile>()
             : InZugehoerigkeit(await LadeAsync(ImZeitraum(db, von, bis).Where(a => ids.Contains(a.SchuelerId))), zeiten);
         var soll = await SollAsync(db, ids, von, bis, klasse: k);
-        var liste = await ZeilenJeSchuelerAsync(db, ids, zeilen, istStufe ? null : k.ToUpperInvariant(), soll);
+        var liste = await ZeilenJeSchuelerAsync(db, ids, zeilen, istStufe && schuljahr == null ? null : k.ToUpperInvariant(), soll);
         return new FzListeDto(GruppenTitel(k, istStufe), von, bis, null, liste, Summe(zeilen), liste.Sum(x => x.Soll));
     }
 

@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using VertretungApi.Data;
 using VertretungApi.Helpers;
@@ -101,6 +102,53 @@ public static class KontenService
     {
         var liste = Zustaendigkeiten(text);
         return liste.Count == 0 ? null : string.Join(", ", liste);
+    }
+
+    // ---- P5c-1 (Nacharbeit P5b-2 N3): führende Null und Prüfung gegen die Klassen bzw. Stufen des Schuljahres ----
+
+    private static readonly Regex EinstelligerJahrgang = new(@"^[1-9][A-Z]{0,3}$", RegexOptions.Compiled);
+
+    /// <summary>Wie ZustaendigText, einstellige Jahrgänge mit führender Null: „7D, 7“ → „07D, 07“ („10B“, „Q1“ bleiben).</summary>
+    public static string? ZustaendigNormalisieren(string? text)
+    {
+        var liste = Zustaendigkeiten(text).Select(z => EinstelligerJahrgang.IsMatch(z) ? "0" + z : z).Distinct().ToList();
+        return liste.Count == 0 ? null : string.Join(", ", liste);
+    }
+
+    /// <summary>Klassen (Lerngruppen vom Typ Klasse) und Stufen aller Lerngruppen je Schuljahr.</summary>
+    public static async Task<Dictionary<string, HashSet<string>>> BekannteGruppenAsync(AppDbContext db, IEnumerable<string> jahre)
+    {
+        var liste = jahre.Where(j => !string.IsNullOrWhiteSpace(j)).Distinct().ToList();
+        var ergebnis = liste.ToDictionary(j => j, _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase), StringComparer.Ordinal);
+        if (liste.Count == 0) return ergebnis;
+        var zeilen = await db.Lerngruppen.AsNoTracking()
+            .Where(l => liste.Contains(l.Schuljahr))
+            .Select(l => new { l.Schuljahr, l.Typ, l.Bezeichnung, l.Stufe })
+            .ToListAsync();
+        foreach (var g in zeilen)
+        {
+            if (!ergebnis.TryGetValue(g.Schuljahr, out var menge)) continue;
+            if (g.Typ == LerngruppeTyp.Klasse && !string.IsNullOrWhiteSpace(g.Bezeichnung)) menge.Add(g.Bezeichnung.Trim());
+            if (!string.IsNullOrWhiteSpace(g.Stufe)) menge.Add(g.Stufe.Trim());
+        }
+        return ergebnis;
+    }
+
+    /// <summary>Einträge der Zuständigkeit, die es unter den bekannten Klassen bzw. Stufen nicht gibt.</summary>
+    public static List<string> Unbekannt(string? zustaendig, IReadOnlySet<string> bekannt)
+        => Zustaendigkeiten(zustaendig).Where(z => !bekannt.Contains(z)).ToList();
+
+    /// <summary>Text der Rückfrage („Die Klasse 07X gibt es im Schuljahr 2026/27 nicht – trotzdem speichern?“).</summary>
+    public static string UnbekanntText(IReadOnlyList<string> unbekannt, string schuljahr, bool keineGruppen, BenutzerRolle rolle)
+    {
+        string liste = string.Join(", ", unbekannt);
+        if (keineGruppen)
+            return $"Für das Schuljahr {schuljahr} gibt es in der App noch keine Klassen und Stufen (sie kommen mit dem " +
+                   $"SchILD-Import) – „{liste}“ lässt sich deshalb nicht prüfen. Trotzdem speichern?";
+        string art = rolle == BenutzerRolle.Stufenkoordination
+            ? (unbekannt.Count == 1 ? "Die Stufe" : "Die Stufen")
+            : (unbekannt.Count == 1 ? "Die Klasse" : "Die Klassen bzw. Stufen");
+        return $"{art} {liste} gibt es im Schuljahr {schuljahr} nicht – trotzdem speichern?";
     }
 
     /// <summary>Klasse (Lerngruppe Typ Klasse) und Stufe je Schüler – seit 5.2b-1 die Klasse von heute.</summary>

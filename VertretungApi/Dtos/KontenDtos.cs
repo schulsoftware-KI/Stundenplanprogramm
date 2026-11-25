@@ -35,7 +35,9 @@ public record KontoDto(
     // ---- P5a (Entscheidung 219) ----
     string? ZustaendigSchuljahr = null,  // Schuljahr der Zuständigkeit (z. B. „2026/27“)
     bool ZustaendigAnderesJahr = false,  // gilt nicht für das aktuelle Schuljahr (nur noch für Daten jenes Jahres)
-    string? AktuellesSchuljahr = null);  // „Aktuelles Schuljahr“ (für den Haken beim Ändern)
+    string? AktuellesSchuljahr = null,   // „Aktuelles Schuljahr“ (für den Haken beim Ändern)
+    // ---- P5c-1 (N3) ----
+    IReadOnlyList<string>? ZustaendigUnbekannt = null); // Einträge der Zuständigkeit, die es im Schuljahr nicht gibt (z. B. „7D“)
 
 public record KontenListeDto(IReadOnlyList<KontoDto> Konten, int Gesamt, bool Mehr);
 
@@ -51,7 +53,8 @@ public record NeuesKontoDto(
     string? Benutzername,         // leer: Kürzel (Lehrkräfte) bzw. vorname.nachname (Schüler)
     string? LehrerKuerzel,
     int? SchuelerId,
-    string? Zustaendig);
+    string? Zustaendig,
+    bool ZustaendigTrotzdem = false);   // P5c-1 (N3): unbekannte Klasse/Stufe nach der Rückfrage trotzdem speichern
 
 public record KontoAendernDto(
     string Rolle,
@@ -59,7 +62,8 @@ public record KontoAendernDto(
     string? LehrerKuerzel,
     int? SchuelerId,
     string? Zustaendig,
-    bool ZustaendigAktuellesSchuljahr = false);   // P5a (219): unveränderte Zuständigkeit für das aktuelle Schuljahr übernehmen
+    bool ZustaendigAktuellesSchuljahr = false,    // P5a (219): unveränderte Zuständigkeit für das aktuelle Schuljahr übernehmen
+    bool ZustaendigTrotzdem = false);             // P5c-1 (N3): unbekannte Klasse/Stufe nach der Rückfrage trotzdem speichern
 
 /// <summary>Ergebnis von Anlegen/Zurücksetzen: das Startpasswort wird nur dieses eine Mal geliefert.</summary>
 public record StartPasswortDto(KontoDto Konto, string StartPasswort);

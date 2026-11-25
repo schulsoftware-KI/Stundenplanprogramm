@@ -21,6 +21,11 @@
 //  Hinweise ohne Häkchen). „Übernehmen“ schickt die angehakten Schlüssel; die API übernimmt nur, was sie noch genauso
 //  vorschlägt. Ohne Namen von Schülern.
 //
+//  P5c-1 (259–265, 271–273): Karte „Archiv und Fristen“ mit den Knöpfen „Archiv-Export … erstellen…“, „Aufbewahrung
+//  bestätigen…“ und „Fortschritt ansehen…“/„Herunterladen…“ – Dialoge in archiv.js (axDialog, abDialog); die Angaben je
+//  Schuljahr kommen in der Übersicht mit („archive“). Nacharbeit P5b-2 (N1): Meldungen der Aktionen stehen im Meldungskasten
+//  oben (jaMeldung, grün bzw. gelb, mit „×“) statt in einem Toast – bis zur nächsten Aktion bzw. bis zum Schließen.
+//
 //  Keine Eingaben – beim Verlassen geht nichts verloren. Wird nach einstellungen.js und VOR hilfe.js/app.js
 //  geladen und nutzt deren Hilfen (h, el, state, senden, aktionsFehler, kurzDatum, appName, …) erst zur Laufzeit.
 //  Einstieg jahresablaufInit() aus start() in app.js. Alle Namen mit Präfix „ja…“ bzw. „jahresablauf…“.
@@ -63,6 +68,14 @@ const jaZk = {
 
 const JA_ZK_ART = { schild: "laut SchILD", folge: "Folgeklasse", entfaellt: "entfällt", hinweis: "Hinweis" };
 
+// P5b-2/P5c-1: Knöpfe mit eigenem Dialog (statt der Rückfrage der API)
+const JA_AKTION_EIGEN = {
+  zustaendigkeiten: (a) => jaZkOeffnen(a),
+  archivExport: (a) => jaArchivExport(a),
+  archivAuftrag: (a) => jaArchivExport(a, true),
+  archivBestaetigen: (a) => jaArchivBestaetigen(a),
+};
+
 const jaDarf = () => !!state.anmeldung && state.anmeldung.rolle === "Admin";
 const jahresablaufOffen = () => !el("jahresablauf").hidden;
 
@@ -77,6 +90,9 @@ function jahresablaufLeeren() {
   if (el("rwDialog").open) { jaRw.ohneNeuladen = true; jaRwZu(); }
   if (el("jaDialog").open) jaAkZu();
   if (el("jzDialog").open) jaZkZu();
+  if (el("axDialog").open) axZu();      // P5c-1 – ein Archiv im Hintergrund läuft auf dem Server weiter
+  if (el("abDialog").open) abZu();
+  jaMeldungZu();
   el("jaKopf").replaceChildren();
   el("jaKarten").replaceChildren();
   el("jaInfo").textContent = "";
@@ -179,10 +195,10 @@ function jaPunkt(p) {
   const ziele = (p.ziele || []).map((z) => h("button", {
     type: "button", class: "textknopf klein ja-ziel", onclick: () => jaZiel(z.id),
   }, `${z.text} →`));
-  // P5a: Aktionen mit Rückfrage
-  const aktionen = (p.aktionen || []).filter((a) => JA_AKTION_URL[a.id] || a.id === "zustaendigkeiten").map((a) => h("button", {
+  // P5a: Aktionen mit Rückfrage (P5b-2, P5c-1: mit eigenem Dialog)
+  const aktionen = (p.aktionen || []).filter((a) => JA_AKTION_URL[a.id] || JA_AKTION_EIGEN[a.id]).map((a) => h("button", {
     type: "button", class: `hauptknopf klein ja-aktion${a.gefahr ? " gefahr" : ""}`, "aria-haspopup": "dialog",
-    onclick: () => (a.id === "zustaendigkeiten" ? jaZkOeffnen(a) : jaAktion(a)),
+    onclick: () => (JA_AKTION_EIGEN[a.id] ? JA_AKTION_EIGEN[a.id](a) : jaAktion(a)),
   }, a.text));
   return h("li", { class: `ja-punkt a-${JA_AMPEL[p.ampel] ? p.ampel : "grau"}` },
     h("div", { class: "ja-punkt-kopf" }, h("strong", { class: "ja-punkt-titel" }, p.titel), jaAmpel(p.ampel)),
@@ -201,7 +217,71 @@ function jaZiel(id) {
   if (id === "gruppen") { el("kbGruppenKnopf").click(); return; }
   if (id === "rueckweg") { jaRwOeffnen(); return; }
   if (id === "konten") { verw.reiter = "konten"; zeigeVerwaltung(); return; }   // P5a
+  if (id === "archiv") { jaZurKarte("archiv"); return; }                         // P5c-1
   if (id === "einstellungen") einstellungenOeffnen();
+}
+
+/** Zu einer Karte im Jahresablauf scrollen (Sprungknopf in einer anderen Karte). */
+function jaZurKarte(id) {
+  const titel = el(`jaT_${id}`);
+  if (!titel) return;
+  const karte = titel.closest(".ja-karte") || titel;
+  karte.scrollIntoView({ block: "start", behavior: "smooth" });
+  titel.setAttribute("tabindex", "-1");
+  try { titel.focus({ preventScroll: true }); } catch { /* egal */ }
+}
+
+// ---------------------------------------------------------------------
+//  P5b-2 (N1): Meldungskasten oben – bleibt bis zur nächsten Aktion bzw. bis zum Schließen („×“)
+// ---------------------------------------------------------------------
+
+/** art „ok“ (grün) bzw. „hinweis“ (gelb). */
+function jaMeldung(text, art = "ok") {
+  const box = el("jaMeldung");
+  el("jaMeldungText").textContent = text || "";
+  box.className = `ja-meldung ${art === "hinweis" ? "a-gelb" : "a-gruen"}`;
+  box.hidden = !text;
+  if (text && jahresablaufOffen()) {
+    try { box.scrollIntoView({ block: "nearest", behavior: "smooth" }); } catch { /* egal */ }
+  }
+}
+
+function jaMeldungZu() {
+  el("jaMeldung").hidden = true;
+  el("jaMeldungText").textContent = "";
+}
+
+// ---------------------------------------------------------------------
+//  P5c-1: Karte „Archiv und Fristen“ – Dialoge in archiv.js
+// ---------------------------------------------------------------------
+
+const jaArchivJahr = (sj) => ((ja.daten && ja.daten.archive) || []).find((x) => x.schuljahr === sj) || null;
+
+/** „Archiv-Export … erstellen…“ bzw. (nurStand) „Fortschritt ansehen…“/„Herunterladen…“. */
+function jaArchivExport(a, nurStand = false) {
+  if (!jaDarf()) return;
+  jaMeldungZu();
+  const j = jaArchivJahr(a.schuljahr);
+  const zeitraum = j && j.kalenderStart && j.kalenderEnde ? ` (${kurzDatum(j.kalenderStart)} – ${kurzDatum(j.kalenderEnde)})` : "";
+  axOeffnen({
+    art: "export",
+    schuljahr: a.schuljahr,
+    titel: `Archiv-Export ${a.schuljahr}`,
+    was: `Abgeschlossenes Schuljahr ${a.schuljahr}${zeitraum}`,
+    text: "Klassenbücher (Sek I), Kurshefte (Oberstufe) und die Fehlzeiten je Halbjahr (CSV, alle Klassen und Stufen) in einer " +
+      "Zip-Datei mit Inhaltsverzeichnis (Inhalt.txt mit Größe und Prüfsumme je Datei). Das dauert einige Minuten." +
+      (j && j.archivAm && !j.veraltet ? " Ein neuer Export ersetzt den bisherigen – dessen Bestätigung gilt dann nicht mehr." : ""),
+    nurStand,
+    beimSchliessen: () => { if (jahresablaufOffen()) jaLaden(); },
+  });
+}
+
+function jaArchivBestaetigen(a) {
+  if (!jaDarf()) return;
+  const j = jaArchivJahr(a.schuljahr);
+  if (!j) return;
+  jaMeldungZu();
+  abOeffnen(j);
 }
 
 // ---------------------------------------------------------------------
@@ -248,12 +328,14 @@ function jaAkZeichen() {
 /** Knopf in einer Karte: zuerst die Rückfrage der API holen (bzw. bei „Wieder öffnen“ gleich die Begründung erfragen). */
 async function jaAktion(a) {
   if (!jaDarf() || jaAk.laeuft) return;
+  jaMeldungZu();
   if (a.id === "oeffnen") {
     jaAkZeigen(a, {
       titel: `Schuljahr ${a.schuljahr} wieder öffnen?`,
       text: "Danach sehen Lehrkräfte, Klassenleitung, Stufenkoordination und Schüler das Schuljahr wieder und können " +
         "nachtragen; Vertretungen, Grundpläne und SchILD-Importe gehen wieder. Die Begründung steht im Protokoll der " +
-        "Einstellungen. Nach den Nachträgen das Schuljahr erneut abschließen.",
+        "Einstellungen. Nach den Nachträgen das Schuljahr erneut abschließen." +
+        (a.hinweis ? ` ${a.hinweis}` : ""),     // P5c-1 (265): nennt den Archiv-Export
       knopf: `Schuljahr ${a.schuljahr} wieder öffnen`,
     }, true);
     return;
@@ -264,7 +346,7 @@ async function jaAktion(a) {
     const d = await senden("POST", JA_AKTION_URL[a.id], { schuljahr: a.schuljahr, bestaetigt: false });
     // 200 ohne Rückfrage: es gab nichts zu tun
     el("jaInfo").textContent = "";
-    if (d && d.meldung) toast(d.meldung);
+    if (d && d.meldung) jaMeldung(d.meldung, "hinweis");
     if (d && d.stand) jaRender(d.stand);
   } catch (f) {
     el("jaInfo").textContent = "";
@@ -301,7 +383,7 @@ async function jaAkAusfuehren() {
   try {
     const d = await senden("POST", JA_AKTION_URL[a.id], body);
     jaAkZu();
-    if (d && d.meldung) toast(d.meldung);
+    if (d && d.meldung) jaMeldung(d.meldung);
     if (d && d.stand && jahresablaufOffen()) jaRender(d.stand);
   } catch (f) {
     const t = aktionsFehler(f);
@@ -318,6 +400,7 @@ async function jaAkAusfuehren() {
 
 function jaZkOeffnen(a) {
   if (!jaDarf() || jaZk.laeuft) return;
+  jaMeldungZu();
   jaZk.daten = null;
   el("jzTitel").textContent = `Zuständigkeiten für ${a.schuljahr} übernehmen`;
   el("jzInfo").textContent = "Lade die Vorschläge …";
@@ -426,7 +509,7 @@ async function jaZkUebernehmen() {
     const r = await senden("POST", "api/jahresablauf/zustaendigkeiten", { schuljahr: d.schuljahr, schluessel });
     jaZk.laeuft = false;
     jaZkZu();
-    if (r && r.meldung) toast(r.meldung);
+    if (r && r.meldung) jaMeldung(r.meldung);
     if (r && r.stand && jahresablaufOffen()) jaRender(r.stand);
   } catch (f) {
     const t = aktionsFehler(f);
@@ -640,6 +723,7 @@ async function jaRwVerwerfen() {
 function jahresablaufInit() {
   el("jaKnopf").addEventListener("click", jahresablaufOeffnen);
   el("jaZurueck").addEventListener("click", jahresablaufVerlassen);
+  el("jaMeldungZu").addEventListener("click", jaMeldungZu);   // P5b-2 (N1)
   // P4b
   el("rwErzeugen").addEventListener("click", jaRwErzeugen);
   el("rwVerwerfen").addEventListener("click", jaRwVerwerfen);

@@ -11,8 +11,10 @@ public sealed record JaZielDto(string Id, string Text);
 
 /// <summary>
 /// P5a: Knopf für eine Aktion mit Rückfrage („abschliessen“, „oeffnen“, „vorbereiten“) für ein Schuljahr. Gefahr = roter Knopf.
+/// P5c-1: „archivExport“, „archivBestaetigen“, „archivAuftrag“ (Dialoge der Karte „Archiv und Fristen“); Hinweis = zusätzlicher
+/// Satz für die Rückfrage (z. B. „Wieder öffnen“ nennt den Archiv-Export).
 /// </summary>
-public sealed record JaAktionDto(string Id, string Text, string Schuljahr, bool Gefahr = false);
+public sealed record JaAktionDto(string Id, string Text, string Schuljahr, bool Gefahr = false, string? Hinweis = null);
 
 /// <summary>Ein Prüfpunkt einer Karte.</summary>
 public sealed record JaPunktDto(
@@ -41,7 +43,9 @@ public sealed record JaUebersichtDto(
     string Schuljahr,
     DateOnly? KalenderStart,
     DateOnly? KalenderEnde,
-    IReadOnlyList<JaKarteDto> Karten);
+    IReadOnlyList<JaKarteDto> Karten,
+    IReadOnlyList<JaArchivJahrDto>? Archive = null,   // P5c-1: Angaben für die Dialoge der Karte „Archiv und Fristen“
+    JaArchivAuftragDto? Auftrag = null);              // P5c-1: Archiv im Hintergrund (null = keiner)
 
 // ---- P5a (215, 217): Aktionen der Karte „Schuljahreswechsel“ ----
 
@@ -100,3 +104,70 @@ public sealed record JaZustaendigkeitenDto(
 
 /// <summary>„Übernehmen“: die angehakten Schlüssel (aus GET) für das neue Schuljahr.</summary>
 public sealed record JaZustaendigkeitenUebernehmenDto(string? Schuljahr, IReadOnlyList<string>? Schluessel);
+
+// ---- P5c-1 (259–265, 271–273): Archiv-Export, Bestätigung, Archiv im Hintergrund ----
+
+/// <summary>
+/// Archiv-Angaben eines Schuljahres (Zeile „Schuljahre“) für die Dialoge – ohne Namen. Veraltet = erstellt vor dem letzten
+/// Abschluss (wieder geöffnet, 265); Bestaetigt = geprüft und aufbewahrt nach dem Export.
+/// </summary>
+public sealed record JaArchivJahrDto(
+    string Schuljahr,
+    string Status,
+    DateOnly? KalenderStart,
+    DateOnly? KalenderEnde,
+    DateTime? AbgeschlossenAm,
+    DateTime? ArchivAm,
+    string? ArchivVon,
+    long? ArchivGroesse,
+    string? ArchivPruefsumme,
+    bool? ArchivMitSchuelerEintraegen,
+    bool Veraltet,
+    bool Bestaetigt,
+    DateTime? AufbewahrtAm,
+    string? AufbewahrtVon,
+    string? AufbewahrtOrt,
+    DateOnly? AufbewahrenBis,
+    bool Geloescht);
+
+/// <summary>
+/// Stand eines Archivs im Hintergrund. Art: „export“ bzw. „jahresarchiv“; Status: „laeuft“, „fertig“, „fehler“,
+/// „abgebrochen“. Eigener = von diesem Konto gestartet (nur dann Prüfsumme und Dateiname; abholen darf nur es).
+/// </summary>
+public sealed record JaArchivAuftragDto(
+    string Art,
+    string? Schuljahr,
+    DateOnly Von,
+    DateOnly Bis,
+    bool MitSchuelerEintraegen,
+    string Akteur,
+    bool Eigener,
+    string Status,
+    string Schritt,
+    int Erledigt,
+    int Gesamt,
+    DateTime Start,                          // UTC
+    DateTime? Fertig,                        // UTC
+    DateTime? GueltigBis,                    // UTC – bis dahin liegt die Datei bereit
+    long? Groesse,
+    string? Pruefsumme,
+    string? Dateiname,
+    string? Fehler,
+    int NichtErstellt);
+
+/// <summary>„Archiv-Export … erstellen“: Kennwort zweimal (nur im Arbeitsspeicher, nie gespeichert).</summary>
+public sealed record JaArchivStartDto(string? Schuljahr, bool SchuelerEintraege, string? Kennwort, string? KennwortWiederholung);
+
+/// <summary>Jahresarchiv aus 4.3 (Klassenbuch → Klassen) – Zeitraum frei, seit P5c-1 mit Kennwort (273).</summary>
+public sealed record JaJahresarchivStartDto(DateOnly? Von, DateOnly? Bis, bool SchuelerEintraege, string? Kennwort,
+    string? KennwortWiederholung);
+
+/// <summary>Antwort auf Start und Abfrage des Auftrags.</summary>
+public sealed record JaArchivAuftragAntwortDto(JaArchivAuftragDto? Auftrag);
+
+/// <summary>
+/// „Aufbewahrung bestätigen“ (264): Prüfsumme der gespeicherten Datei (im Browser gerechnet oder eingetippt), Haken „mit
+/// 7-Zip und Kennwort geöffnet“, Ort (nie das Kennwort) und „aufzubewahren bis“.
+/// </summary>
+public sealed record JaArchivBestaetigenDto(string? Schuljahr, string? Pruefsumme, bool Geoeffnet, string? Ort,
+    DateOnly? AufbewahrenBis);

@@ -1938,6 +1938,35 @@ main.klassenbuch > .hi-karte, main.fehlzeiten > .hi-karte { margin-top: 2px; }
 .fz-s-aktionen { margin-top: 6px; }
 .es-gruende { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--linie); }
 .es-gruende-knopf.warnung { color: var(--rot); font-weight: 700; }
+/* P5b-2 (N1): Meldungskasten im Jahresablauf – bleibt bis zur nächsten Aktion bzw. bis „×“ */
+.ja-meldung {
+  display: flex; align-items: flex-start; gap: 8px; margin: 10px 0 0 0; padding: 10px 6px 10px 14px;
+  border-radius: 10px; border: 1px solid var(--vertretung); border-left-width: 6px; background: var(--vertretung-t);
+  color: var(--tinte); scroll-margin-top: 80px;
+}
+.ja-meldung[hidden] { display: none; }
+.ja-meldung.a-gelb { border-color: var(--verlegung); background: var(--verlegung-t); }
+.ja-meldung p { margin: 0; flex: 1; font-weight: 600; overflow-wrap: anywhere; }
+.ja-meldung-zu { flex: none; min-width: 44px; min-height: 44px; margin: -8px 0; font-size: 1.4rem; line-height: 1; }
+/* P5c-1: Archiv mit Kennwort (axDialog) und „Aufbewahrung bestätigen“ (abDialog) */
+.ax-dialog .eingabe, .ab-dialog .eingabe { width: 100%; box-sizing: border-box; }
+.ax-dialog .passwort { margin-bottom: 0; }
+#axKwInfo { margin: 4px 0 0 0; }
+.ax-stand { margin: 12px 0 0 0; padding: 10px 12px; border-radius: 10px; background: var(--seite); }
+.ax-stand[hidden] { display: none; }
+.ax-schritt { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
+.ax-balken { display: block; width: 100%; height: 12px; margin: 8px 0 0 0; accent-color: var(--akzent); }
+.ax-balken[hidden] { display: none; }
+.ax-info { margin: 8px 0 0 0; overflow-wrap: anywhere; }
+.ax-dialog .knopfreihe .hauptknopf, .ax-dialog .knopfreihe .textknopf,
+.ab-dialog .knopfreihe .hauptknopf, .ab-dialog .knopfreihe .textknopf { min-height: 44px; }
+.ab-datei { display: block; width: 100%; min-height: 44px; margin: 2px 0 0 0; font-size: 0.95rem; }
+.ab-summe { font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 0.86rem; }
+.ab-vergleich { margin: 6px 0 0 0; font-size: 0.9rem; font-weight: 650; overflow-wrap: anywhere; }
+.ab-vergleich:empty { display: none; }
+.ab-vergleich.richtig { color: var(--vertretung); }
+.ab-vergleich.falsch { color: var(--entfall); }
+.ab-haken { margin-top: 14px; }
 
 @media print {
   .zf-zettel .zf-codeliste {

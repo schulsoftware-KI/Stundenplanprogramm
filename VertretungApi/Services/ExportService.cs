@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.IO.Compression;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -36,6 +35,12 @@ namespace VertretungApi.Services;
 //     steht in Inhalt.txt unter „Nicht erstellt", Details im Log der API.
 //
 //  Rechte prüft der Aufrufer (BerichteController). Protokolliert wird dort.
+//
+//  P5c-1 (Entscheidungen 260–263, 273): Das Archiv ist jetzt immer mit WinZip-AES-256 verschlüsselt (AesZipSchreiber,
+//  Kennwort des Admins) und entsteht im Hintergrund (ArchivAuftraege) – für das Jahresarchiv aus 4.3 wie für den
+//  Archiv-Export eines abgeschlossenen Schuljahres. Der Archiv-Export bringt dazu die Fehlzeiten-CSV je Halbjahr mit
+//  (alle Klassen und Stufen dieses Schuljahres) und einen eigenen Kopf in Inhalt.txt. Inhalt.txt nennt je Datei Größe und
+//  SHA-256 – keine Namen von Schülern (die stehen nur in den PDFs und CSV).
 // =====================================================================
 
 /// <summary>Vorabprüfung zum CSV-Export (Entscheidung 62).</summary>
@@ -52,9 +57,16 @@ public sealed record CsvPruefungDto(
 /// <summary>Fertige CSV-Datei.</summary>
 public sealed record CsvErgebnis(byte[] Daten, string Dateiname, int Schueler, int Zeilen);
 
-/// <summary>Ergebnis des Jahresarchivs.</summary>
+/// <summary>Ergebnis des Jahresarchivs (P5c-1: dazu die Fehlzeiten-CSV und die Schüler darin).</summary>
 public sealed record ArchivErgebnis(
-    string Dateiname, DateOnly Von, DateOnly Bis, int Klassen, int Kurse, IReadOnlyList<string> Fehler);
+    string Dateiname, DateOnly Von, DateOnly Bis, int Klassen, int Kurse, IReadOnlyList<string> Fehler,
+    int Csv = 0, int CsvSchueler = 0);
+
+/// <summary>P5c-1: eine Fehlzeiten-CSV im Archiv-Export (Name im Zip, Text für Inhalt.txt, Zeitraum).</summary>
+public sealed record ArchivCsvTeil(string Name, string Text, DateOnly Von, DateOnly Bis);
+
+/// <summary>P5c-1: Fortschritt beim Erstellen eines Archivs (z. B. „Klassenbuch 12 von 41“).</summary>
+public sealed record ArchivFortschritt(string Schritt, int Erledigt, int Gesamt);
 
 public static class ExportService
 {
@@ -101,8 +113,9 @@ public static class ExportService
     // =================================================================
 
     /// <param name="dateiTeil">Teil des Dateinamens, z. B. „05A" bzw. „alle".</param>
+    /// <param name="schuljahr">P5c-1: nur Klassen dieses Schuljahres und Stufen nach seinen Kursen (Archiv-Export).</param>
     public static async Task<CsvErgebnis> FehlzeitenCsvAsync(
-        AppDbContext db, IReadOnlyList<string> gruppen, string dateiTeil, DateOnly von, DateOnly bis)
+        AppDbContext db, IReadOnlyList<string> gruppen, string dateiTeil, DateOnly von, DateOnly bis, string? schuljahr = null)
     {
         var sb = new StringBuilder();
         CsvZeile(sb, "SchILD-Id", "Name", "Vorname", "Klasse", "Kurs",
@@ -112,8 +125,8 @@ public static class ExportService
         int zeilen = 0;
         foreach (var g in gruppen)
         {
-            var (_, istStufe) = await FehlzeitenService.KlassenSchuelerAsync(db, g);
-            var liste = await FehlzeitenService.KlasseAsync(db, g, von, bis);
+            var (_, istStufe) = await FehlzeitenService.KlassenSchuelerAsync(db, g, schuljahr: schuljahr);
+            var liste = await FehlzeitenService.KlasseAsync(db, g, von, bis, schuljahr);
             var neu = liste.Schueler.Where(z => gesehen.Add(z.Id)).ToList();
             if (neu.Count == 0) continue;
 
@@ -233,14 +246,19 @@ public static class ExportService
     }
 
     /// <summary>
-    /// Schreibt das Archiv als Zip nach <paramref name="ziel"/> (der Stream bleibt offen).
-    /// Abbruch über <paramref name="ct"/> (Verbindung beendet) zwischen zwei Heften.
+    /// Schreibt Klassenbücher, Kurshefte, ggf. Fehlzeiten-CSV (<paramref name="csv"/>) und Inhalt.txt in das verschlüsselte
+    /// Archiv <paramref name="zip"/> – abschließen (Zentralverzeichnis) muss der Aufrufer. Abbruch über <paramref name="ct"/>
+    /// zwischen zwei Dateien. P5c-1: <paramref name="kopf"/> = eigene Kopfzeilen für Inhalt.txt (Archiv-Export),
+    /// <paramref name="schuljahr"/> = nur Klassen dieses Schuljahres, <paramref name="fortschritt"/> = Meldung je Datei.
     /// </summary>
     public static async Task<ArchivErgebnis> ArchivSchreibenAsync(
         AppDbContext db, KbNutzer u, DateOnly von, DateOnly bis, bool schuelerEintraege,
-        Stream ziel, ILogger log, CancellationToken ct, string? schule = null)
+        AesZipSchreiber zip, ILogger log, CancellationToken ct, string? schule = null,
+        IReadOnlyList<string>? kopf = null, IReadOnlyList<ArchivCsvTeil>? csv = null, string? schuljahr = null,
+        Action<ArchivFortschritt>? fortschritt = null)
     {
         var bisEff = BisHoechstensHeute(bis);
+        fortschritt?.Invoke(new ArchivFortschritt("Plan des Zeitraums wird berechnet", 0, 0));
         var tage = await WochenplanService.TageAsync(db, von, bisEff);
         ct.ThrowIfCancellationRequested();
 
@@ -289,9 +307,14 @@ public static class ExportService
             .ThenBy(x => x.UNr)
             .ToList();
 
+        var csvTeile = csv ?? Array.Empty<ArchivCsvTeil>();
+        int gesamt = klassenListe.Count + kursListe.Count + csvTeile.Count;
+        int erledigt = 0;
         var fehler = new List<string>();
         var dateienKlassen = new List<string>();
         var dateienKurse = new List<string>();
+        var csvZeilen = new List<string>();
+        int csvSchueler = 0, csvAnzahl = 0;
         var namen = new HashSet<string>(Cmp);
 
         string Eindeutig(string pfad)
@@ -306,83 +329,132 @@ public static class ExportService
             }
         }
 
-        using (var zip = new ZipArchive(ziel, ZipArchiveMode.Create, leaveOpen: true))
+        foreach (var k in klassenListe)
         {
-            foreach (var k in klassenListe)
+            ct.ThrowIfCancellationRequested();
+            fortschritt?.Invoke(new ArchivFortschritt($"Klassenbuch {dateienKlassen.Count + 1} von {klassenListe.Count}",
+                erledigt, gesamt));
+            try
+            {
+                var bericht = await BerichtService.KlassenbuchAsync(db, u, k, von, bisEff, schuelerEintraege, tage, schuljahr);
+                var pdf = KlassenbuchPdf.Erzeuge(bericht, schule);
+                string name = Eindeutig("Klassen/" + BerichtService.Dateiname(bericht.Kopf));
+                zip.Hinzufuegen(name, pdf);
+                dateienKlassen.Add(name);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (ArchivZuGrossException) { throw; }
+            catch (Exception ex)
+            {
+                log.LogError(ex, "Jahresarchiv: Klassenbuch {Klasse} konnte nicht erstellt werden.", k);
+                fehler.Add($"Klassenbuch {k}");
+            }
+            erledigt++;
+        }
+
+        int kursNr = 0;
+        foreach (var kurs in kursListe)
+        {
+            ct.ThrowIfCancellationRequested();
+            fortschritt?.Invoke(new ArchivFortschritt($"Kursheft {++kursNr} von {kursListe.Count}", erledigt, gesamt));
+            string bezeichnung = $"{kurs.Fach} · {string.Join(", ", kurs.Klassen)} · {kurs.Lehrer} (UNr {kurs.UNr})";
+            try
+            {
+                var bericht = await BerichtService.KursheftAsync(db, u, kurs.UNr, kurs.Lehrer, kurs.Fach, kurs.Klassen,
+                    von, bisEff, schuelerEintraege, tage);
+                var pdf = KlassenbuchPdf.Erzeuge(bericht, schule);
+                string datei = BerichtService.SichererName(
+                    $"Kursheft_{kurs.Fach}_{string.Join("_", kurs.Klassen)}_{kurs.Lehrer}_UNr{kurs.UNr}_{von:yyyy-MM-dd}_{bisEff:yyyy-MM-dd}",
+                    ".pdf");
+                string name = Eindeutig($"Kurse/{BerichtService.SichererName(kurs.Stufe, "")}/{datei}");
+                zip.Hinzufuegen(name, pdf);
+                dateienKurse.Add(name);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (ArchivZuGrossException) { throw; }
+            catch (Exception ex)
+            {
+                log.LogError(ex, "Jahresarchiv: Kursheft {Kurs} konnte nicht erstellt werden.", bezeichnung);
+                fehler.Add($"Kursheft {bezeichnung}");
+            }
+            erledigt++;
+        }
+
+        // P5c-1 (260): Fehlzeiten je Halbjahr – alle Klassen und Stufen des Schuljahres (Admin-Sicht wie „alle“ in 4.3)
+        if (csvTeile.Count > 0)
+        {
+            var gruppen = schuljahr != null
+                ? await FehlzeitenService.KlassenUndStufenDesJahresAsync(db, schuljahr)
+                : await FehlzeitenService.AlleKlassenUndStufenAsync(db);
+            int csvNr = 0;
+            foreach (var teil in csvTeile)
             {
                 ct.ThrowIfCancellationRequested();
+                fortschritt?.Invoke(new ArchivFortschritt($"Fehlzeiten-CSV {++csvNr} von {csvTeile.Count}", erledigt, gesamt));
+                var bisTeil = BisHoechstensHeute(teil.Bis);
                 try
                 {
-                    var bericht = await BerichtService.KlassenbuchAsync(db, u, k, von, bisEff, schuelerEintraege, tage);
-                    var pdf = KlassenbuchPdf.Erzeuge(bericht, schule);
-                    string name = Eindeutig("Klassen/" + BerichtService.Dateiname(bericht.Kopf));
-                    Schreibe(zip, name, pdf);
-                    dateienKlassen.Add(name);
+                    if (bisTeil < teil.Von) throw new InvalidOperationException("Zeitraum liegt in der Zukunft.");
+                    var erg = await FehlzeitenCsvAsync(db, gruppen, "alle", teil.Von, bisTeil, schuljahr);
+                    string name = Eindeutig(teil.Name);
+                    zip.Hinzufuegen(name, erg.Daten);
+                    csvZeilen.Add($"  {name} – {teil.Text} {teil.Von:dd.MM.yyyy} – {bisTeil:dd.MM.yyyy}: " +
+                                  $"{erg.Schueler} Schüler, {erg.Zeilen} Zeilen");
+                    csvSchueler = Math.Max(csvSchueler, erg.Schueler);
+                    csvAnzahl++;
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (ArchivZuGrossException) { throw; }
                 catch (Exception ex)
                 {
-                    log.LogError(ex, "Jahresarchiv: Klassenbuch {Klasse} konnte nicht erstellt werden.", k);
-                    fehler.Add($"Klassenbuch {k}");
+                    log.LogError(ex, "Archiv-Export: Fehlzeiten-CSV {Teil} konnte nicht erstellt werden.", teil.Text);
+                    fehler.Add($"Fehlzeiten-CSV {teil.Text}");
                 }
+                erledigt++;
             }
+        }
 
-            foreach (var kurs in kursListe)
-            {
-                ct.ThrowIfCancellationRequested();
-                string bezeichnung = $"{kurs.Fach} · {string.Join(", ", kurs.Klassen)} · {kurs.Lehrer} (UNr {kurs.UNr})";
-                try
-                {
-                    var bericht = await BerichtService.KursheftAsync(db, u, kurs.UNr, kurs.Lehrer, kurs.Fach, kurs.Klassen,
-                        von, bisEff, schuelerEintraege, tage);
-                    var pdf = KlassenbuchPdf.Erzeuge(bericht, schule);
-                    string datei = BerichtService.SichererName(
-                        $"Kursheft_{kurs.Fach}_{string.Join("_", kurs.Klassen)}_{kurs.Lehrer}_UNr{kurs.UNr}_{von:yyyy-MM-dd}_{bisEff:yyyy-MM-dd}",
-                        ".pdf");
-                    string name = Eindeutig($"Kurse/{BerichtService.SichererName(kurs.Stufe, "")}/{datei}");
-                    Schreibe(zip, name, pdf);
-                    dateienKurse.Add(name);
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-                catch (Exception ex)
-                {
-                    log.LogError(ex, "Jahresarchiv: Kursheft {Kurs} konnte nicht erstellt werden.", bezeichnung);
-                    fehler.Add($"Kursheft {bezeichnung}");
-                }
-            }
-
-            var inhalt = new StringBuilder();
+        fortschritt?.Invoke(new ArchivFortschritt("Inhaltsverzeichnis", erledigt, gesamt));
+        var inhalt = new StringBuilder();
+        if (kopf != null)
+        {
+            foreach (var z in kopf) inhalt.Append(z).Append("\r\n");
+        }
+        else
+        {
             inhalt.Append("Jahresarchiv – Klassenbücher und Kurshefte\r\n");
             inhalt.Append($"Zeitraum: {von:dd.MM.yyyy} – {bisEff:dd.MM.yyyy}\r\n");
             inhalt.Append($"Erstellt am {DateTime.Now:dd.MM.yyyy HH:mm} von {u.Name}\r\n");
             inhalt.Append(schuelerEintraege ? "Schülereinträge: aufgenommen\r\n" : "Schülereinträge: nicht aufgenommen\r\n");
+            inhalt.Append("Verschlüsselt mit AES-256 (WinZip-AES) – öffnen mit 7-Zip, WinZip oder WinRAR und dem Kennwort\r\n");
+            inhalt.Append("(der Windows-Explorer kann es nicht).\r\n");
             inhalt.Append("ACHTUNG: Enthält personenbezogene Daten von Schülerinnen und Schülern. Nur auf dienstlich\r\n");
-            inhalt.Append("freigegebenen Geräten speichern, nicht weitergeben. Aufbewahrung nach den Vorgaben der Schule.\r\n\r\n");
-            inhalt.Append($"Klassenbücher (Sek I): {dateienKlassen.Count}\r\n");
-            foreach (var d in dateienKlassen) inhalt.Append("  ").Append(d).Append("\r\n");
-            inhalt.Append($"\r\nKurshefte (Oberstufe): {dateienKurse.Count}\r\n");
-            foreach (var d in dateienKurse) inhalt.Append("  ").Append(d).Append("\r\n");
-            if (fehler.Count > 0)
-            {
-                inhalt.Append($"\r\nNicht erstellt ({fehler.Count}) – Details im Protokoll der API:\r\n");
-                foreach (var f in fehler) inhalt.Append("  ").Append(f).Append("\r\n");
-            }
-            var text = Encoding.UTF8.GetBytes(inhalt.ToString());
-            var mitBom = new byte[3 + text.Length];
-            mitBom[0] = 0xEF; mitBom[1] = 0xBB; mitBom[2] = 0xBF;
-            Buffer.BlockCopy(text, 0, mitBom, 3, text.Length);
-            Schreibe(zip, "Inhalt.txt", mitBom);
+            inhalt.Append("freigegebenen Geräten speichern, nicht weitergeben. Aufbewahrung nach den Vorgaben der Schule.\r\n");
         }
+        inhalt.Append($"\r\nKlassenbücher (Sek I): {dateienKlassen.Count}\r\n");
+        inhalt.Append($"Kurshefte (Oberstufe): {dateienKurse.Count}\r\n");
+        if (csvTeile.Count > 0)
+        {
+            inhalt.Append($"Fehlzeiten (CSV, alle Klassen und Stufen): {csvAnzahl}\r\n");
+            foreach (var z in csvZeilen) inhalt.Append(z).Append("\r\n");
+        }
+        if (fehler.Count > 0)
+        {
+            inhalt.Append($"\r\nNicht erstellt ({fehler.Count}) – Details im Protokoll der API:\r\n");
+            foreach (var f in fehler) inhalt.Append("  ").Append(f).Append("\r\n");
+        }
+        inhalt.Append("\r\nDateien – SHA-256 (wie PowerShell „Get-FileHash“), Größe in Bytes, Name:\r\n");
+        foreach (var d in zip.Dateien)
+            inhalt.Append("  ").Append(d.Sha256).Append("  ").Append(d.Groesse.ToString(Inv).PadLeft(10)).Append("  ")
+                .Append(d.Name).Append("\r\n");
+        var text = Encoding.UTF8.GetBytes(inhalt.ToString());
+        var mitBom = new byte[3 + text.Length];
+        mitBom[0] = 0xEF; mitBom[1] = 0xBB; mitBom[2] = 0xBF;
+        Buffer.BlockCopy(text, 0, mitBom, 3, text.Length);
+        zip.Hinzufuegen("Inhalt.txt", mitBom);
 
         string dateiname = BerichtService.SichererName($"Klassenbuch-Archiv_{von:yyyy-MM-dd}_{bisEff:yyyy-MM-dd}", ".zip");
-        return new ArchivErgebnis(dateiname, von, bisEff, dateienKlassen.Count, dateienKurse.Count, fehler);
-    }
-
-    private static void Schreibe(ZipArchive zip, string name, byte[] daten)
-    {
-        var eintrag = zip.CreateEntry(name, CompressionLevel.Fastest);
-        eintrag.LastWriteTime = DateTimeOffset.Now;
-        using var s = eintrag.Open();
-        s.Write(daten, 0, daten.Length);
+        return new ArchivErgebnis(dateiname, von, bisEff, dateienKlassen.Count, dateienKurse.Count, fehler, csvAnzahl,
+            csvSchueler);
     }
 }

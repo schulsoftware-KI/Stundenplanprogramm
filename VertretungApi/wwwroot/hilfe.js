@@ -408,7 +408,10 @@ const HI_THEMEN = [
       "**Zuständigkeit je Schuljahr:** Klassenleitung und Stufenkoordination sind für ein Schuljahr zuständig (steht im " +
         "Konto). Eine neue bzw. geänderte Zuständigkeit gilt für das aktuelle Schuljahr; eine unveränderte übernimmst du " +
         "beim „Bearbeiten“ mit dem Haken „für das aktuelle Schuljahr“. Zum Schuljahreswechsel alle auf einmal: Jahresablauf → " +
-        "„Zuständigkeiten für … übernehmen…“ (siehe „Jahresablauf“).",
+        "„Zuständigkeiten für … übernehmen…“ (siehe „Jahresablauf“). Die Liste zeigt das Schuljahr immer mit („10B (2026/27)“). " +
+        "Beim Speichern ergänzt die App einstellige Jahrgänge um die führende Null („7D“ → „07D“) und fragt nach, wenn es " +
+        "die Klasse bzw. Stufe im Schuljahr nicht gibt (Klassen eines neuen Jahres kommen evtl. erst mit dem SchILD-Import). " +
+        "Marke **„Zuständigkeit prüfen“**: so eine Klasse steht schon im Konto – über „Bearbeiten“ korrigieren.",
       "Bei Lehrkräften steht der **Name laut SchILD** neben dem Kürzel (nur für dich und die Lehrkraft selbst sichtbar); " +
         "die Suche findet auch Namen. Filter **„Laut SchILD aktiv, gesperrt“**: nach einem Wiedereintritt entsperren. " +
         "Filter **„Name laut SchILD geändert“**: im Konto steht ein Vorschlag für den neuen Benutzernamen – " +
@@ -557,7 +560,7 @@ const HI_THEMEN = [
       "Kontomenü → „Jahresablauf“: was zum Halbjahres- und Schuljahreswechsel zu tun ist. Jede Karte und " +
         "jeder Punkt hat eine **Ampel**: grün erledigt, gelb zu tun, rot überfällig, grau nur ein Hinweis bzw. noch " +
         "nicht dran. Hier geschieht **nichts von selbst** – die Links führen in den passenden Bereich, die Knöpfe fragen " +
-        "vorher nach.",
+        "vorher nach. Was eine Aktion getan hat, steht danach **oben im Kasten** – bis zur nächsten Aktion bzw. bis „×“.",
       { zwischen: "Schuljahreswechsel" },
       "Die Karte erscheint **6 Wochen vor** dem letzten Schultag laut Kalender. Reihenfolge:",
       { liste: [
@@ -585,6 +588,33 @@ const HI_THEMEN = [
           "Jahrgang 10 → Oberstufe) ist nicht angehakt – angehakt verliert das Konto die Zuständigkeit und wird Lehrkraft. " +
           "Ohne Häkchen bleibt die Zuständigkeit beim alten Jahr (z. B. für Nachträge). Die Konten werden abgemeldet; alles " +
           "steht im Kontenprotokoll. Sonderfälle: Konto → „Bearbeiten“ (Haken „für das aktuelle Schuljahr“).",
+        "Nach dem Abschluss: Punkt **„Archiv-Export …“** – er springt zur Karte „Archiv und Fristen“.",
+      ] },
+      { zwischen: "Archiv und Fristen" },
+      "Je **abgeschlossenem** Schuljahr ein Archiv-Export – die Schule bewahrt ihn selbst auf, die App speichert ihn nicht:",
+      { liste: [
+        "**„Archiv-Export … erstellen…“:** Klassenbücher (Sek I), Kurshefte (Oberstufe), Fehlzeiten je Halbjahr (CSV, alle " +
+          "Klassen und Stufen) und Inhalt.txt mit Größe und **Prüfsumme (SHA-256)** je Datei in einer Zip-Datei. " +
+          "„Schülereinträge aufnehmen“ ist absichtlich aus.",
+        "**Kennwort** zweimal, mindestens 12 Zeichen – am besten ein Satz aus mehreren Wörtern, ohne Umlaute und ß (ä → ae). " +
+          "Die Datei ist damit verschlüsselt (AES-256); öffnen mit **7-Zip**, WinZip oder WinRAR – der Windows-Explorer kann " +
+          "es nicht. Die App speichert das Kennwort nicht: **vergessen heißt, das Archiv ist wertlos.** Das Kennwort getrennt " +
+          "vom Datenträger aufbewahren (z. B. bei der Schulleitung).",
+        "Das Archiv entsteht **im Hintergrund** – das Fenster darf zu, die Karte zeigt den Stand („Fortschritt ansehen…“). " +
+          "Fertig: **„Herunterladen…“ – nur einmal**, danach ist die Datei auf dem Server gelöscht; nicht abgeholt nach 30 " +
+          "Minuten ebenfalls. Bricht der Download ab: neu erstellen. Es entsteht immer nur ein Archiv gleichzeitig.",
+        "Danach die Datei mit 7-Zip und dem Kennwort **öffnen**, Inhalt.txt lesen, sicher **aufbewahren** (dienstlicher " +
+          "Datenträger, nicht in einem Cloud-Ordner) und **„Aufbewahrung bestätigen…“**: Datei wählen (der Browser rechnet die " +
+          "Prüfsumme auf dem Gerät – nichts wird hochgeladen) bzw. die Prüfsumme aus PowerShell „Get-FileHash“ eintragen, " +
+          "Haken „geöffnet“, **Ort** (nie das Kennwort) und **„aufzubewahren bis“** (laut Löschkonzept bzw. DSB). Erst dann " +
+          "ist der Punkt grün. Ein Tippfehler bei Ort oder Datum: „Bestätigung ändern…“ mit derselben Datei.",
+        "Ein **neuer** Export ersetzt den bisherigen – dessen Bestätigung gilt dann nicht mehr. Wird das Schuljahr **wieder " +
+          "geöffnet**, gilt der Export als **veraltet**: nach dem erneuten Abschluss neu erstellen und bestätigen.",
+        "Ist „aufzubewahren bis“ erreicht, erinnert die Karte daran, dass die Schule die Datei **vernichten** darf – das " +
+          "erledigt sie selbst.",
+        "Punkt **„Fristen“:** die Löschfristen aus Einstellungen → Datenschutz mit „abgestimmt am / mit“ – gelb, solange eine " +
+          "noch nicht mit der bzw. dem Datenschutzbeauftragten abgestimmt ist. Die Klassenbuchdaten ganzer Schuljahre löscht " +
+          "die App (noch) nicht.",
       ] },
       { zwischen: "Halbjahreswechsel" },
       "Die Karte erscheint **4 Wochen vor** „2. Halbjahr ab“ (Einstellungen → Schuljahr) und bleibt bis zum Ende des " +
@@ -644,9 +674,13 @@ const HI_THEMEN = [
     id: "jahresarchiv", gruppe: "admin", titel: "Jahresarchiv",
     inhalt: [
       "„Jahresarchiv …“ (Klassenbuch → Klassen, Übersicht) erstellt für den gewählten Zeitraum je Klasse der Sek I " +
-        "ein Klassenbuch und je Oberstufenkurs ein Kursheft – als PDF-Dateien in einer Zip-Datei mit Inhaltsverzeichnis.",
-      "Das dauert einige Minuten. Lass das Fenster so lange offen; „Abbrechen“ beendet die Erstellung. Am " +
-        "zuverlässigsten am PC im Schulnetz.",
+        "ein Klassenbuch und je Oberstufenkurs ein Kursheft – als PDF-Dateien in einer Zip-Datei mit Inhaltsverzeichnis " +
+        "(mit Prüfsumme je Datei). Für ein ganzes abgeschlossenes Schuljahr gibt es den **Archiv-Export** im Jahresablauf.",
+      "Die Datei ist mit einem **Kennwort** verschlüsselt (mindestens 12 Zeichen, ohne Umlaute und ß; zweimal eingeben). " +
+        "Öffnen mit 7-Zip, WinZip oder WinRAR – der Windows-Explorer kann es nicht. Die App speichert das Kennwort nicht.",
+      "Das Archiv entsteht im Hintergrund – das Fenster darf zu; „Jahresarchiv …“ zeigt den Stand wieder. Fertig: " +
+        "„Herunterladen“ – **nur einmal**, danach (bzw. nach 30 Minuten) ist die Datei auf dem Server gelöscht. Es entsteht " +
+        "immer nur ein Archiv gleichzeitig.",
       "„Schülereinträge aufnehmen“ ist absichtlich aus – schalte es nur ein, wenn du sie wirklich brauchst.",
       "Die Datei enthält Schülerdaten aller Klassen: nur auf dienstlich freigegebenen Geräten speichern. Der " +
         "Download wird protokolliert.",
@@ -730,7 +764,7 @@ function hiKontext() {
   if (hiSichtbar("pflicht")) return { themen: ["konto", "anmelden"] };
   if (hiSichtbar("faktorPflicht")) return { themen: ["zweiterFaktor", "konto"] };   // P6a
   if (hiSichtbar("einstellungen")) return { themen: ["einstellungen", "zugriffe", "konten", "zweiterFaktor", "downloads"] };   // P3, P6a, P6b
-  if (hiSichtbar("jahresablauf")) return { themen: ["jahresablauf", "rueckweg", "einstellungen", "schildImporte"] };   // P4a/P4b
+  if (hiSichtbar("jahresablauf")) return { themen: ["jahresablauf", "rueckweg", "jahresarchiv", "einstellungen", "schildImporte"] };   // P4a/P4b, P5c-1
   if (hiSichtbar("verwaltung")) {
     if (r.admin && verw.reiter === "downloads") return { themen: ["downloads", "konten"] };
     if (r.admin && verw.reiter === "zugriffe") return { themen: ["zugriffe", "einstellungen", "auskunft", "konten"] };   // P6a, P6b

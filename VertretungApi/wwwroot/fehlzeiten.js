@@ -40,7 +40,7 @@
 //  Das PDF wird nur im Arbeitsspeicher gehalten und als Datei angeboten.
 //  Phase 4.3 (Entscheidungen 48–50, 60–65): „Fehlzeiten als CSV …" (Klasse/
 //  Stufe, Übersicht – KL/SK zuständig, Admin; Admin wahlweise alle Klassen)
-//  mit Vorabprüfung (offene/nicht erfasste Stunden) und „Jahresarchiv …"
+//  mit Vorabprüfung (offene/nicht erfasste Stunden) und „Jahresarchiv …" (seit P5c-1 mit Kennwort, im Hintergrund: archiv.js)
 //  (nur Admin; Zip mit allen Klassenbüchern und Kursheften, Abbruch möglich).
 //  Wie beim PDF: nur herunterladen, nichts im Browser-Speicher.
 //
@@ -88,10 +88,7 @@ const fz = {
   csv: null,         // im CSV-Dialog: { klasse }
   csvLaeuft: false,
   csvNr: 0,
-  archivLaeuft: false,
-  archivNr: 0,
-  archivAbbruch: null,   // AbortController des laufenden Archivs
-  archivUhr: null,       // Zeitanzeige „seit m:ss"
+  // P5c-1: Das Jahresarchiv entsteht im Hintergrund – Dialog und Stand in archiv.js (axDialog)
 };
 
 const fehlzeitenOffen = () => !el("fehlzeiten").hidden;
@@ -206,12 +203,12 @@ function fehlzeitenLeeren() {
   el("pdUmfang").replaceChildren();
   for (const id of ["pdWas", "pdZeitraum", "pdStatus"]) el(id).textContent = "";
   dialogZu(el("fzPdfDialog"));
-  // Phase 4.3: CSV- und Archiv-Dialog schließen (ein laufendes Archiv wird dabei abgebrochen)
+  // Phase 4.3: CSV-Dialog schließen; P5c-1: der Archiv-Dialog (ein Archiv im Hintergrund läuft auf dem Server weiter)
   fz.csv = null;
   fz.csvNr++;
   dialogZu(el("fzCsvDialog"));
-  dialogZu(el("fzArchivDialog"));
-  for (const id of ["csWas", "csZeitraum", "csPruefung", "arZeitraum", "arStatus"]) el(id).textContent = "";
+  if (el("axDialog").open) axZu();
+  for (const id of ["csWas", "csZeitraum", "csPruefung"]) el(id).textContent = "";
   el("csWarnung").replaceChildren();
   for (const id of ["fzReiter", "fzNeWahl", "fzNeArt", "fzNeLehrer", "fzNeKlasse", "fzNeListe", "fzKurseListe", "fzKlasseWahl",
     "fzListeZeilen", "fzSumme", "fzEntsch", "fzFaecher", "fzEintraege", "fzSInfo", "fzTListe",
@@ -813,79 +810,21 @@ async function fzCsvLaden() {
   }
 }
 
-// ---- Jahresarchiv ----
+// ---- Jahresarchiv (P5c-1, 273: mit Kennwort verschlüsselt, im Hintergrund – Dialog in archiv.js) ----
 
 function fzArchivOeffnen() {
   if (!fzArchivMoeglich(fzOben())) return;
-  fz.archivNr++;
   const zr = fzZeitraumHinweis();
-  el("arZeitraum").textContent = zr.text;
-  el("arSchueler").checked = false;   // wie beim PDF: Standard aus
-  el("arErstellen").disabled = zr.zukunft;
-  el("arErstellen").textContent = "Archiv erstellen";
-  el("arAbbrechen").textContent = "Abbrechen";
-  el("arStatus").textContent = "";
-  fehlerIn("arFehler", "");
-  dialogAuf(el("fzArchivDialog"));
-  el(zr.zukunft ? "arAbbrechen" : "arErstellen").focus();
-}
-
-function fzArchivUhrStopp() {
-  if (fz.archivUhr) clearInterval(fz.archivUhr);
-  fz.archivUhr = null;
-}
-
-async function fzArchivErstellen() {
-  if (fz.archivLaeuft) return;
-  const nr = ++fz.archivNr;
-  const url = fzMitZr(`api/berichte/archiv?schuelerEintraege=${el("arSchueler").checked}`);
-  const abbruch = new AbortController();
-  fz.archivAbbruch = abbruch;
-  fz.archivLaeuft = true;
-  el("arErstellen").disabled = true;
-  el("arErstellen").textContent = "Archiv wird erstellt …";
-  el("arSchueler").disabled = true;
-  fehlerIn("arFehler", "");
-  // Entscheidung 64: in einem Durchgang, bis zu 15 Minuten.
-  const start = Date.now();
-  const zeige = () => {
-    const s = Math.floor((Date.now() - start) / 1000);
-    el("arStatus").textContent = `Das kann einige Minuten dauern – lass dieses Fenster so lange offen. (${Math.floor(s / 60)}:${pad(s % 60)})`;
-  };
-  zeige();
-  fz.archivUhr = setInterval(zeige, 1000);
-  let zuLange = false;
-  const timer = setTimeout(() => { zuLange = true; abbruch.abort(); }, 15 * 60000);
-  try {
-    const name = await fzDateiLaden(url, "Klassenbuch-Archiv.zip", abbruch);
-    if (nr !== fz.archivNr) return;
-    fz.archivLaeuft = false;
-    dialogZu(el("fzArchivDialog"));
-    toast(`Archiv gespeichert: ${name}`);
-  } catch (f) {
-    if (nr !== fz.archivNr) return;
-    const t = abbruch.signal.aborted
-      ? (zuLange ? "Nach 15 Minuten abgebrochen – bitte einen kürzeren Zeitraum wählen." : "Abgebrochen.")
-      : aktionsFehler(f);
-    if (t !== null) fehlerIn("arFehler", t);
-  } finally {
-    clearTimeout(timer);
-    if (fz.archivAbbruch === abbruch) fz.archivAbbruch = null;
-    if (nr === fz.archivNr) {
-      fz.archivLaeuft = false;
-      fzArchivUhrStopp();
-      el("arStatus").textContent = "";
-      el("arSchueler").disabled = false;
-      el("arErstellen").disabled = fzZeitraumHinweis().zukunft;
-      el("arErstellen").textContent = "Archiv erstellen";
-    }
-  }
-}
-
-/** Abbrechen: läuft das Archiv, wird nur die Anfrage beendet (Dialog bleibt offen), sonst schließen. */
-function fzArchivAbbrechen() {
-  if (fz.archivLaeuft && fz.archivAbbruch) { fz.archivAbbruch.abort(); return; }
-  dialogZu(el("fzArchivDialog"));
+  axOeffnen({
+    art: "jahresarchiv",
+    von: fz.zr ? fz.zr.von : null,
+    bis: fz.zr ? fz.zr.bis : null,
+    titel: "Jahresarchiv",
+    was: "Alle Klassenbücher und Kurshefte",
+    text: "Je Klasse (Sek I) ein Klassenbuch und je Oberstufenkurs ein Kursheft als PDF – zusammen in einer verschlüsselten " +
+      "Zip-Datei mit Inhaltsverzeichnis. " + zr.text,
+    gesperrt: zr.zukunft,
+  });
 }
 
 // ---------------------------------------------------------------------
@@ -1550,15 +1489,5 @@ function fehlzeitenInit() {
   hintergrundSchliesst(el("fzCsvDialog"), () => { if (!fz.csvLaeuft) dialogZu(el("fzCsvDialog")); });
 
   el("fzArchivKnopf").addEventListener("click", fzArchivOeffnen);
-  el("arErstellen").addEventListener("click", fzArchivErstellen);
-  el("arAbbrechen").addEventListener("click", fzArchivAbbrechen);
-  // Esc während der Erstellung schließt nicht (sonst liefe das Archiv unsichtbar weiter) – dafür „Abbrechen".
-  el("fzArchivDialog").addEventListener("cancel", (e) => { if (fz.archivLaeuft) e.preventDefault(); });
-  el("fzArchivDialog").addEventListener("close", () => {
-    if (fz.archivAbbruch) fz.archivAbbruch.abort();
-    fz.archivNr++; fz.archivLaeuft = false; fzArchivUhrStopp();
-    el("arStatus").textContent = ""; el("arSchueler").disabled = false;
-  });
-  hintergrundSchliesst(el("fzArchivDialog"), () => { if (!fz.archivLaeuft) dialogZu(el("fzArchivDialog")); });
   hintergrundSchliesst(el("fzEntschDialog"), () => dialogZu(el("fzEntschDialog")));
 }

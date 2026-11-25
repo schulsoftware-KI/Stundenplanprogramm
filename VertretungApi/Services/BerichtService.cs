@@ -157,15 +157,16 @@ public static class BerichtService
     /// <summary>
     /// Klassenbuch einer Klasse (Sek I) bzw. Stufe (Sek II). Rechte prüft der Aufrufer.
     /// <paramref name="tage"/>: schon berechnete Plantage (Phase 4.3, Jahresarchiv) – sonst werden sie geladen.
+    /// <paramref name="schuljahr"/>: P5c-1 (Archiv-Export) – Schülerliste nur aus Klassen dieses Schuljahres.
     /// </summary>
     public static async Task<Bericht> KlassenbuchAsync(
         AppDbContext db, KbNutzer u, string klasse, DateOnly von, DateOnly bis, bool schuelerEintraege,
-        IReadOnlyList<TagKontext>? tage = null)
+        IReadOnlyList<TagKontext>? tage = null, string? schuljahr = null)
     {
         string k = klasse.Trim().ToUpperInvariant();
         var filter = new List<string> { k };
         var bisEff = BisHoechstensHeute(bis);
-        var fehlzeiten = await FehlzeitenService.KlasseAsync(db, k, von, bisEff);
+        var fehlzeiten = await FehlzeitenService.KlasseAsync(db, k, von, bisEff, schuljahr);
 
         var kopf = new BerichtKopf("Klassenbuch", fehlzeiten.Titel, null, await SchuljahrAsync(db, von),
             von, bisEff, u.Name, DateTime.Now, false);

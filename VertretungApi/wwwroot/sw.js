@@ -6,7 +6,7 @@
 //    Anfragen mit Anmeldung (Authorization) landen nie im Cache.
 //  Neue Version = neuer Cache-Name; alte Caches werden beim Aktivieren gelöscht.
 
-const CACHE = "stundenplan-shell-v27";   // P5b-2 (Zuständigkeiten übernehmen)
+const CACHE = "stundenplan-shell-v28";   // P5c-1 (Archiv-Export, Aufbewahrung, Meldungskasten)
 const SHELL = [
   "./",
   "index.html",
@@ -19,6 +19,7 @@ const SHELL = [
   "eintraege.js",
   "einstellungen.js",
   "jahresablauf.js",   // P4a
+  "archiv.js",         // P5c-1
   "zweiterfaktor.js",  // P6a
   "zugriffe.js",       // P6a
   "hilfe.js",

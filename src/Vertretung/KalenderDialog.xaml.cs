@@ -358,15 +358,23 @@ namespace Stundenplan_V2.Vertretung
             catch { dateien = Array.Empty<string>(); }
             var menue = new ContextMenu { PlacementTarget = BtnSchuljahrOeffnen };
             if (dateien.Length == 0)
-                menue.Items.Add(new MenuItem { Header = "(keine Datei Vertretung_*.xlsx neben der Plandatei)", IsEnabled = false });
+                menue.Items.Add(new MenuItem
+                {
+                    Header = new TextBlock { Text = "(keine Datei Vertretung_*.xlsx neben der Plandatei)" },
+                    IsEnabled = false
+                });
             string? juengste = FindeVorhandeneDatei();
             foreach (var f in dateien)
             {
                 string datei = f;
+                // P5c-1 (N2): Text als TextBlock – sonst liest WPF den ersten „_“ des Dateinamens als Zugriffstaste.
                 var mi = new MenuItem
                 {
-                    Header = $"{JahrAusDatei(datei)}  ({Path.GetFileName(datei)}" +
-                             (GleicherPfad(datei, juengste) ? ", damit arbeiten Wocheneditor und „Vertretung erfassen“" : "") + ")",
+                    Header = new TextBlock
+                    {
+                        Text = $"{JahrAusDatei(datei)}  ({Path.GetFileName(datei)}" +
+                               (GleicherPfad(datei, juengste) ? ", damit arbeiten Wocheneditor und „Vertretung erfassen“" : "") + ")"
+                    },
                     IsCheckable = false,
                     IsChecked = GleicherPfad(datei, _geladenPfad)
                 };

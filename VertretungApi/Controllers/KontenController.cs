@@ -217,7 +217,8 @@ public class KontenController : ControllerBase
         if (!RolleLesen(dto.Rolle, out var rolle)) return BadRequest(new { fehler = "Unbekannte Rolle.", feld = "rolle" });
 
         var u = new Benutzer { AngelegtAm = DateTime.UtcNow, MussPasswortAendern = true };
-        var fehler = await ZuordnungSetzen(u, rolle, dto.LehrerKuerzel, dto.SchuelerId, dto.Zustaendig, null, false);
+        var fehler = await ZuordnungSetzen(u, rolle, dto.LehrerKuerzel, dto.SchuelerId, dto.Zustaendig, null, false,
+            dto.ZustaendigTrotzdem);
         if (fehler != null) return fehler;
 
         var name = (dto.Benutzername ?? "").Trim();
@@ -277,7 +278,7 @@ public class KontenController : ControllerBase
         var alterName = u.Benutzername;
 
         var fehler = await ZuordnungSetzen(u, rolle, dto.LehrerKuerzel, dto.SchuelerId, dto.Zustaendig, u.Id,
-            dto.ZustaendigAktuellesSchuljahr);
+            dto.ZustaendigAktuellesSchuljahr, dto.ZustaendigTrotzdem);
         if (fehler != null) return fehler;
 
         var name = (dto.Benutzername ?? "").Trim();
@@ -884,9 +885,12 @@ public class KontenController : ControllerBase
     /// Liefert eine Fehlerantwort oder null. ausser = eigene Konto-Id beim Ändern.
     /// P5a (219): Eine neue bzw. geänderte Zuständigkeit gilt für das aktuelle Schuljahr; eine unveränderte behält ihr Schuljahr –
     /// außer mit <paramref name="fuerAktuellesJahr"/> (Haken „für das aktuelle Schuljahr übernehmen“ beim Ändern).
+    /// P5c-1 (N3): einstellige Jahrgänge bekommen die führende Null („7D“ → „07D“; zählt nicht als Änderung des Schuljahres);
+    /// eine neue bzw. geänderte Zuständigkeit wird gegen die Klassen und Stufen ihres Schuljahres geprüft – unbekannt →
+    /// 409 mit „rueckfrage“ (keine Sperre), gespeichert erst mit <paramref name="trotzdem"/>.
     /// </summary>
     private async Task<IActionResult?> ZuordnungSetzen(Benutzer u, BenutzerRolle rolle, string? kuerzel,
-        int? schuelerId, string? zustaendig, int? ausser, bool fuerAktuellesJahr)
+        int? schuelerId, string? zustaendig, int? ausser, bool fuerAktuellesJahr, bool trotzdem = false)
     {
         if (rolle == BenutzerRolle.Schueler)
         {
@@ -916,7 +920,7 @@ public class KontenController : ControllerBase
 
             if (rolle is BenutzerRolle.Klassenlehrer or BenutzerRolle.Stufenkoordination)
             {
-                var z = KontenService.ZustaendigText(zustaendig);
+                var z = KontenService.ZustaendigNormalisieren(zustaendig);   // P5c-1 (N3)
                 if (z == null)
                     return BadRequest(new
                     {
@@ -925,10 +929,25 @@ public class KontenController : ControllerBase
                             : "Bitte die Stufe angeben (z. B. Q1).",
                         feld = "zustaendig"
                     });
-                bool neu = !string.Equals(u.Zustaendig, z, StringComparison.Ordinal)
+                bool neu = !string.Equals(KontenService.ZustaendigNormalisieren(u.Zustaendig), z, StringComparison.Ordinal)
                            || string.IsNullOrWhiteSpace(u.ZustaendigSchuljahr) || fuerAktuellesJahr;
+                string aktuell = await _einst.AktuellesSchuljahrAsync(_db);
+                string sjZiel = neu || string.IsNullOrWhiteSpace(u.ZustaendigSchuljahr) ? aktuell : u.ZustaendigSchuljahr!;
+                if (!trotzdem && (neu || !string.Equals(u.Zustaendig, z, StringComparison.Ordinal)))
+                {
+                    var bekannt = (await KontenService.BekannteGruppenAsync(_db, new[] { sjZiel }))[sjZiel];
+                    var unbekannt = KontenService.Unbekannt(z, bekannt);
+                    if (unbekannt.Count > 0)
+                        return Conflict(new
+                        {
+                            fehler = KontenService.UnbekanntText(unbekannt, sjZiel, bekannt.Count == 0, rolle),
+                            feld = "zustaendig",
+                            rueckfrage = true,
+                            unbekannt
+                        });
+                }
                 u.Zustaendig = z;
-                if (neu) u.ZustaendigSchuljahr = await _einst.AktuellesSchuljahrAsync(_db);
+                if (neu) u.ZustaendigSchuljahr = aktuell;
             }
             else
             {
@@ -963,6 +982,17 @@ public class KontenController : ControllerBase
         var pflichten = await _einst.FaktorPflichtAsync(_db);
         bool produktiv = Betrieb.Produktiv(_env);
         string aktuellesJahr = await _einst.AktuellesSchuljahrAsync(_db);   // P5a (219)
+        // P5c-1 (N3): Klassen und Stufen der Schuljahre, für die die Konten zuständig sind
+        string JahrDer(Benutzer b) => string.IsNullOrWhiteSpace(b.ZustaendigSchuljahr) ? aktuellesJahr : b.ZustaendigSchuljahr;
+        var gruppen = await KontenService.BekannteGruppenAsync(_db,
+            konten.Where(k => !string.IsNullOrWhiteSpace(k.Zustaendig)).Select(JahrDer));
+        IReadOnlyList<string>? UnbekanntBei(Benutzer b)
+        {
+            if (string.IsNullOrWhiteSpace(b.Zustaendig) || !gruppen.TryGetValue(JahrDer(b), out var bekannt) || bekannt.Count == 0)
+                return null;
+            var l = KontenService.Unbekannt(b.Zustaendig, bekannt);
+            return l.Count > 0 ? l : null;
+        }
         return konten.Select(u =>
         {
             (string Name, string? Klasse, string Stufe)? s =
@@ -986,7 +1016,8 @@ public class KontenController : ControllerBase
                 FaktorFehlt: !ZweiterFaktor.Aktiv(u) && ZweiterFaktor.Pflicht(u.Rolle, pflichten, produktiv),
                 ZustaendigSchuljahr: string.IsNullOrWhiteSpace(u.Zustaendig) ? null : u.ZustaendigSchuljahr,
                 ZustaendigAnderesJahr: !string.IsNullOrWhiteSpace(u.Zustaendig) && !ImJahr(u, aktuellesJahr),
-                AktuellesSchuljahr: aktuellesJahr);
+                AktuellesSchuljahr: aktuellesJahr,
+                ZustaendigUnbekannt: UnbekanntBei(u));
         }).ToList();
     }
 

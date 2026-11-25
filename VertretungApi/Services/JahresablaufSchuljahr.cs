@@ -22,6 +22,8 @@ namespace VertretungApi.Services;
 //  für das 2. Halbjahr · 5. Jahresabschluss (Knopf „abschließen…“ bzw. „Wieder öffnen…“) · 6. neues Schuljahr vorbereiten
 //  (Knopf) · 7. seit P5b-1 Jahreswechsel-Import aus SchILD (erster Import des neuen Jahres, aus dem Importprotokoll) ·
 //  8. Zuständigkeiten (seit P5b-2 mit Knopf „Zuständigkeiten für … übernehmen…“ und Ampel – JahresablaufZustaendigkeit.cs) ·
+//  P5c-1: nach „Jahresabschluss“ der Punkt „Archiv-Export …“ mit Sprung zur Karte „Archiv und Fristen“ (beim abgeschlossenen
+//  Vorjahr bei den weiteren Punkten, solange sein Archiv-Export nicht grün ist) ·
 //  dazu weitere abgeschlossene Schuljahre (Knopf „Wieder öffnen…“); ist das Vorjahr schon abgeschlossen und noch ein Konto
 //  nur dafür zuständig, steht der Punkt „Zuständigkeiten“ für den Wechsel ins aktuelle Schuljahr bei diesen.
 //  1.–4. sind die Vorprüfung (215): nur Warnungen, keine Sperre.
@@ -142,13 +144,19 @@ public static partial class Jahresablauf
         if (vorjahrAkt != w.Schuljahr && zu.Contains(vorjahrAkt)
             && await ZustaendigkeitPunktAsync(db, w, vorjahrAkt, w.Schuljahr, nurWennOffen: true) is JaPunktDto zv)
             weiterePunkte.Add(zv);
+        // P5c-1 (271): Vorjahr abgeschlossen, sein Archiv-Export noch nicht erledigt → Punkt mit Sprung zu „Archiv und Fristen“
+        if (vorjahrAkt != w.Schuljahr && vorjahrAkt != jahr && zu.Contains(vorjahrAkt)
+            && zeilen.FirstOrDefault(x => x.Schuljahr == vorjahrAkt) is SchuljahrDb zeileVorjahr
+            && ArchivSprungPunkt(zeileVorjahr, heute) is { Ampel: not Gruen } sprungVorjahr)
+            weiterePunkte.Add(sprungVorjahr);
         if (weitere.Count > 0)
             weiterePunkte.Add(new JaPunktDto("abgeschlossen", "Abgeschlossene Schuljahre", Grau,
                 "Nur lesbar und nur für die Verwaltung sichtbar (Klassenbuch, PDF, Archiv).",
                 weitere.Take(MaxListe).Select(z => $"{z.Schuljahr}: abgeschlossen {Zeitpunkt(z.AbgeschlossenAm, z.AbgeschlossenVon)}")
                     .ToList(),
                 Aktionen: weitere.Take(MaxListe)
-                    .Select(z => new JaAktionDto("oeffnen", $"{z.Schuljahr} wieder öffnen…", z.Schuljahr)).ToList()));
+                    .Select(z => new JaAktionDto("oeffnen", $"{z.Schuljahr} wieder öffnen…", z.Schuljahr,
+                        Hinweis: ArchivHinweisOeffnen(z))).ToList()));
 
         if (kal == null && !abgeschlossen)
             return new JaKarteDto("schuljahr", titel, Grau,
@@ -170,6 +178,7 @@ public static partial class Jahresablauf
         if (!abgeschlossen && kal != null)
             punkte.AddRange(await VorpruefungAsync(db, w, jahr, kal, zeile, heute, akteur));
         punkte.Add(AbschlussPunkt(jahr, kal, zeile, abgeschlossen, heute));
+        if (abgeschlossen && zeile != null) punkte.Add(ArchivSprungPunkt(zeile, heute));   // P5c-1 (271)
         punkte.Add(await NeuesJahrPunktAsync(db, w, stand, kalender, zeilen, kal, heute));
         punkte.Add(await JahreswechselImportPunktAsync(db, stand.NeuesJahr, !produktiv));   // P5b-1 (218, 246)
         punkte.Add((await ZustaendigkeitPunktAsync(db, w, jahr, stand.NeuesJahr))!);   // P5b-2 (249)
@@ -289,7 +298,7 @@ public static partial class Jahresablauf
                 $"Abgeschlossen {Zeitpunkt(zeile?.AbgeschlossenAm, zeile?.AbgeschlossenVon)}. Das Klassenbuch des Schuljahres ist nur " +
                 "noch lesbar und nur für die Verwaltung sichtbar (lesen, PDF, Archiv); Vertretungen, Grundpläne und SchILD-Importe " +
                 "für das Jahr nimmt die API nicht mehr an. Für Nachträge: wieder öffnen (mit Begründung, protokolliert).",
-                Aktionen: new[] { new JaAktionDto("oeffnen", "Wieder öffnen…", jahr) });
+                Aktionen: new[] { new JaAktionDto("oeffnen", "Wieder öffnen…", jahr, Hinweis: ArchivHinweisOeffnen(zeile)) });
         string geoeffnet = zeile?.GeoeffnetAm != null
             ? $" Zuletzt wieder geöffnet {Zeitpunkt(zeile.GeoeffnetAm, zeile.GeoeffnetVon)} („{zeile.GeoeffnetGrund}“)."
             : "";
@@ -530,15 +539,20 @@ public static partial class Jahresablauf
         if (zeile.GeloeschtAm != null)
             return new AktionErgebnis(409, Fehler: $"Die Daten des Schuljahres {jahr} sind gelöscht – es lässt sich nicht wieder öffnen.");
 
+        // P5c-1 (265): ein vorhandener Archiv-Export gilt danach als veraltet (ArchivAm < GeoeffnetAm)
+        bool mitExport = zeile.ArchivAm != null;
         zeile.Status = SchuljahrStatus.Laufend;
         zeile.GeoeffnetAm = DateTime.UtcNow;
         zeile.GeoeffnetVon = akteur;
         zeile.GeoeffnetGrund = grund;
-        Protokoll(db, akteur, $"Schuljahr {jahr} wieder geöffnet", $"Begründung: {grund}");
+        Protokoll(db, akteur, $"Schuljahr {jahr} wieder geöffnet", $"Begründung: {grund}" +
+            (mitExport ? $"; der Archiv-Export {Zeitpunkt(zeile.ArchivAm, zeile.ArchivVon)} gilt jetzt als veraltet" : ""));
         await db.SaveChangesAsync();
         log.LogInformation("Jahresablauf: Schuljahr {Schuljahr} wieder geöffnet von {Akteur}.", jahr, akteur);
         return new AktionErgebnis(200, Meldung: $"Schuljahr {jahr} wieder geöffnet – Lehrkräfte können wieder nachtragen. Danach " +
-                                                "erneut abschließen.");
+                                                "erneut abschließen." +
+                                                (mitExport ? " Der bisherige Archiv-Export gilt jetzt als veraltet – nach dem " +
+                                                             "Abschluss bitte neu erstellen." : ""));
     }
 
     /// <summary>„Neues Schuljahr vorbereiten“ (217); <paramref name="eingabe"/> = das neue Schuljahr.</summary>

@@ -22,7 +22,8 @@ namespace VertretungApi.Services;
 //  P4b (210–213): Karte „Rückweg nach SchILD“ (immer sichtbar, Hinweis): Abholcode erzeugen (Knopf öffnet den Dialog in
 //  der App), bisherige Übertragungen im Schuljahr.
 //  P5a (215–217, 239–242): Karte „Schuljahreswechsel“ mit Jahresabschluss, Wiedereröffnen und „Neues Schuljahr
-//  vorbereiten“ – Services/JahresablaufSchuljahr.cs. P5c ergänzt „Archiv und Fristen“.
+//  vorbereiten“ – Services/JahresablaufSchuljahr.cs. P5c-1: Karte „Archiv und Fristen“ (Archiv-Export, Bestätigung,
+//  Fristen) – Services/JahresablaufArchiv.cs; sie steht unter „Schuljahreswechsel“ (bzw. darüber, wenn dort nichts dran ist).
 //
 //  „Heute“ = Heute der API (Testdatum, 221). Keine Namen – nur Zahlen, Daten und Bezeichnungen.
 // =====================================================================
@@ -44,7 +45,9 @@ public static partial class Jahresablauf
     private static string D(DateOnly d) => d.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture);
     private static string Tag(DateOnly d) => $"{Wochentage[(int)d.DayOfWeek]}, {D(d)}";
 
-    public static async Task<JaUebersichtDto> UebersichtAsync(AppDbContext db, SchulWerte w, bool produktiv, string akteur)
+    /// <param name="auftrag">P5c-1: Archiv im Hintergrund (für die Karte „Archiv und Fristen“), null = keiner.</param>
+    public static async Task<JaUebersichtDto> UebersichtAsync(AppDbContext db, SchulWerte w, bool produktiv, string akteur,
+        JaArchivAuftragDto? auftrag = null)
     {
         var heute = KlassenbuchService.Heute();
         var kal = await db.Kalender.AsNoTracking().FirstOrDefaultAsync(k => k.Schuljahr == w.Schuljahr);
@@ -54,10 +57,23 @@ public static partial class Jahresablauf
             await RueckwegKarteAsync(db, w, kal)
         };
         // P5a: Karte „Schuljahreswechsel“ – oben, solange sie dran ist, sonst unten.
+        // P5c-1: „Archiv und Fristen“ darunter (aktiv) bzw. darüber (Schuljahreswechsel noch nicht dran); ohne
+        // abgeschlossenes Schuljahr ganz unten.
         var schuljahr = await SchuljahrKarteAsync(db, w, heute, produktiv, akteur);
-        if (schuljahr.Aktiv) karten.Insert(0, schuljahr);
-        else karten.Add(schuljahr);
-        return new JaUebersichtDto(heute, Testdatum.Wert != null, w.Schuljahr, kal?.Start, kal?.Ende, karten);
+        var (archiv, jahre) = await ArchivKarteAsync(db, heute, auftrag);
+        if (schuljahr.Aktiv)
+        {
+            karten.Insert(0, schuljahr);
+            if (archiv.Aktiv) karten.Insert(1, archiv);
+            else karten.Add(archiv);
+        }
+        else
+        {
+            if (archiv.Aktiv) karten.Add(archiv);
+            karten.Add(schuljahr);
+            if (!archiv.Aktiv) karten.Add(archiv);
+        }
+        return new JaUebersichtDto(heute, Testdatum.Wert != null, w.Schuljahr, kal?.Start, kal?.Ende, karten, jahre, auftrag);
     }
 
     /// <summary>Schlechteste Ampel: rot vor gelb vor grün; nur graue Punkte = grau.</summary>

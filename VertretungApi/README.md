@@ -501,7 +501,7 @@ Download-Protokoll ist Text; neue Werte `FehlzeitenCsv` und `Archiv`). Code: `Se
 |---|---|---|---|
 | GET | `/api/berichte/fehlzeiten-csv/pruefen?klasse=05A&von=&bis=` (bzw. `alle=true`) | Vorab: offene Fehlstunden/Verspätungen, nicht erfasste Stunden | KL/SK zuständig, Admin (`alle` nur Admin) |
 | GET | `/api/berichte/fehlzeiten-csv?klasse=05A&von=&bis=` (bzw. `alle=true`) | Fehlzeiten als CSV | KL/SK zuständig, Admin (`alle` nur Admin) |
-| GET | `/api/berichte/archiv?von=&bis=&schuelerEintraege=` | Jahresarchiv als Zip | Admin |
+| POST | `/api/berichte/archiv` `{ von, bis, schuelerEintraege, kennwort, kennwortWiederholung }` | Jahresarchiv als verschlüsselte Zip – seit P5c-1 im Hintergrund (Stand/Datei: `api/jahresablauf/archiv/auftrag` bzw. `…/datei`) | Admin |
 | GET | `/api/berichte/protokoll?limit=&art=&akteur=` | Download-Protokoll, Filter nach Art und Person | Admin |
 
 - **CSV:** Semikolon, UTF-8 mit BOM, Formelschutz (wie die Zugangszettel). Spalten `SchILD-Id; Name; Vorname;
@@ -520,8 +520,8 @@ Download-Protokoll ist Text; neue Werte `FehlzeitenCsv` und `Archiv`). Code: `Se
 - **Protokoll:** jeder CSV-/Archiv-Download wie die PDFs (wer, wann, was, Zeitraum – ohne Inhalt).
   `Berichte:NurAdmin = true` sperrt auch den CSV-Export für alle außer der Verwaltung.
 
-> Über den Cloudflare-Quick-Tunnel kann eine lange Anfrage nach etwa 100 Sekunden abbrechen (Fehler 524).
-> Das Jahresarchiv für ein ganzes Halbjahr deshalb am PC über `http://localhost:5080` erstellen.
+> Seit P5c-1 ist das Jahresarchiv mit WinZip-AES-256 verschlüsselt (Kennwort des Admins) und entsteht im Hintergrund –
+> eine lange Anfrage gibt es nicht mehr (siehe „Archiv-Export und Aufbewahrung“).
 
 In der PWA: Knöpfe „Fehlzeiten als CSV …“ (Klasse/Stufe, Übersicht; Admin wahlweise alle Klassen) und
 „Jahresarchiv …“ (Admin) neben „Klassenbuch als PDF …“; Reiter „Downloads“ in „Konten verwalten“ (Admin).
@@ -1196,6 +1196,55 @@ stehen seit P5a in `Schuljahre`). API: `Services/JahresablaufZustaendigkeit.cs` 
   und „Vertretung erfassen“ lesen sie; ohne sie die jüngste Datei); erster/letzter Schultag außerhalb des Schuljahres → kein
   Import, Rückfrage beim Speichern; Sperre „ohne Folgeklasse“ hat die eigene Art `OhneFolgeklasse` mit eigenem „Was tun?“;
   Kästchen „Bestätigen“ im Reiter „Import“ mit einem Klick.
+
+## Archiv-Export und Aufbewahrung (P5c-1, 5.3b)
+
+Entscheidungen 259–265, 271–273 (`claude/P5c_Vorschlag.md` §3–§5, §7). **Keine Migration** (die Spalten `Archiv…`,
+`Aufbewahrt…`, `AufbewahrenBis` stehen seit P5a in `Schuljahre`). API: `Services/AesZip.cs`, `Services/ArchivAuftraege.cs`,
+`Services/JahresablaufArchiv.cs` (neu), `Services/ExportService.cs`, `Services/FehlzeitenService.cs`,
+`Services/BerichtService.cs`, `Services/Jahresablauf*.cs`, `Controllers/JahresablaufController.cs`,
+`Controllers/BerichteController.cs`, `Program.cs`; PWA: `archiv.js` (neu), `jahresablauf.js`, `fehlzeiten.js`, `konten.js`,
+`index.html`, `style.css`, `hilfe.js`, `sw.js` (Cache v28).
+
+| Methode | Pfad | Zweck |
+|---|---|---|
+| POST | `api/jahresablauf/archiv` `{ schuljahr, schuelerEintraege, kennwort, kennwortWiederholung }` | Archiv-Export eines abgeschlossenen Schuljahres starten |
+| GET | `api/jahresablauf/archiv/auftrag` | Stand (Fortschritt, fertig, Fehler) – gemeinsam für Archiv-Export und Jahresarchiv |
+| DELETE | `api/jahresablauf/archiv/auftrag` | eigenen Auftrag abbrechen bzw. die fertige Datei verwerfen |
+| GET | `api/jahresablauf/archiv/datei` | die fertige Zip-Datei **einmal** (danach gelöscht), protokolliert |
+| POST | `api/jahresablauf/archiv/bestaetigen` `{ schuljahr, pruefsumme, geoeffnet, ort, aufbewahrenBis }` | „geprüft und aufbewahrt“ |
+
+Alle nur Admin. Ohne Namen von Schülern in Antworten, Protokoll und Log.
+
+- **Verschlüsselung:** WinZip-AES-256 (AE-2) je Datei – Deflate, Salz 16 Byte, PBKDF2-HMAC-SHA1 mit 1000 Runden (vom Format
+  festgelegt), AES-256-CTR (Zähler little-endian ab 1), 10 Byte HMAC-SHA1, Extra-Feld `0x9901`, CRC 0. Selbst gebaut mit
+  `System.Security.Cryptography` (kein Zusatzpaket). Öffnen mit 7-Zip, WinZip, WinRAR – nicht mit dem Windows-Explorer.
+  Dateinamen bleiben sichtbar (keine Schülernamen). Kein Zip64: über 4 GB bzw. 65 534 Dateien bricht der Export ab.
+- **Kennwort:** 12–128 Zeichen, nur Zeichen der Tastatur ohne Umlaute (ASCII 32–126), ohne Leerzeichen am Anfang/Ende –
+  so lesen alle Programme es gleich. Es kommt einmal im Körper der POST-Anfrage und liegt nur im Arbeitsspeicher, solange die
+  Datei entsteht; nie in Datenbank, Protokoll oder Log.
+- **Im Hintergrund:** höchstens ein Auftrag je Server; die Temp-Datei (`%TEMP%\vertretung-archiv-<id>.zip`, schon
+  verschlüsselt) wird nach dem Download gelöscht, spätestens 30 Minuten nach dem Fertigwerden, beim Verwerfen und beim
+  nächsten Start der API. Abholen und Verwerfen nur durch die Person, die gestartet hat.
+- **Inhalt des Archiv-Exports:** `Klassen/…pdf`, `Kurse/<Stufe>/…pdf` (Zeitraum = Kalender des Jahres; Klassen dieses
+  Schuljahres), `Fehlzeiten/Fehlzeiten_<Jahr>_1-Halbjahr.csv` und `…_2-Halbjahr.csv` (alle Klassen und Stufen des Jahres;
+  Oberstufe nach den Kursen des Jahres; ohne 2. Halbjahr eine CSV fürs ganze Jahr), `Inhalt.txt` mit Kopf (Schule,
+  Schuljahr, Zeitraum, erstellt am/von, Schülereinträge, Hinweise) und je Datei SHA-256 und Größe. Dateiname
+  `Archiv_<Kurzname>_<Jahr>_<Datum>.zip`.
+- **Nach dem Download:** `Schuljahre.ArchivAm/-Von/-Groesse/-Pruefsumme/-MitSchuelerEintraegen`; eine vorhandene Bestätigung
+  wird aufgehoben (sie galt der alten Datei); Download-Protokoll Art `ArchivExport` (bzw. `Archiv` für das Jahresarchiv),
+  Protokoll der Einstellungen („Jahresablauf: Archiv-Export … erstellt“), Log ohne Namen.
+- **Bestätigung:** nur mit passender SHA-256 der ganzen Zip (im Browser gerechnet oder aus `Get-FileHash`), Haken „mit
+  7-Zip und dem Kennwort geöffnet“, Ort (3–200 Zeichen) und „aufzubewahren bis“ (nach heute) → `Aufbewahrt…`,
+  `AufbewahrenBis`, Protokoll. Wieder öffnen macht den Export **veraltet** (`ArchivAm` vor dem letzten Abschluss bzw.
+  Wiederöffnen) – Bestätigen geht dann nicht mehr, die Karte verlangt einen neuen Export.
+- **Karte „Archiv und Fristen“** (Jahresablauf): je abgeschlossenem Schuljahr Ampel und Knöpfe, Erinnerung „darf
+  vernichtet werden“ ab „aufzubewahren bis“, Punkt „Fristen“ (Löschfristen mit „abgestimmt am / mit“); in „Schuljahreswechsel“
+  nach dem Abschluss ein Punkt mit Sprung. Das Löschen ganzer Schuljahre kommt mit P5c-2.
+- **Nacharbeit P5b-2:** Meldungskasten oben im Jahresablauf statt Toast (N1); Kalender-Menü des Desktops mit `TextBlock`
+  (N2, `KalenderDialog.xaml.cs`); Zuständigkeit mit führender Null („7D“ → „07D“) und Rückfrage, wenn es die Klasse bzw.
+  Stufe im Schuljahr nicht gibt (409 mit `rueckfrage`, danach `zustaendigTrotzdem`), Marke „Zuständigkeit prüfen“ (N3);
+  Schuljahr immer in der Kontenliste (N4).
 
 ## Zugangsschutz (P6a, 5.4)
 

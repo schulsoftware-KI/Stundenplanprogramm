@@ -514,6 +514,8 @@ function kontoMarken(k) {
   if (k.wiederAktiv) m.push({ text: "laut SchILD aktiv", art: "start" });
   if (k.nameGeaendert) m.push({ text: "Name laut SchILD geändert", art: "start" });
   if (k.faktorFehlt) m.push({ text: "2. Faktor fehlt", art: "start" });   // P6a
+  // P5c-1 (N3): Klasse bzw. Stufe gibt es im Schuljahr der Zuständigkeit nicht (z. B. „7D“ statt „07D“)
+  if (k.zustaendigUnbekannt && k.zustaendigUnbekannt.length) m.push({ text: "Zuständigkeit prüfen", art: "start" });
   return m;
 }
 
@@ -525,8 +527,8 @@ function kontoZeile(k) {
   if (schueler) unten.push(k.benutzername);
   else {
     unten.push(k.rollenText);
-    // P5a (219): Zuständigkeit eines anderen Schuljahres mit Jahr
-    if (k.zustaendig) unten.push(k.zustaendigAnderesJahr ? `${k.zustaendig} (${k.zustaendigSchuljahr})` : k.zustaendig);
+    // P5a (219), P5c-1 (N4): Zuständigkeit immer mit Schuljahr – „10B (2026/27)“
+    if (k.zustaendig) unten.push(k.zustaendigSchuljahr ? `${k.zustaendig} (${k.zustaendigSchuljahr})` : k.zustaendig);
   }
   unten.push(k.letzteAnmeldung ? `zuletzt ${kurzZeit(k.letzteAnmeldung)}` : "nie angemeldet");
   const marken = kontoMarken(k);
@@ -573,6 +575,14 @@ function kontoDetail(k) {
 
   const aktionen = [];
   const knopf = (text, klasse, onclick) => h("button", { type: "button", class: "menuepunkt" + (klasse ? " " + klasse : ""), onclick }, text);
+  // P5c-1 (N3): Zuständigkeit, die es im Schuljahr nicht gibt – von Hand korrigieren
+  if (k.zustaendigUnbekannt && k.zustaendigUnbekannt.length) {
+    const n = k.zustaendigUnbekannt.length;
+    aktionen.push(h("p", { class: "kd-hinweis" }, `${n === 1 ? "Die Klasse bzw. Stufe" : "Die Klassen bzw. Stufen"} ` +
+      `${k.zustaendigUnbekannt.join(", ")} gibt es im Schuljahr ${k.zustaendigSchuljahr || k.aktuellesSchuljahr || ""} ` +
+      "nicht. Bitte über „Bearbeiten“ korrigieren (z. B. „07D“ statt „7D“ – einstellige Jahrgänge ergänzt die App beim " +
+      "Speichern selbst um die führende Null)."));
+  }
   // Phase 5.2c-2 (197): Hinweise aus SchILD – nichts geschieht von selbst.
   if (k.wiederAktiv)
     aktionen.push(h("p", { class: "kd-hinweis" }, "Laut SchILD ist die Schülerin bzw. der Schüler (wieder) aktiv – zum " +
@@ -884,19 +894,36 @@ async function formSpeichern(e) {
   const knopf = el("kfSpeichern");
   knopf.disabled = true;
   fehlerIn("kfFehler", "");
+  // P5c-1 (N3): unbekannte Klasse/Stufe → Rückfrage der API, dann mit „trotzdem“ noch einmal
+  const speichern = () => (neu ? senden("POST", "api/konten", body) : senden("PUT", `api/konten/${verw.formKonto.id}`, body));
+  const eingetippt = (body.zustaendig || "").split(/[,; ]+/).filter((x) => x).map((x) => x.toUpperCase()).join(", ");
   try {
+    let d;
+    try {
+      d = await speichern();
+    } catch (f) {
+      if (!(f instanceof HttpFehler && f.status === 409 && f.daten && f.daten.rueckfrage)) throw f;
+      if (!window.confirm(f.daten.fehler)) {
+        fehlerIn("kfFehler", "Nicht gespeichert – bitte die Klasse bzw. Stufe prüfen (z. B. 07D).");
+        el("kfZustaendig").focus();
+        return;
+      }
+      body.zustaendigTrotzdem = true;
+      d = await speichern();
+    }
+    const zust = neu ? d.konto.zustaendig : d.zustaendig;
+    const angepasst = !!zust && !!eingetippt && zust !== eingetippt ? ` – zuständig für ${zust}` : "";
     if (neu) {
-      const d = await senden("POST", "api/konten", body);
       dialogZu(el("kfDialog"));
       startpasswortZeigen(d.konto, d.startPasswort);
+      if (angepasst) toast(`Angelegt${angepasst}.`);
     } else {
-      const d = await senden("PUT", `api/konten/${verw.formKonto.id}`, body);
       dialogZu(el("kfDialog"));
       if (d.ich && (d.benutzername !== verw.formKonto.benutzername || d.lehrerKuerzel !== verw.formKonto.lehrerKuerzel)) {
         abmelden("Dein Konto wurde geändert. Bitte melde dich neu an.");
         return;
       }
-      toast("Gespeichert.");
+      toast(`Gespeichert${angepasst}.`);
     }
     kontenLaden();
   } catch (f) {
@@ -1134,6 +1161,7 @@ const DOWNLOAD_ARTEN = {
   KursheftPdf: "Kursheft (PDF)",
   FehlzeitenCsv: "Fehlzeiten (CSV)",
   Archiv: "Jahresarchiv (Zip)",
+  ArchivExport: "Archiv-Export eines Schuljahres (Zip)",   // P5c-1
   // P4b (210): Rückweg nach SchILD – abgeholt vom Desktop bzw. gemeldete Datei
   SchildRueckweg: "Rückweg nach SchILD (abgeholt)",
   SchildRueckwegDatei: "Rückweg nach SchILD (Datei)",

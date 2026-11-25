@@ -1764,6 +1764,7 @@ async function start() {
   eintraegeInit();
   einstellungenInit();
   jahresablaufInit();   // P4a
+  archivInit();         // P5c-1
   zfInit();             // P6a
   zugriffeInit();       // P6a
   hilfeInit();

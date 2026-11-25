@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using VertretungApi.Data;
+using VertretungApi.Dtos;
 using VertretungApi.Helpers;
 using VertretungApi.Model;
 using VertretungApi.Services;
@@ -18,7 +19,9 @@ namespace VertretungApi.Controllers;
 /// Phase 4.3 (Entscheidungen 48–50, 60–65):
 ///   GET api/berichte/fehlzeiten-csv/pruefen?klasse=|alle=true&amp;von=&amp;bis=  Vorabprüfung (offene/nicht erfasste Stunden)
 ///   GET api/berichte/fehlzeiten-csv?klasse=|alle=true&amp;von=&amp;bis=          CSV (KL/SK zuständig, Admin; „alle" nur Admin)
-///   GET api/berichte/archiv?von=&amp;bis=&amp;schuelerEintraege=               Jahresarchiv als Zip (nur Admin)
+///   POST api/berichte/archiv { von, bis, schuelerEintraege, kennwort, kennwortWiederholung }
+///        Jahresarchiv als verschlüsselte Zip (nur Admin; P5c-1, 273: WinZip-AES-256, im Hintergrund – Stand und Datei wie
+///        beim Archiv-Export über api/jahresablauf/archiv/auftrag bzw. …/datei; protokolliert wird beim Download)
 /// Zeitraum ohne von/bis: das laufende Schuljahr; er endet spätestens heute.
 /// „Downloads nur für die Verwaltung“ (Einstellungen → Datenschutz, seit P3; vorher „Berichte:NurAdmin“): nur Admin
 /// (Entscheidung 50).
@@ -34,12 +37,15 @@ public class BerichteController : ControllerBase
     private readonly AppDbContext _db;
     private readonly ILogger<BerichteController> _log;
     private readonly Schuleinstellungen _einst;
+    private readonly ArchivAuftraege _auftraege;
 
-    public BerichteController(AppDbContext db, ILogger<BerichteController> log, Schuleinstellungen einst)
+    public BerichteController(AppDbContext db, ILogger<BerichteController> log, Schuleinstellungen einst,
+        ArchivAuftraege auftraege)
     {
         _db = db;
         _log = log;
         _einst = einst;
+        _auftraege = auftraege;
     }
 
     /// <summary>P3 (E-1): „Downloads nur für die Verwaltung“ aus den Schuleinstellungen (wirkt sofort).</summary>
@@ -230,54 +236,31 @@ public class BerichteController : ControllerBase
     // =================================================================
 
     /// <summary>
-    /// Alle Klassenbücher (Sek I) und Kurshefte (Oberstufe) des Zeitraums als Zip – nur Admin. Wird in
-    /// einem Durchgang erzeugt (Zwischendatei im Temp-Ordner, nach dem Senden gelöscht); bricht die
-    /// Verbindung ab, wird die Erzeugung zwischen zwei Heften beendet.
+    /// Alle Klassenbücher (Sek I) und Kurshefte (Oberstufe) des Zeitraums als Zip – nur Admin. P5c-1 (273): verschlüsselt mit
+    /// dem Kennwort des Admins (WinZip-AES-256) und im Hintergrund erstellt (ArchivAuftraege) – die Antwort ist der Stand des
+    /// Auftrags; die Datei holt die App einmal über api/jahresablauf/archiv/datei (dort wird der Download protokolliert).
     /// </summary>
-    [TeurerAbruf]            // P6a (230)
-    [HttpGet("archiv")]
-    public async Task<IActionResult> Archiv(
-        [FromQuery] DateOnly? von, [FromQuery] DateOnly? bis, [FromQuery] bool schuelerEintraege = false)
+    [HttpPost("archiv")]
+    public async Task<IActionResult> Archiv([FromBody] JaJahresarchivStartDto dto)
     {
         var u = await NutzerAsync();
         if (u == null) return Unauthorized();
         if (!u.IstAdmin) return StatusCode(403, new { fehler = "Das Jahresarchiv erstellt nur die Verwaltung." });
+        if (Kennwort.Pruefen(dto?.Kennwort) is string kwFehler) return BadRequest(new { fehler = kwFehler, feld = "kennwort" });
+        if (!string.Equals(dto!.Kennwort, dto.KennwortWiederholung, StringComparison.Ordinal))
+            return BadRequest(new { fehler = "Die beiden Kennwörter stimmen nicht überein.", feld = "kennwort2" });
 
-        var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, von, bis);
-        if (ExportService.BisHoechstensHeute(b) < v) return BadRequest(new { fehler = "Der Zeitraum liegt noch in der Zukunft." });
+        var (v, b) = await FehlzeitenService.ZeitraumAsync(_db, dto.Von, dto.Bis);
+        var bisEff = ExportService.BisHoechstensHeute(b);
+        if (bisEff < v) return BadRequest(new { fehler = "Der Zeitraum liegt noch in der Zukunft." });
 
-        var ct = HttpContext.RequestAborted;
-        FileStream? datei = null;
-        try
-        {
-            datei = new FileStream(Path.Combine(Path.GetTempPath(), $"klassenbuch-archiv-{Guid.NewGuid():N}.zip"),
-                FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 81920, FileOptions.DeleteOnClose);
-            var erg = await ExportService.ArchivSchreibenAsync(_db, u, v, b, schuelerEintraege, datei, _log, ct,
-                (await _einst.LesenAsync(_db, ct)).SchuleName);
-
-            string was = $"{Anzahl(erg.Klassen, "Klassenbuch", "Klassenbücher")}, {Anzahl(erg.Kurse, "Kursheft", "Kurshefte")}"
-                         + (erg.Fehler.Count > 0 ? $", {erg.Fehler.Count} nicht erstellt" : "");
-            await ProtokollierenAsync(u, "Archiv", was, erg.Von, erg.Bis, schuelerEintraege);
-
-            datei.Position = 0;
-            var antwort = File(datei, "application/zip", erg.Dateiname);
-            datei = null;   // gehört jetzt der Antwort; wird nach dem Senden geschlossen und damit gelöscht
-            return antwort;
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            _log.LogInformation("Jahresarchiv abgebrochen – die Verbindung wurde beendet.");
-            return new EmptyResult();
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex, "Jahresarchiv konnte nicht erstellt werden.");
-            return StatusCode(500, new { fehler = "Das Archiv konnte nicht erstellt werden. Details stehen im Protokoll der API." });
-        }
-        finally
-        {
-            datei?.Dispose();
-        }
+        string name = BerichtService.SichererName($"Klassenbuch-Archiv_{v:yyyy-MM-dd}_{bisEff:yyyy-MM-dd}", ".zip");
+        var plan = new ArchivPlan(ArchivArt.Jahresarchiv, null, v, b, dto.SchuelerEintraege, name,
+            (await _einst.LesenAsync(_db)).SchuleName, null, null);
+        int kontoId = Rollen.BenutzerId(User) ?? 0;
+        if (_auftraege.Starten(plan, u.Name, kontoId, dto.Kennwort!) is string belegt) return Conflict(new { fehler = belegt });
+        _log.LogInformation("Jahresarchiv gestartet von {Akteur} ({Von} – {Bis}).", u.Name, v, bisEff);
+        return Ok(new JaArchivAuftragAntwortDto(_auftraege.Stand(kontoId)));
     }
 
     // -----------------------------------------------------------------

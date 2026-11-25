@@ -456,6 +456,7 @@
           <option value="KursheftPdf">Kursheft (PDF)</option>
           <option value="FehlzeitenCsv">Fehlzeiten (CSV)</option>
           <option value="Archiv">Jahresarchiv (Zip)</option>
+          <option value="ArchivExport">Archiv-Export eines Schuljahres (Zip)</option>
           <option value="SchildRueckweg">Rückweg nach SchILD (abgeholt)</option>
           <option value="SchildRueckwegDatei">Rückweg nach SchILD (Datei)</option>
           <option value="SchildRueckwegProbe">Rückweg nach SchILD (Probedatei)</option>
@@ -511,7 +512,13 @@
     </div>
     <p class="kleingedruckt ohne-einzug">Was zum Halbjahres- und Schuljahreswechsel zu tun ist – mit Ampel: grün erledigt,
       gelb zu tun, rot überfällig, grau nur ein Hinweis. Hier geschieht nichts von selbst: Die Links führen in den passenden
-      Bereich, die Knöpfe (Schuljahr abschließen, wieder öffnen, neues Schuljahr vorbereiten) fragen vorher nach.</p>
+      Bereich, die Knöpfe (Schuljahr abschließen, wieder öffnen, neues Schuljahr vorbereiten, Archiv-Export) fragen vorher
+      nach.</p>
+    <!-- P5b-2 (N1): Meldung der letzten Aktion – bleibt bis zur nächsten Aktion bzw. bis „×“ -->
+    <div id="jaMeldung" class="ja-meldung a-gruen" role="status" hidden>
+      <p id="jaMeldungText"></p>
+      <button id="jaMeldungZu" class="textknopf ja-meldung-zu" type="button" aria-label="Meldung schließen">×</button>
+    </div>
     <div id="jaKopf"></div>
     <p id="jaInfo" class="such-info" role="status"></p>
     <div id="jaKarten" class="ja-karten"></div>
@@ -1173,24 +1180,74 @@
     </div>
   </dialog>
 
-  <!-- Phase 4.3: Jahresarchiv (Entscheidungen 49, 63, 64; nur Admin) -->
-  <dialog id="fzArchivDialog" class="fenster" aria-labelledby="arTitel">
-    <h2 id="arTitel" class="karte-titel">Jahresarchiv</h2>
-    <p class="pd-was">Alle Klassenbücher und Kurshefte</p>
-    <p class="kleingedruckt ohne-einzug">Je Klasse (Sek I) ein Klassenbuch und je Oberstufenkurs ein Kursheft als PDF –
-      zusammen in einer Zip-Datei mit Inhaltsverzeichnis.</p>
-    <p id="arZeitraum" class="kleingedruckt ohne-einzug"></p>
-    <label class="schalter gross pd-schueler">
-      <input id="arSchueler" type="checkbox" />
-      <span>Schülereinträge aufnehmen</span>
-    </label>
-    <p class="pd-warnung" role="note"><strong>Die Datei enthält Schülerdaten aller Klassen.</strong> Bitte nur auf
-      dienstlichen bzw. freigegebenen Geräten speichern und nicht weitergeben. Der Download wird protokolliert.</p>
-    <p id="arStatus" class="such-info" role="status"></p>
-    <p id="arFehler" class="fehler klein" role="alert" hidden></p>
+  <!-- P5c-1 (260–263, 273): Archiv mit Kennwort – Archiv-Export eines Schuljahres (Jahresablauf) bzw. Jahresarchiv aus 4.3
+       (Klassenbuch → Klassen). Entsteht im Hintergrund; das Kennwort steht nur in diesen Feldern (archiv.js). -->
+  <dialog id="axDialog" class="fenster ja-dialog ax-dialog" aria-labelledby="axTitel">
+    <h2 id="axTitel" class="karte-titel">Archiv erstellen</h2>
+    <p id="axWas" class="pd-was"></p>
+    <p id="axText" class="kleingedruckt ohne-einzug"></p>
+    <div id="axEingabe">
+      <p class="pd-warnung" role="note"><strong>Die Datei enthält Schülerdaten aller Klassen.</strong> Nur auf einem
+        dienstlichen Gerät bzw. Datenträger speichern, nicht in einem Cloud-Ordner. Sie ist mit dem Kennwort verschlüsselt
+        (AES-256) und lässt sich mit 7-Zip, WinZip oder WinRAR öffnen – der Windows-Explorer kann es nicht. Das Kennwort
+        getrennt aufbewahren: ohne Kennwort ist das Archiv wertlos.</p>
+      <label class="schalter gross pd-schueler">
+        <input id="axSchueler" type="checkbox" />
+        <span>Schülereinträge aufnehmen</span>
+      </label>
+      <label class="feld" for="axKw1">Kennwort für das Archiv</label>
+      <div class="passwort">
+        <input id="axKw1" class="eingabe" type="password" autocomplete="off" spellcheck="false" autocapitalize="off"
+               maxlength="128" aria-describedby="axKwInfo" />
+        <button id="axKwZeigen" class="textknopf klein" type="button" aria-pressed="false" aria-controls="axKw1 axKw2">Anzeigen</button>
+      </div>
+      <p id="axKwInfo" class="kleingedruckt ohne-einzug" aria-live="polite"></p>
+      <label class="feld" for="axKw2">Kennwort wiederholen</label>
+      <input id="axKw2" class="eingabe" type="password" autocomplete="off" spellcheck="false" autocapitalize="off"
+             maxlength="128" />
+    </div>
+    <div id="axStand" class="ax-stand" hidden>
+      <p id="axSchritt" class="ax-schritt" role="status"></p>
+      <progress id="axBalken" class="ax-balken" max="1" value="0"></progress>
+      <p id="axStandInfo" class="kleingedruckt ohne-einzug ax-info"></p>
+    </div>
+    <p id="axFehler" class="fehler klein" role="alert" hidden></p>
     <div class="knopfreihe">
-      <button id="arErstellen" class="hauptknopf" type="button">Archiv erstellen</button>
-      <button id="arAbbrechen" class="textknopf" type="button">Abbrechen</button>
+      <button id="axOk" class="hauptknopf" type="button" disabled>Archiv erstellen</button>
+      <button id="axAbbrechen" class="textknopf" type="button" hidden>Erstellung abbrechen</button>
+      <button id="axZu" class="textknopf" type="button">Schließen</button>
+    </div>
+  </dialog>
+
+  <!-- P5c-1 (264): „Aufbewahrung bestätigen“ – die Prüfsumme rechnet der Browser, die Datei wird nicht hochgeladen -->
+  <dialog id="abDialog" class="fenster ja-dialog ab-dialog" aria-labelledby="abTitel">
+    <h2 id="abTitel" class="karte-titel">Aufbewahrung bestätigen</h2>
+    <p id="abWas" class="kleingedruckt ohne-einzug"></p>
+    <p class="feld">1. Prüfsumme der gespeicherten Datei</p>
+    <label class="feld ab-datei-titel" for="abDatei">Gespeicherte Datei wählen</label>
+    <input id="abDatei" class="ab-datei" type="file" accept=".zip,application/zip" />
+    <p class="kleingedruckt ohne-einzug">Die Datei wird nicht hochgeladen – der Browser rechnet die Prüfsumme auf diesem Gerät.
+      Liegt sie schon woanders (z. B. auf einem USB-Stick): in PowerShell <code>Get-FileHash</code> mit dem Pfad der Datei
+      und den Wert hier eintragen.</p>
+    <label class="feld" for="abSumme">Prüfsumme (SHA-256)</label>
+    <input id="abSumme" class="eingabe ab-summe" type="text" spellcheck="false" autocomplete="off" autocapitalize="characters"
+           maxlength="100" />
+    <p id="abVergleich" class="ab-vergleich" role="status"></p>
+    <label class="schalter gross ab-haken">
+      <input id="abGeoeffnet" type="checkbox" />
+      <span>2. Mit 7-Zip und dem Kennwort geöffnet, Inhalt.txt gelesen</span>
+    </label>
+    <label class="feld" for="abOrt">3. Wo liegt der Archiv-Export? (nie das Kennwort selbst)</label>
+    <input id="abOrt" class="eingabe" type="text" maxlength="200" autocomplete="off"
+           placeholder="z. B. USB-Stick im Tresor Sekretariat, Kennwort bei der Schulleitung" />
+    <label class="feld" for="abBis">Aufzubewahren bis</label>
+    <input id="abBis" class="eingabe" type="date" />
+    <p class="kleingedruckt ohne-einzug">Den Wert nennt das Löschkonzept bzw. die oder der Datenschutzbeauftragte. Ist das Datum
+      erreicht, erinnert die Karte daran, dass die Schule die Datei vernichten darf.</p>
+    <p id="abFehler" class="fehler klein" role="alert" hidden></p>
+    <div class="knopfreihe">
+      <button id="abOk" class="hauptknopf" type="button" disabled>Bestätigen</button>
+      <button id="abAbbrechen" class="textknopf" type="button">Abbrechen</button>
     </div>
   </dialog>
 
@@ -1309,6 +1366,7 @@
   <script src="eintraege.js"></script>
   <script src="einstellungen.js"></script>
   <script src="jahresablauf.js"></script>
+  <script src="archiv.js"></script>
   <script src="zweiterfaktor.js"></script>
   <script src="zugriffe.js"></script>
   <script src="hilfe.js"></script>

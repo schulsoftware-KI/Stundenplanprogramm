@@ -189,6 +189,9 @@ builder.Services.AddSingleton<Schuleinstellungen>();
 builder.Services.AddSingleton<Leseprotokoll>();   // P6b (232, 233): Leseprotokoll (Schalter in den Einstellungen)
 builder.Services.AddSingleton<RueckwegCodes>();   // P4b (210): Abholcodes für den Rückweg nach SchILD (nur im Speicher)
 builder.Services.AddHostedService<Aufraeumdienst>();
+// P5c-1 (262): Archive im Hintergrund (Archiv-Export, Jahresarchiv) – höchstens einer, Temp-Datei verschlüsselt, Reste beim Start weg
+builder.Services.AddSingleton<ArchivAuftraege>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ArchivAuftraege>());
 
 var app = builder.Build();
 

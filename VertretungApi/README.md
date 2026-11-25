@@ -1240,11 +1240,51 @@ Alle nur Admin. Ohne Namen von Schülern in Antworten, Protokoll und Log.
   Wiederöffnen) – Bestätigen geht dann nicht mehr, die Karte verlangt einen neuen Export.
 - **Karte „Archiv und Fristen“** (Jahresablauf): je abgeschlossenem Schuljahr Ampel und Knöpfe, Erinnerung „darf
   vernichtet werden“ ab „aufzubewahren bis“, Punkt „Fristen“ (Löschfristen mit „abgestimmt am / mit“); in „Schuljahreswechsel“
-  nach dem Abschluss ein Punkt mit Sprung. Das Löschen ganzer Schuljahre kommt mit P5c-2.
+  nach dem Abschluss ein Punkt mit Sprung. Das Löschen ganzer Schuljahre: nächster Abschnitt (P5c-2).
 - **Nacharbeit P5b-2:** Meldungskasten oben im Jahresablauf statt Toast (N1); Kalender-Menü des Desktops mit `TextBlock`
   (N2, `KalenderDialog.xaml.cs`); Zuständigkeit mit führender Null („7D“ → „07D“) und Rückfrage, wenn es die Klasse bzw.
   Stufe im Schuljahr nicht gibt (409 mit `rueckfrage`, danach `zustaendigTrotzdem`), Marke „Zuständigkeit prüfen“ (N3);
   Schuljahr immer in der Kontenliste (N4).
+
+## Löschen ganzer Schuljahre (P5c-2, 5.3b)
+
+Entscheidungen 266–270 (`claude/P5c_Vorschlag.md` §6). **Keine Migration** (die Spalten `Geloescht…` stehen seit P5a in
+`Schuljahre`; die Frist ist ein Schlüssel in `Einstellungen`). API: `Services/JahresablaufLoeschen.cs` (neu),
+`Services/JahresablaufArchiv.cs`, `Services/JahresablaufSchuljahr.cs`, `Services/Jahresablauf.cs`,
+`Services/ArchivAuftraege.cs`, `Services/Schuleinstellungen.cs`, `Services/SchuljahrRechte.cs`,
+`Controllers/JahresablaufController.cs`, `Controllers/EinstellungenController.cs`, `Dtos/JahresablaufDtos.cs`; PWA:
+`archiv.js`, `jahresablauf.js`, `konten.js`, `index.html`, `style.css`, `hilfe.js`, `sw.js` (Cache v29).
+
+| Methode | Pfad | Zweck |
+|---|---|---|
+| POST | `api/jahresablauf/loeschen` `{ schuljahr }` | 409 mit `zahlen` (je Art), `pruefsumme`, `hinweise`, `archiv` – die Rückfrage |
+| POST | `api/jahresablauf/loeschen` `{ schuljahr, bestaetigung, passwort, pruefsumme }` | löschen (Schuljahr eingetippt, Passwort, Prüfsumme der Zahlen) |
+
+- **Frist (266):** Einstellungen → Datenschutz → „Klassenbuchdaten ganzer Schuljahre behalten“ (`Datenschutz.SchuljahrBehaltenJahre`,
+  0 = aus = Standard, 1–15 Jahre, DSB-Frage und „abgestimmt am / mit“). Löschbar ab = Ende laut Kalender + n Jahre + 1 Tag
+  (mit dem „Heute“ der API). Die Frist löscht nie selbst – keine Rückfrage beim Verkürzen, kein Aufräumen; die Antwort der
+  Einstellungen nennt, ab wann welches Jahr löschbar ist.
+- **Knopf (241)** in der Karte „Archiv und Fristen“ nur bei: abgeschlossen · Archiv-Export nach dem letzten Abschluss ·
+  Aufbewahrung danach bestätigt · Frist gesetzt und erreicht · nicht „Aktuelles Schuljahr“ · nicht gelöscht. Der Server
+  prüft dasselbe (`LoeschSperre`). Kein Löschen, solange ein Archiv entsteht bzw. ein neuer Archiv-Export des Jahres auf den
+  Download wartet; während des Löschens startet kein Archiv.
+- **Gelöscht wird (267–269):** Stunden mit Klassenbuch samt Anwesenheiten, Klassenbucheinträge, Unterrichtseinstellungen,
+  Lerngruppen und Zugehörigkeiten, Vertretungstage samt Einträgen, Grundplan-Versionen samt Stunden, Kalender samt freien
+  Zeiten; Entschuldigungen im Zeitraum des Kalenders (übergreifende werden gekürzt bzw. geteilt); Verlaufszeilen zu den
+  Stunden bzw. Einträgen und solche ohne Stunde nach dem Zeitpunkt (01.08.–31.07.); Schüler mit Zugehörigkeit im Jahr und
+  **ohne Daten in einem anderen Schuljahr** (Zugehörigkeit, Anwesenheit, Eintrag) samt Konto, Entschuldigungen, Verlaufs-
+  und Leseprotokollzeilen (Kontenprotokoll „Gelöscht“ je Konto); Zuständigkeiten für das Jahr → Lehrkraft (Kontenprotokoll,
+  abgemeldet). Es bleiben die Zeile in `Schuljahre` (Status „abgeschlossen“, `GeloeschtAm/-Von/-Text` mit den Zahlen),
+  Protokolle mit eigener Frist und SchILD-Importprotokolle.
+- **Ablauf (270):** Rückfrage (409) → Bestätigung mit Schuljahr und Passwort (Login-Bremse, 429) → neu zählen (andere Zahlen →
+  409 mit `neu: true`) → **eine Transaktion** mit `ExecuteDelete` (Befehls-Zeitlimit 10 Minuten); Fehler → 500, nichts
+  gelöscht. Protokoll der Einstellungen („Schuljahr … aus der Datenbank gelöscht“ mit Zahlen und Archiv-Export), Log ohne
+  Namen. Danach: kein Wiederöffnen, kein Archiv-Export; Desktop-Pushes und SchILD-Importe für das Jahr → 409 („… gelöscht“).
+- **Nicht in der App:** die Vertretungsdatei des Desktops (`Vertretung_<Jahr>.xlsx`) und ältere Sicherungen.
+- **Befunde aus dem Test von P5c-1 (A–E):** Sprung „Archiv und Fristen →“ ohne `smooth` und mit Hervorhebung (A);
+  Überschrift nach einem Haken in eigener Zeile (B); Meldung und Karte nach „Bestätigen“ auch, wenn der Dialog inzwischen zu
+  ist, Esc während der Anfrage gesperrt (C); Protokoll „mit Schülereinträgen“ (D); Kennwortfelder mit
+  `autocomplete="new-password"` (E).
 
 ## Zugangsschutz (P6a, 5.4)
 

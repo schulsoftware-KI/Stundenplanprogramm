@@ -39,6 +39,8 @@ namespace VertretungApi.Controllers;
 //    GET  api/einstellungen/gruende           – wie viele Gründe gespeichert sind (Fehlstunden, Entschuldigungen, Verlauf)
 //    POST api/einstellungen/gruende-entfernen – { anzahl } (Zahl aus der Rückfrage): alle auf „ohne Angabe“; nur bei
 //                                               ausgeschaltetem Schalter; 409, wenn sich die Zahl inzwischen geändert hat
+//  P5c-2 (266): „Klassenbuchdaten ganzer Schuljahre behalten … Jahre“ löscht nichts selbst – keine Rückfrage beim Verkürzen;
+//  die Antwort nennt in „hinweise“, ab wann welches abgeschlossene Schuljahr im Jahresablauf gelöscht werden kann.
 // =====================================================================
 
 [ApiController]
@@ -179,6 +181,12 @@ public class EinstellungenController : ControllerBase
             case K.GrundErfassen:
                 return w.GrundErfassen ? "an – beim Entschuldigen wird ein Grund gewählt"
                                        : "aus – gespeichert wird „ohne Angabe“ (vorhandene Gründe bleiben bis zum Entfernen)";
+            // P5c-2 (266)
+            case K.SchuljahrBehalten:
+                return w.SchuljahrBehaltenJahre <= 0
+                    ? "0 (aus) – ganze Schuljahre bleiben in der Datenbank"
+                    : $"{K.Text(d, w.SchuljahrBehaltenJahre.ToString(CultureInfo.InvariantCulture))} nach dem Ende des " +
+                      "Schuljahres – danach bietet der Jahresablauf das Löschen an (es löscht nichts von selbst)";
             default:
                 int zahl = d.Schluessel switch
                 {
@@ -432,6 +440,13 @@ public class EinstellungenController : ControllerBase
         _einst.Verwerfen();
         _log.LogInformation("Einstellungen geändert von {Akteur}: {Schluessel}", ich,
             string.Join(", ", geplant.Select(x => x.Def.Schluessel)));
+
+        // P5c-2 (266): Frist für ganze Schuljahre – sagen, ab wann welches Jahr löschbar ist (gelöscht wird nichts)
+        if (geplant.Any(x => x.Def.Schluessel == K.SchuljahrBehalten && x.WertGeaendert))
+        {
+            var wNeu = await _einst.LesenAsync(_db);
+            hinweise.Add(await Jahresablauf.FristHinweisAsync(_db, wNeu.SchuljahrBehaltenJahre, wNeu.Schuljahr));
+        }
 
         // Kürzere bzw. neue Frist: gleich aufräumen (bestätigt).
         object? geloescht = null;

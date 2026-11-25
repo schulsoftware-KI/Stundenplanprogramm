@@ -53,7 +53,8 @@ public class SchuljahrDb
     public string? AufbewahrtOrt { get; set; }              // wo der Export liegt (Freitext, nie das Kennwort)
     public DateOnly? AufbewahrenBis { get; set; }
 
-    // P5c (223): Löschen des ganzen Schuljahres (Zahlen ohne Namen)
+    // P5c (223): Löschen des ganzen Schuljahres (Zahlen ohne Namen) – seit P5c-2 (Services/JahresablaufLoeschen.cs). Die
+    // Zeile bleibt danach mit Status „abgeschlossen“: kein Wiederöffnen, keine Pushes für das Jahr.
     public DateTime? GeloeschtAm { get; set; }              // UTC
     public string? GeloeschtVon { get; set; }
     public string? GeloeschtText { get; set; }

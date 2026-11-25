@@ -147,16 +147,24 @@ public static partial class Jahresablauf
         // P5c-1 (271): Vorjahr abgeschlossen, sein Archiv-Export noch nicht erledigt → Punkt mit Sprung zu „Archiv und Fristen“
         if (vorjahrAkt != w.Schuljahr && vorjahrAkt != jahr && zu.Contains(vorjahrAkt)
             && zeilen.FirstOrDefault(x => x.Schuljahr == vorjahrAkt) is SchuljahrDb zeileVorjahr
+            && zeileVorjahr.GeloeschtAm == null                                      // P5c-2: gelöscht = nichts mehr zu tun
             && ArchivSprungPunkt(zeileVorjahr, heute) is { Ampel: not Gruen } sprungVorjahr)
             weiterePunkte.Add(sprungVorjahr);
         if (weitere.Count > 0)
+        {
+            // P5c-2 (270): gelöschte Schuljahre lassen sich nicht wieder öffnen – sie stehen nur noch in der Liste.
+            var offenBar = weitere.Where(z => z.GeloeschtAm == null).Take(MaxListe).ToList();
             weiterePunkte.Add(new JaPunktDto("abgeschlossen", "Abgeschlossene Schuljahre", Grau,
-                "Nur lesbar und nur für die Verwaltung sichtbar (Klassenbuch, PDF, Archiv).",
-                weitere.Take(MaxListe).Select(z => $"{z.Schuljahr}: abgeschlossen {Zeitpunkt(z.AbgeschlossenAm, z.AbgeschlossenVon)}")
+                "Nur lesbar und nur für die Verwaltung sichtbar (Klassenbuch, PDF, Archiv)." +
+                (weitere.Any(z => z.GeloeschtAm != null) ? " Gelöschte Schuljahre stehen nur noch im Archiv-Export." : ""),
+                weitere.Take(MaxListe).Select(z => $"{z.Schuljahr}: abgeschlossen {Zeitpunkt(z.AbgeschlossenAm, z.AbgeschlossenVon)}" +
+                                                   (z.GeloeschtAm != null ? $", gelöscht {Zeitpunkt(z.GeloeschtAm, z.GeloeschtVon)}" : ""))
                     .ToList(),
-                Aktionen: weitere.Take(MaxListe)
-                    .Select(z => new JaAktionDto("oeffnen", $"{z.Schuljahr} wieder öffnen…", z.Schuljahr,
-                        Hinweis: ArchivHinweisOeffnen(z))).ToList()));
+                Aktionen: offenBar.Count > 0
+                    ? offenBar.Select(z => new JaAktionDto("oeffnen", $"{z.Schuljahr} wieder öffnen…", z.Schuljahr,
+                        Hinweis: ArchivHinweisOeffnen(z))).ToList()
+                    : null));
+        }
 
         if (kal == null && !abgeschlossen)
             return new JaKarteDto("schuljahr", titel, Grau,
@@ -293,6 +301,10 @@ public static partial class Jahresablauf
     public static JaPunktDto AbschlussPunkt(string jahr, KalStand? kal, SchuljahrDb? zeile, bool abgeschlossen, DateOnly heute)
     {
         string titel = $"Jahresabschluss {jahr}";
+        if (abgeschlossen && zeile?.GeloeschtAm != null)   // P5c-2: gelöscht – kein Wiederöffnen
+            return new JaPunktDto("abschluss", titel, Grau,
+                $"Abgeschlossen {Zeitpunkt(zeile.AbgeschlossenAm, zeile.AbgeschlossenVon)}, aus der Datenbank gelöscht " +
+                $"{Zeitpunkt(zeile.GeloeschtAm, zeile.GeloeschtVon)} – die Daten stehen nur noch im Archiv-Export.");
         if (abgeschlossen)
             return new JaPunktDto("abschluss", titel, Gruen,
                 $"Abgeschlossen {Zeitpunkt(zeile?.AbgeschlossenAm, zeile?.AbgeschlossenVon)}. Das Klassenbuch des Schuljahres ist nur " +

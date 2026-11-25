@@ -118,9 +118,18 @@ public static class SchuljahrRechte
     public static async Task<KbErgebnis?> SchreibsperreZeitraumAsync(AppDbContext db, DateOnly von, DateOnly bis)
         => await SchreibsperreAsync(db, await JahreAsync(db, von, bis));
 
-    /// <summary>Für den Desktop: Text, wenn eines der Schuljahre abgeschlossen ist – sonst null.</summary>
+    /// <summary>P5c-2 (270): für den Desktop, wenn die Daten des Schuljahres gelöscht sind.</summary>
+    public static string DesktopGeloeschtText(string sj) =>
+        $"Die Daten des Schuljahres {sj} sind in der App gelöscht (Löschfrist) – Vertretungen, Grundpläne und SchILD-Importe " +
+        "für dieses Schuljahr nimmt die API nicht mehr an.";
+
+    /// <summary>Für den Desktop: Text, wenn eines der Schuljahre abgeschlossen (P5c-2: bzw. gelöscht) ist – sonst null.</summary>
     public static async Task<string?> DesktopSperreAsync(AppDbContext db, IEnumerable<string?> jahre)
-        => await ErstesAbgeschlossenesAsync(db, jahre) is string sj ? DesktopText(sj) : null;
+    {
+        if (await ErstesAbgeschlossenesAsync(db, jahre) is not string sj) return null;
+        bool geloescht = await db.Schuljahre.AsNoTracking().AnyAsync(s => s.Schuljahr == sj && s.GeloeschtAm != null);
+        return geloescht ? DesktopGeloeschtText(sj) : DesktopText(sj);
+    }
 
     // -----------------------------------------------------------------
     //  Lesen (216) und Zuständigkeit (219, 242)

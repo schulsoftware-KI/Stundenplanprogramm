@@ -1967,6 +1967,34 @@ main.klassenbuch > .hi-karte, main.fehlzeiten > .hi-karte { margin-top: 2px; }
 .ab-vergleich.richtig { color: var(--vertretung); }
 .ab-vergleich.falsch { color: var(--entfall); }
 .ab-haken { margin-top: 14px; }
+/* P5c-2 (Befund B aus P5c-1): Haken und Überschrift je in eigener Zeile – .schalter ist inline-flex, label.feld inline */
+.ja-dialog label.feld { display: block; }
+.ja-dialog .schalter.gross { display: flex; }
+/* P5c-2 (Befund A): Ziel eines Sprungs kurz hervorheben; die Karte bleibt unter dem Rand frei */
+.ja-karte { scroll-margin-top: 12px; }
+.ja-karte.ja-hervor { animation: ja-hervor 1.6s ease-out 1; }
+@keyframes ja-hervor {
+  0%, 35% { box-shadow: 0 0 0 4px var(--akzent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ja-karte.ja-hervor { animation: none; outline: 3px solid var(--akzent); outline-offset: 2px; }
+}
+/* P5c-2 (266–270): Schuljahr löschen */
+.lj-dialog .eingabe { width: 100%; box-sizing: border-box; }
+.lj-warnung {
+  margin: 4px 0 0 0; padding: 8px 10px; border-left: 4px solid var(--entfall); border-radius: 0 8px 8px 0;
+  background: var(--entfall-t); color: var(--tinte); font-size: 0.9rem; line-height: 1.4;
+}
+.lj-neu { margin: 8px 0 0 0; padding: 8px 10px; border-radius: 8px; background: var(--verlegung-t); font-weight: 650; }
+.lj-neu[hidden] { display: none; }
+.lj-zahlen { font-variant-numeric: tabular-nums; }
+.lj-mehr { margin: 10px 0 0 0; font-size: 0.9rem; }
+.lj-mehr summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 650; }
+.lj-mehr .ja-dliste { margin-top: 2px; }
+#ljStand { margin: 8px 0 0 0; }
+#ljStand:empty { display: none; }
+.lj-dialog .knopfreihe .hauptknopf, .lj-dialog .knopfreihe .textknopf { min-height: 44px; }
 
 @media print {
   .zf-zettel .zf-codeliste {

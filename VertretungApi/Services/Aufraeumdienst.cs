@@ -29,6 +29,8 @@ namespace VertretungApi.Services;
 //  Protokolle mit der echten Uhr (Zeitstempel).
 //  P6a (Entscheidung 228): das Anmeldeprotokoll ebenfalls unter „Aufbewahrung der Protokolle“.
 //  P6b (Entscheidung 233): das Leseprotokoll ebenfalls (nach dem Tag des Eintrags).
+//  P5c-2 (241, 266): Ganze Schuljahre löscht der Aufräumdienst nie – die Frist „Klassenbuchdaten ganzer Schuljahre
+//  behalten“ gibt nur den Knopf im Jahresablauf frei (Services/JahresablaufLoeschen.cs).
 // =====================================================================
 
 public sealed record AufraeumErgebnis(int Kontenprotokoll, int Downloads, int Einstellungsprotokoll, int Eintraege,

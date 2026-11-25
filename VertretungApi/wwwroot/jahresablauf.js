@@ -26,6 +26,10 @@
 //  Schuljahr kommen in der Übersicht mit („archive“). Nacharbeit P5b-2 (N1): Meldungen der Aktionen stehen im Meldungskasten
 //  oben (jaMeldung, grün bzw. gelb, mit „×“) statt in einem Toast – bis zur nächsten Aktion bzw. bis zum Schließen.
 //
+//  P5c-2 (266–270): Knopf „Schuljahr … löschen…“ (rot, erst nach Frist und bestätigtem Archiv-Export) → Dialog ljDialog in
+//  archiv.js (Zahlen der API, Schuljahr eintippen, Passwort). Befund A aus P5c-1: Sprung zur Karte ohne „smooth“ (Firefox
+//  brach das sanfte Scrollen beim Fokussieren ab) und mit kurzer Hervorhebung.
+//
 //  Keine Eingaben – beim Verlassen geht nichts verloren. Wird nach einstellungen.js und VOR hilfe.js/app.js
 //  geladen und nutzt deren Hilfen (h, el, state, senden, aktionsFehler, kurzDatum, appName, …) erst zur Laufzeit.
 //  Einstieg jahresablaufInit() aus start() in app.js. Alle Namen mit Präfix „ja…“ bzw. „jahresablauf…“.
@@ -74,6 +78,7 @@ const JA_AKTION_EIGEN = {
   archivExport: (a) => jaArchivExport(a),
   archivAuftrag: (a) => jaArchivExport(a, true),
   archivBestaetigen: (a) => jaArchivBestaetigen(a),
+  loeschen: (a) => ljOeffnen(a),                     // P5c-2 (archiv.js)
 };
 
 const jaDarf = () => !!state.anmeldung && state.anmeldung.rolle === "Admin";
@@ -92,6 +97,7 @@ function jahresablaufLeeren() {
   if (el("jzDialog").open) jaZkZu();
   if (el("axDialog").open) axZu();      // P5c-1 – ein Archiv im Hintergrund läuft auf dem Server weiter
   if (el("abDialog").open) abZu();
+  if (el("ljDialog").open) ljZu();   // P5c-2 – ein laufendes Löschen geht auf dem Server weiter
   jaMeldungZu();
   el("jaKopf").replaceChildren();
   el("jaKarten").replaceChildren();
@@ -221,14 +227,26 @@ function jaZiel(id) {
   if (id === "einstellungen") einstellungenOeffnen();
 }
 
-/** Zu einer Karte im Jahresablauf scrollen (Sprungknopf in einer anderen Karte). */
+/**
+ * Zu einer Karte im Jahresablauf springen (Sprungknopf in einer anderen Karte). P5c-2 (Befund A): Firefox brach das sanfte
+ * Scrollen ab, sobald danach der Titel den Fokus bekam – deshalb erst fokussieren, dann im nächsten Bild ohne „smooth“
+ * scrollen und die Karte kurz hervorheben.
+ */
 function jaZurKarte(id) {
   const titel = el(`jaT_${id}`);
   if (!titel) return;
   const karte = titel.closest(".ja-karte") || titel;
-  karte.scrollIntoView({ block: "start", behavior: "smooth" });
   titel.setAttribute("tabindex", "-1");
   try { titel.focus({ preventScroll: true }); } catch { /* egal */ }
+  const springen = () => {
+    try { karte.scrollIntoView({ block: "start" }); } catch { karte.scrollIntoView(true); }
+    karte.classList.remove("ja-hervor");
+    void karte.offsetWidth;            // Animation neu starten
+    karte.classList.add("ja-hervor");
+    setTimeout(() => karte.classList.remove("ja-hervor"), 2000);
+  };
+  if (typeof requestAnimationFrame === "function") requestAnimationFrame(springen);
+  else springen();
 }
 
 // ---------------------------------------------------------------------
@@ -249,6 +267,22 @@ function jaMeldung(text, art = "ok") {
 function jaMeldungZu() {
   el("jaMeldung").hidden = true;
   el("jaMeldungText").textContent = "";
+}
+
+/**
+ * P5c-2 (Befund C aus P5c-1): nach einer erfolgreichen Aktion – Meldung oben und neue Übersicht, auch wenn der Dialog
+ * inzwischen zu ist. Klappt das Darstellen nicht, wenigstens neu laden (der Server hat gespeichert).
+ */
+function jaNachAktion(r, ersatz) {
+  if (!jahresablaufOffen()) return;     // Bereich inzwischen verlassen – beim nächsten Öffnen kommt der neue Stand
+  jaMeldung((r && r.meldung) || ersatz || "Erledigt.");
+  try {
+    if (r && r.stand) jaRender(r.stand);
+    else jaLaden();
+  } catch (f) {
+    console.error(f);
+    jaLaden();
+  }
 }
 
 // ---------------------------------------------------------------------

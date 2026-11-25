@@ -65,10 +65,13 @@ const verw = {
 //  Anfragen und Rückmeldungen
 // ---------------------------------------------------------------------
 
-/** Schreibende/lesende API-Anfrage mit Anmeldung. Fehler -> HttpFehler (mit .daten). */
-async function senden(methode, url, body) {
+/**
+ * Schreibende/lesende API-Anfrage mit Anmeldung. Fehler -> HttpFehler (mit .daten).
+ * P5c-2: zeitMs = wie lange die App auf die Antwort wartet (Standard 90 s; „Schuljahr löschen“ länger).
+ */
+async function senden(methode, url, body, zeitMs = 90000) {
   const abbruch = new AbortController();
-  const timer = setTimeout(() => abbruch.abort(), 90000); // Sammelanlage kann etwas dauern
+  const timer = setTimeout(() => abbruch.abort(), zeitMs); // Sammelanlage kann etwas dauern
   let resp;
   try {
     const kopf = { ...authKopf() };

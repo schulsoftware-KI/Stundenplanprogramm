@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VertretungApi.Data;
@@ -32,6 +33,12 @@ namespace VertretungApi.Controllers;
 //                                               Größe, SHA-256 und protokolliert (JahresablaufArchiv.cs)
 //    POST   api/jahresablauf/archiv/bestaetigen – { schuljahr, pruefsumme, geoeffnet, ort, aufbewahrenBis }: „geprüft und
 //                                               aufbewahrt“ (nur mit passender Prüfsumme)
+//  P5c-2 (266–270): Schuljahr aus der Datenbank löschen (nur nach der Frist und bestätigtem Archiv-Export):
+//    POST   api/jahresablauf/loeschen          – { schuljahr }: 409 mit den Zahlen je Art und ihrer Prüfsumme (Rückfrage);
+//                                               { schuljahr, bestaetigung (eingetippt), passwort, pruefsumme }: der Server
+//                                               zählt neu (abweichend → 409 mit den neuen Zahlen) und löscht in EINER
+//                                               Transaktion. Falsches Passwort → 400 (feld „passwort“), zählt in der
+//                                               Login-Bremse (429). Während des Löschens startet kein Archiv.
 //  Antwort 200: { meldung, stand } mit der neuen Übersicht. Logik und Texte: Services/Jahresablauf*.cs.
 // =====================================================================
 
@@ -45,15 +52,17 @@ public class JahresablaufController : ControllerBase
     private readonly IHostEnvironment _env;
     private readonly ILogger<JahresablaufController> _log;
     private readonly ArchivAuftraege _auftraege;
+    private readonly LoginBremse _bremse;
 
     public JahresablaufController(AppDbContext db, Schuleinstellungen einst, IHostEnvironment env,
-        ILogger<JahresablaufController> log, ArchivAuftraege auftraege)
+        ILogger<JahresablaufController> log, ArchivAuftraege auftraege, LoginBremse bremse)
     {
         _db = db;
         _einst = einst;
         _env = env;
         _log = log;
         _auftraege = auftraege;
+        _bremse = bremse;
     }
 
     private string Ich => User.Identity?.Name ?? "";
@@ -139,6 +148,71 @@ public class JahresablaufController : ControllerBase
     [HttpPost("archiv/bestaetigen")]
     public async Task<IActionResult> ArchivBestaetigen([FromBody] JaArchivBestaetigenDto dto)
         => await AntwortAsync(await Jahresablauf.ArchivBestaetigenAsync(_db, dto, Ich, _log));
+
+    // ---- P5c-2: Schuljahr aus der Datenbank löschen ----
+
+    [TeurerAbruf]            // zählt bzw. löscht viele Zeilen
+    [HttpPost("loeschen")]
+    public async Task<IActionResult> Loeschen([FromBody] JaLoeschenDto dto)
+    {
+        var vor = await Jahresablauf.LoeschenVorbereitenAsync(_db, _einst, dto?.Schuljahr);
+        if (vor.Plan == null) return StatusCode(vor.Status, new { fehler = vor.Fehler });
+        var plan = vor.Plan;
+        if (_auftraege.LoeschenPruefen(plan.Schuljahr, sperren: false) is string belegt) return Conflict(new { fehler = belegt });
+        if (string.IsNullOrWhiteSpace(dto?.Pruefsumme)) return Conflict(Jahresablauf.LoeschRueckfrage(plan, neu: false));
+
+        // Bestätigung: Schuljahr eintippen und Passwort (Entscheidung 270, §10 E)
+        if (!string.Equals((dto!.Bestaetigung ?? "").Trim(), plan.Schuljahr, StringComparison.Ordinal))
+            return BadRequest(new { fehler = $"Zum Bestätigen bitte genau „{plan.Schuljahr}“ eintippen.", feld = "bestaetigung" });
+        var ich = await _db.Benutzer.FindAsync(IchId);
+        if (ich == null) return Unauthorized();
+        var adresse = HttpContext.Connection.RemoteIpAddress;
+        if (_bremse.Gesperrt(ich.Benutzername, adresse) is TimeSpan warten) return Gebremst(warten);
+        if (!PasswortHasher.Verify(dto.Passwort ?? "", ich.PasswortHash))
+        {
+            _bremse.Fehlschlag(ich.Benutzername, adresse);
+            _log.LogInformation("Jahresablauf: Löschen von {Schuljahr} – Passwort falsch ({Akteur}).", plan.Schuljahr, Ich);
+            return BadRequest(new { fehler = "Das Passwort stimmt nicht.", feld = "passwort" });
+        }
+        _bremse.Erfolg(ich.Benutzername);
+
+        // Der Server hat eben neu gezählt – gilt die Bestätigung noch für dieselben Zahlen?
+        if (!string.Equals(dto.Pruefsumme!.Trim(), plan.Zahlen.Pruefsumme(plan.Schuljahr), StringComparison.OrdinalIgnoreCase))
+            return Conflict(Jahresablauf.LoeschRueckfrage(plan, neu: true));
+
+        if (_auftraege.LoeschenPruefen(plan.Schuljahr, sperren: true) is string belegt2) return Conflict(new { fehler = belegt2 });
+        Jahresablauf.AktionErgebnis erg;
+        try
+        {
+            erg = await Jahresablauf.LoeschenAusfuehrenAsync(_db, plan, Ich, _log);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Jahresablauf: Löschen von {Schuljahr} fehlgeschlagen – die Transaktion wurde zurückgesetzt.",
+                plan.Schuljahr);
+            return StatusCode(500, new
+            {
+                fehler = $"Das Löschen von {plan.Schuljahr} ist fehlgeschlagen – es wurde nichts gelöscht (alles in einer " +
+                         "Transaktion). Details stehen im Protokoll der API."
+            });
+        }
+        finally
+        {
+            _auftraege.LoeschenBeenden();
+        }
+        return await AntwortAsync(erg);
+    }
+
+    private IActionResult Gebremst(TimeSpan w)
+    {
+        int sek = Math.Max(1, (int)Math.Ceiling(w.TotalSeconds));
+        Response.Headers.RetryAfter = sek.ToString(CultureInfo.InvariantCulture);
+        return StatusCode(StatusCodes.Status429TooManyRequests, new
+        {
+            fehler = $"Zu viele Fehlversuche. Bitte in {sek} Sekunden erneut versuchen.",
+            sekunden = sek
+        });
+    }
 
     private async Task<IActionResult> AntwortAsync(Jahresablauf.AktionErgebnis e)
     {

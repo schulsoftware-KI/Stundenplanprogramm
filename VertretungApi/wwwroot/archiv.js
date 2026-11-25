@@ -12,10 +12,18 @@
 //
 //  abDialog: „Aufbewahrung bestätigen“ (264) – Datei wählen (die SHA-256 rechnet der Browser auf dem Gerät, nichts wird
 //  hochgeladen) oder Prüfsumme eintragen (PowerShell Get-FileHash), Haken „mit 7-Zip und dem Kennwort geöffnet“, Ort
-//  (nie das Kennwort) und „aufzubewahren bis“ → POST api/jahresablauf/archiv/bestaetigen.
+//  (nie das Kennwort) und „aufzubewahren bis“ → POST api/jahresablauf/archiv/bestaetigen. P5c-2 (Befund C): Ist das
+//  Bestätigen gespeichert, kommen Meldung und neue Karte immer – auch wenn der Dialog inzwischen zu ist; solange die Anfrage
+//  läuft, schließt Esc ihn nicht. Befund E: Kennwortfelder mit autocomplete="new-password" (index.html).
+//
+//  ljDialog (P5c-2, 266–270): „Schuljahr … löschen…“ – POST api/jahresablauf/loeschen ohne Prüfsumme liefert 409 mit den
+//  Zahlen je Art; der Dialog zeigt sie samt Archiv-Export und Hinweisen. Löschen erst, wenn das Schuljahr eingetippt und
+//  das Passwort eingetragen ist; der zweite POST schickt beides mit der Prüfsumme der Zahlen. Andere Zahlen → 409 mit den
+//  neuen (der Dialog zeigt sie, Passwort neu); falsches Passwort → 400. Kommt keine Antwort (Zeitüberschreitung, Proxy),
+//  lädt die Karte neu – sie zeigt, ob gelöscht wurde. Das Passwort steht nach jeder Anfrage nicht mehr im Feld.
 //
 //  Wird nach jahresablauf.js und VOR hilfe.js/app.js geladen und nutzt deren Hilfen (h, el, senden, aktionsFehler,
-//  dialogAuf, …) erst zur Laufzeit. Einstieg archivInit() aus start() in app.js. Namen mit Präfix „ax…“ bzw. „ab…“.
+//  dialogAuf, …) erst zur Laufzeit. Einstieg archivInit() aus start() in app.js. Namen mit Präfix „ax…“, „ab…“ bzw. „lj…“.
 // =====================================================================
 
 const AX_KW_MIN = 12, AX_KW_MAX = 128;
@@ -35,6 +43,15 @@ const ab = {
   nr: 0,
   laeuft: false,
 };
+
+// P5c-2: Schuljahr löschen
+const lj = {
+  a: null,                // Aktion aus der Karte { schuljahr, text }
+  r: null,                // Rückfrage der API (JaLoeschRueckfrageDto)
+  laeuft: false,
+  nr: 0,
+};
+const LJ_ZEIT_MS = 15 * 60 * 1000;   // länger als das Befehls-Zeitlimit der API (10 Minuten)
 
 /** Wie Kennwort.Pruefen in der API (AesZip.cs). */
 function axKennwortFehler(k) {
@@ -439,27 +456,147 @@ async function abBestaetigen() {
   abPruefen();
   fehlerIn("abFehler", "");
   const nr = ab.nr;
+  let r;
   try {
-    const r = await senden("POST", "api/jahresablauf/archiv/bestaetigen", {
+    r = await senden("POST", "api/jahresablauf/archiv/bestaetigen", {
       schuljahr: j.schuljahr,
       pruefsumme: abNorm(el("abSumme").value),
       geoeffnet: el("abGeoeffnet").checked,
       ort: el("abOrt").value.trim(),
       aufbewahrenBis: el("abBis").value || null,
     });
-    if (nr !== ab.nr) return;
-    ab.laeuft = false;
-    abZu();
-    if (r && r.meldung) jaMeldung(r.meldung);
-    if (r && r.stand && jahresablaufOffen()) jaRender(r.stand);
   } catch (f) {
-    if (nr !== ab.nr) return;
-    const t = aktionsFehler(f);
-    if (t !== null) fehlerIn("abFehler", t);
-  } finally {
     ab.laeuft = false;
-    if (el("abDialog").open) abPruefen();
+    if (nr === ab.nr && el("abDialog").open) {
+      const t = aktionsFehler(f);
+      if (t !== null) fehlerIn("abFehler", t);
+      abPruefen();
+    }
+    return;
   }
+  // Befund C: gespeichert ist gespeichert – Meldung und Karte immer, auch wenn der Dialog inzwischen zu ist.
+  ab.laeuft = false;
+  if (el("abDialog").open) abZu();
+  jaNachAktion(r, `Bestätigt: Der Archiv-Export ${j.schuljahr} ist geprüft und aufbewahrt.`);
+}
+
+// ---------------------------------------------------------------------
+//  P5c-2: Schuljahr aus der Datenbank löschen (266–270)
+// ---------------------------------------------------------------------
+
+/** Knopf „Schuljahr … löschen…“: zuerst die Zahlen der API holen (409), dann der Dialog. */
+async function ljOeffnen(a) {
+  if (!state.anmeldung || state.anmeldung.rolle !== "Admin" || lj.laeuft) return;
+  jaMeldungZu();
+  const nr = ++lj.nr;
+  el("jaInfo").textContent = "Zähle, was gelöscht würde …";
+  try {
+    const d = await senden("POST", "api/jahresablauf/loeschen", { schuljahr: a.schuljahr });
+    // Ohne Rückfrage antwortet die API nicht mit 200 – sicherheitshalber den Stand zeigen.
+    if (nr !== lj.nr) return;
+    el("jaInfo").textContent = "";
+    if (d && d.stand && jahresablaufOffen()) jaRender(d.stand);
+  } catch (f) {
+    if (nr !== lj.nr) return;
+    el("jaInfo").textContent = "";
+    if (f instanceof HttpFehler && f.status === 409 && f.daten && f.daten.loeschen) {
+      ljZeigen(a, f.daten);
+      el("ljJahr").value = "";
+      el("ljPasswort").value = "";
+      ljPruefen();
+      dialogAuf(el("ljDialog"));
+      setTimeout(() => { try { el("ljJahr").focus(); } catch { /* egal */ } }, 0);
+    } else {
+      const t = aktionsFehler(f);
+      if (t !== null) jaMeldung(t, "hinweis");
+    }
+  }
+}
+
+/** Rückfrage r (JaLoeschRueckfrageDto) im Dialog zeigen – auch nach „andere Zahlen“ (r.neu). */
+function ljZeigen(a, r) {
+  lj.a = a;
+  lj.r = r;
+  el("ljTitel").textContent = r.titel || `Schuljahr ${r.schuljahr} löschen?`;
+  el("ljArchiv").textContent = r.archiv || "";
+  el("ljNeu").textContent = r.neu ? r.fehler || "Inzwischen sind es andere Zahlen." : "";
+  el("ljNeu").hidden = !r.neu;
+  const zahlen = r.zahlen || [];
+  el("ljZahlen").replaceChildren(...(zahlen.length
+    ? zahlen.map((z) => h("li", null, z.text))
+    : [h("li", null, "Keine Daten mehr – es bleibt nur der Vermerk „gelöscht“.")]));
+  el("ljHinweise").replaceChildren(...(r.hinweise || []).map((t) => h("li", null, t)));
+  el("ljJahrTitel").textContent = `Zum Bestätigen „${r.schuljahr}“ eintippen`;
+  el("ljJahr").placeholder = r.schuljahr;
+  el("ljOk").textContent = r.knopf || `Schuljahr ${r.schuljahr} endgültig löschen`;
+  el("ljStand").textContent = "";
+  fehlerIn("ljFehler", "");
+}
+
+function ljPruefen() {
+  const r = lj.r;
+  const ok = !!r && el("ljJahr").value.trim() === r.schuljahr && el("ljPasswort").value.length > 0;
+  el("ljOk").disabled = lj.laeuft || !ok;
+  el("ljAbbrechen").disabled = lj.laeuft;
+}
+
+/** Dialog schließen (ein laufendes Löschen geht auf dem Server weiter; die Antwort lädt dann die Karte). */
+function ljZu() {
+  lj.nr++;
+  el("ljPasswort").value = "";
+  dialogZu(el("ljDialog"));
+}
+
+async function ljLoeschen() {
+  const r = lj.r, a = lj.a;
+  if (!r || !a || lj.laeuft) return;
+  const jahr = el("ljJahr").value.trim();
+  const pw = el("ljPasswort").value;
+  if (jahr !== r.schuljahr || !pw) { ljPruefen(); return; }
+  lj.laeuft = true;
+  ljPruefen();
+  fehlerIn("ljFehler", "");
+  el("ljNeu").hidden = true;
+  el("ljStand").textContent = "Wird gelöscht … Das kann einige Minuten dauern – bitte warten.";
+  const nr = lj.nr;
+  let d;
+  try {
+    d = await senden("POST", "api/jahresablauf/loeschen",
+      { schuljahr: r.schuljahr, bestaetigung: jahr, passwort: pw, pruefsumme: r.pruefsumme }, LJ_ZEIT_MS);
+  } catch (f) {
+    lj.laeuft = false;
+    el("ljPasswort").value = "";
+    const offen = nr === lj.nr && el("ljDialog").open;
+    const status = f instanceof HttpFehler ? f.status : 0;
+    if (status === 409 && f.daten && f.daten.loeschen) {
+      // Andere Zahlen: zeigen, das eingetippte Schuljahr bleibt, das Passwort neu.
+      if (offen) { ljZeigen(a, f.daten); ljPruefen(); el("ljPasswort").focus(); }
+      else if (jahresablaufOffen()) jaLaden();
+      return;
+    }
+    if (status === 400 || status === 409 || status === 429 || status === 500) {
+      // Der Server hat geantwortet – gelöscht ist nichts (500: Transaktion zurückgesetzt).
+      if (offen) {
+        el("ljStand").textContent = "";
+        const t = aktionsFehler(f);
+        if (t !== null) fehlerIn("ljFehler", t);
+        ljPruefen();
+        try { (f.daten && f.daten.feld === "bestaetigung" ? el("ljJahr") : el("ljPasswort")).focus(); } catch { /* egal */ }
+      } else if (jahresablaufOffen()) jaLaden();
+      return;
+    }
+    // Keine (vollständige) Antwort – ob gelöscht wurde, zeigt der neue Stand der Karte.
+    if (offen) ljZu();
+    const t = aktionsFehler(f);
+    if (t !== null && jahresablaufOffen())
+      jaMeldung(`${t} Ob ${r.schuljahr} gelöscht wurde, zeigt die Karte „Archiv und Fristen“ (wird neu geladen).`, "hinweis");
+    if (jahresablaufOffen()) jaLaden();
+    return;
+  }
+  lj.laeuft = false;
+  el("ljPasswort").value = "";
+  if (el("ljDialog").open) ljZu();
+  jaNachAktion(d, `Schuljahr ${r.schuljahr} gelöscht.`);   // nur, solange der Jahresablauf offen ist
 }
 
 // ---------------------------------------------------------------------
@@ -493,5 +630,21 @@ function archivInit() {
   el("abOk").addEventListener("click", abBestaetigen);
   el("abAbbrechen").addEventListener("click", () => { if (!ab.laeuft) abZu(); });
   el("abDialog").addEventListener("close", () => { ab.nr++; ab.jahr = null; el("abDatei").value = ""; });
+  el("abDialog").addEventListener("cancel", (e) => { if (ab.laeuft) e.preventDefault(); });   // P5c-2 (Befund C)
   hintergrundSchliesst(el("abDialog"), () => { if (!ab.laeuft) abZu(); });
+
+  // P5c-2: Schuljahr löschen
+  el("ljJahr").addEventListener("input", ljPruefen);
+  el("ljPasswort").addEventListener("input", ljPruefen);
+  el("ljOk").addEventListener("click", ljLoeschen);
+  el("ljAbbrechen").addEventListener("click", () => { if (!lj.laeuft) ljZu(); });
+  el("ljDialog").addEventListener("cancel", (e) => { if (lj.laeuft) e.preventDefault(); });
+  el("ljDialog").addEventListener("close", () => {
+    lj.nr++;
+    el("ljPasswort").value = "";
+    el("ljJahr").value = "";
+    lj.r = null;
+    lj.a = null;
+  });
+  hintergrundSchliesst(el("ljDialog"), () => { if (!lj.laeuft) ljZu(); });
 }

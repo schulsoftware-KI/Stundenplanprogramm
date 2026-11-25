@@ -512,8 +512,8 @@
     </div>
     <p class="kleingedruckt ohne-einzug">Was zum Halbjahres- und Schuljahreswechsel zu tun ist – mit Ampel: grün erledigt,
       gelb zu tun, rot überfällig, grau nur ein Hinweis. Hier geschieht nichts von selbst: Die Links führen in den passenden
-      Bereich, die Knöpfe (Schuljahr abschließen, wieder öffnen, neues Schuljahr vorbereiten, Archiv-Export) fragen vorher
-      nach.</p>
+      Bereich, die Knöpfe (Schuljahr abschließen, wieder öffnen, neues Schuljahr vorbereiten, Archiv-Export, Schuljahr
+      löschen) fragen vorher nach.</p>
     <!-- P5b-2 (N1): Meldung der letzten Aktion – bleibt bis zur nächsten Aktion bzw. bis „×“ -->
     <div id="jaMeldung" class="ja-meldung a-gruen" role="status" hidden>
       <p id="jaMeldungText"></p>
@@ -1197,13 +1197,13 @@
       </label>
       <label class="feld" for="axKw1">Kennwort für das Archiv</label>
       <div class="passwort">
-        <input id="axKw1" class="eingabe" type="password" autocomplete="off" spellcheck="false" autocapitalize="off"
+        <input id="axKw1" class="eingabe" type="password" autocomplete="new-password" spellcheck="false" autocapitalize="off"
                maxlength="128" aria-describedby="axKwInfo" />
         <button id="axKwZeigen" class="textknopf klein" type="button" aria-pressed="false" aria-controls="axKw1 axKw2">Anzeigen</button>
       </div>
       <p id="axKwInfo" class="kleingedruckt ohne-einzug" aria-live="polite"></p>
       <label class="feld" for="axKw2">Kennwort wiederholen</label>
-      <input id="axKw2" class="eingabe" type="password" autocomplete="off" spellcheck="false" autocapitalize="off"
+      <input id="axKw2" class="eingabe" type="password" autocomplete="new-password" spellcheck="false" autocapitalize="off"
              maxlength="128" />
     </div>
     <div id="axStand" class="ax-stand" hidden>
@@ -1248,6 +1248,31 @@
     <div class="knopfreihe">
       <button id="abOk" class="hauptknopf" type="button" disabled>Bestätigen</button>
       <button id="abAbbrechen" class="textknopf" type="button">Abbrechen</button>
+    </div>
+  </dialog>
+
+  <!-- P5c-2 (266–270): Schuljahr aus der Datenbank löschen – Zahlen der API, Schuljahr eintippen, Passwort -->
+  <dialog id="ljDialog" class="fenster ja-dialog lj-dialog" aria-labelledby="ljTitel">
+    <h2 id="ljTitel" class="karte-titel">Schuljahr löschen?</h2>
+    <p class="lj-warnung" role="note"><strong>Das lässt sich nicht rückgängig machen.</strong> Die Daten stehen danach nur
+      noch im Archiv-Export. Vorher eine Sicherung der Datenbank anlegen.</p>
+    <p id="ljArchiv" class="kleingedruckt ohne-einzug"></p>
+    <p id="ljNeu" class="lj-neu" role="alert" hidden></p>
+    <p class="feld">Gelöscht wird</p>
+    <ul id="ljZahlen" class="ja-dliste lj-zahlen"></ul>
+    <details class="lj-mehr">
+      <summary>Was bleibt, was die Schule selbst löscht</summary>
+      <ul id="ljHinweise" class="ja-dliste"></ul>
+    </details>
+    <label class="feld" for="ljJahr" id="ljJahrTitel">Zum Bestätigen das Schuljahr eintippen</label>
+    <input id="ljJahr" class="eingabe" type="text" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="9" />
+    <label class="feld" for="ljPasswort">Dein Passwort</label>
+    <input id="ljPasswort" class="eingabe" type="password" autocomplete="current-password" maxlength="200" />
+    <p id="ljStand" class="kleingedruckt ohne-einzug" role="status"></p>
+    <p id="ljFehler" class="fehler klein" role="alert" hidden></p>
+    <div class="knopfreihe">
+      <button id="ljOk" class="hauptknopf gefahr" type="button" disabled>Endgültig löschen</button>
+      <button id="ljAbbrechen" class="textknopf" type="button">Abbrechen</button>
     </div>
   </dialog>
 

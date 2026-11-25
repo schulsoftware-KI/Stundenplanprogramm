@@ -19,8 +19,10 @@ namespace VertretungApi.Services;
 //    grau  wieder geöffnet (Export gilt danach als veraltet) bzw. gelöscht (P5c-2)
 //  Dazu der Punkt „Fristen“ (Löschfristen der Karte „Datenschutz“ mit „abgestimmt am / mit“; gelb, solange eine nicht
 //  abgestimmt ist) und in der Karte „Schuljahreswechsel“ nach dem Jahresabschluss ein Punkt mit Sprung hierher.
-//  Ohne abgeschlossenes Schuljahr ist die Karte grau („Erst nach einem Jahresabschluss“). Das Löschen ganzer Schuljahre
-//  (Frist „Klassenbuchdaten behalten“) kommt mit P5c-2.
+//  Ohne abgeschlossenes Schuljahr ist die Karte grau („Erst nach einem Jahresabschluss“).
+//  P5c-2 (266–270): Im grünen Punkt steht, ab wann das Schuljahr laut Frist „Klassenbuchdaten ganzer Schuljahre behalten“
+//  gelöscht werden darf; ist die Frist erreicht, wird er gelb mit dem roten Knopf „Schuljahr … löschen…“ (Ablauf:
+//  JahresablaufLoeschen.cs). Ein gelöschtes Jahr ist grau mit den Zahlen; die Erinnerung „vernichten“ bleibt auch danach.
 //
 //  Aktionen (nur Admin, ohne Namen von Schülern in Protokoll und Log):
 //    ArchivPlanAsync     – prüft und plant den Archiv-Export (abgeschlossen, nicht gelöscht, mit Kalender); den Auftrag
@@ -123,7 +125,8 @@ public static partial class Jahresablauf
         => utc is DateTime t ? DateTime.SpecifyKind(t, DateTimeKind.Utc).ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture) : "";
 
     /// <summary>Punkt eines Schuljahres in der Karte „Archiv und Fristen“ (ohne Datenbank, für den Nachbau prüfbar).</summary>
-    public static List<JaPunktDto> ArchivPunkte(SchuljahrDb z, DateOnly heute, JaArchivAuftragDto? auftrag)
+    /// <param name="frist">P5c-2: Frist „Klassenbuchdaten ganzer Schuljahre behalten“ für dieses Jahr (null = wie „aus“).</param>
+    public static List<JaPunktDto> ArchivPunkte(SchuljahrDb z, DateOnly heute, JaArchivAuftragDto? auftrag, LoeschFrist? frist)
     {
         string jahr = z.Schuljahr;
         string titel = $"Archiv-Export {jahr}";
@@ -154,7 +157,7 @@ public static partial class Jahresablauf
         {
             ampel = Gelb;
             text = $"Noch kein Archiv-Export. Er enthält die Klassenbücher, Kurshefte und die Fehlzeiten je Halbjahr von {jahr} " +
-                   "in einer mit Kennwort verschlüsselten Zip-Datei, die die Schule selbst aufbewahrt.";
+                   "in einer mit Kennwort verschlüsselten Zip-Datei, die die Schule selbst aufbewahrt." + FristOhneExport(frist, heute);
             aktionen.Add(erstellen);
         }
         else if (ArchivVeraltet(z))
@@ -162,50 +165,86 @@ public static partial class Jahresablauf
             ampel = Gelb;
             text = $"Der Archiv-Export {Zeitpunkt(z.ArchivAm, z.ArchivVon)} ist veraltet: {jahr} wurde danach wieder geöffnet " +
                    $"{Zeitpunkt(z.GeoeffnetAm, z.GeoeffnetVon)} und abgeschlossen {Zeitpunkt(z.AbgeschlossenAm, z.AbgeschlossenVon)}. " +
-                   "Bitte neu erstellen und die Aufbewahrung bestätigen.";
+                   "Bitte neu erstellen und die Aufbewahrung bestätigen." + FristOhneExport(frist, heute);
             aktionen.Add(erstellen);
         }
         else if (!ArchivBestaetigt(z))
         {
             ampel = Gelb;
             text = $"{ArchivBeschreibung(z)}. Noch nicht bestätigt, dass die Datei geprüft (mit 7-Zip und dem Kennwort geöffnet) " +
-                   "und sicher aufbewahrt ist.";
+                   "und sicher aufbewahrt ist." + FristOhneExport(frist, heute);
             aktionen.Add(bestaetigen);
             aktionen.Add(erneut);
         }
         else
         {
-            ampel = Gruen;
+            // P5c-2 (266, 241): löschbar erst nach der Frist – der Knopf erscheint nur, wenn alles erfüllt ist
+            var (fristText, loeschbar) = FristBestaetigt(z, frist, heute);
+            ampel = loeschbar ? Gelb : Gruen;
             text = $"{ArchivBeschreibung(z)}. Geprüft und aufbewahrt (bestätigt {Zeitpunkt(z.AufbewahrtAm, z.AufbewahrtVon)}): " +
                    $"Ort „{z.AufbewahrtOrt}“" + (z.AufbewahrenBis is DateOnly bis ? $", aufzubewahren bis {D(bis)}." : ".") +
-                   " Gelöscht wird nichts von selbst.";
+                   " " + fristText;
+            if (loeschbar) aktionen.Add(new JaAktionDto("loeschen", $"Schuljahr {jahr} löschen…", jahr, Gefahr: true));
             aktionen.Add(new JaAktionDto("archivBestaetigen", "Bestätigung ändern…", jahr));
             aktionen.Add(erneut);
         }
 
-        if (auftrag != null && auftrag.Art == ArchivArt.Export && auftrag.Schuljahr == jahr)
+        if (z.GeloeschtAm == null && auftrag != null && auftrag.Art == ArchivArt.Export && auftrag.Schuljahr == jahr)
         {
             text += AuftragText(auftrag);
             if (auftrag.Eigener && auftrag.Status is ArchivAuftraege.Laeuft or ArchivAuftraege.Fertig)
             {
-                aktionen.RemoveAll(a => a.Id == "archivExport");
+                aktionen.RemoveAll(a => a.Id is "archivExport" or "loeschen");   // P5c-2: erst den neuen Export abholen
                 aktionen.Insert(0, new JaAktionDto("archivAuftrag",
                     auftrag.Status == ArchivAuftraege.Fertig ? "Herunterladen…" : "Fortschritt ansehen…", jahr));
             }
         }
         l.Add(new JaPunktDto("archivJahr", titel, ampel, text, Aktionen: aktionen.Count > 0 ? aktionen : null));
 
-        if (ampel == Gruen && z.AufbewahrenBis is DateOnly frist && frist <= heute)
+        // „vernichten“: auch nach dem Löschen des Schuljahres (P5c-2) – dann stehen die Daten nur noch im Archiv-Export.
+        if (ArchivBestaetigt(z) && z.AufbewahrenBis is DateOnly bisTag && bisTag <= heute)
             l.Add(new JaPunktDto("archivVernichten", $"Archiv-Export {jahr} vernichten", Grau,
-                $"„Aufzubewahren bis“ ({D(frist)}) ist erreicht: Der Archiv-Export {jahr} darf jetzt vernichtet werden (Ort: " +
-                $"{z.AufbewahrtOrt}) – das erledigt die Schule selbst; die App kann die Datei nicht löschen."));
+                $"„Aufzubewahren bis“ ({D(bisTag)}) ist erreicht: Der Archiv-Export {jahr} darf jetzt vernichtet werden (Ort: " +
+                $"{z.AufbewahrtOrt}) – das erledigt die Schule selbst; die App kann die Datei nicht löschen." +
+                (z.GeloeschtAm != null ? $" Die Daten von {jahr} sind aus der Datenbank schon gelöscht – mit dem Archiv-Export sind " +
+                                         "sie ganz weg." : "")));
         return l;
+    }
+
+    /// <summary>P5c-2: Satz zur Frist, solange der Archiv-Export fehlt, veraltet oder nicht bestätigt ist.</summary>
+    private static string FristOhneExport(LoeschFrist? f, DateOnly heute)
+    {
+        if (f == null || f.Jahre <= 0) return "";
+        var ab = LoeschbarAb(f.Ende, f.Jahre);
+        return heute >= ab
+            ? $" Die Frist „Klassenbuchdaten ganzer Schuljahre behalten“ ist erreicht (seit {D(ab)}) – löschen geht erst nach " +
+              "einem gültigen Archiv-Export und der Bestätigung seiner Aufbewahrung."
+            : $" Laut Frist löschbar ab {D(ab)} – vorher braucht es einen gültigen, bestätigten Archiv-Export.";
+    }
+
+    /// <summary>P5c-2: Satz zur Frist bei bestätigtem Export – und ob der Knopf „löschen…“ erscheint.</summary>
+    private static (string Text, bool Loeschbar) FristBestaetigt(SchuljahrDb z, LoeschFrist? f, DateOnly heute)
+    {
+        if (f == null || f.Jahre <= 0)
+            return ("Die Frist „Klassenbuchdaten ganzer Schuljahre behalten“ ist aus – die Daten bleiben in der Datenbank; " +
+                    "gelöscht wird nichts von selbst.", false);
+        var ab = LoeschbarAb(f.Ende, f.Jahre);
+        string frist = $"{f.Jahre} {(f.Jahre == 1 ? "Jahr" : "Jahre")} nach dem Ende am {D(f.Ende)}";
+        if (heute < ab)
+            return ($"Laut Frist löschbar ab {D(ab)} ({frist}); gelöscht wird nichts von selbst.", false);
+        if (f.Aktuell)
+            return ($"Die Frist ist erreicht ({frist}), aber {z.Schuljahr} ist das „Aktuelle Schuljahr“ – löschen geht erst nach " +
+                    "„Neues Schuljahr vorbereiten…“.", false);
+        return ($"Die Frist ist erreicht ({frist}, löschbar seit {D(ab)}): Die Daten von {z.Schuljahr} dürfen aus der " +
+                "Datenbank. Gelöscht wird nur per Knopf – mit Rückfrage, den Zahlen und deinem Passwort; danach stehen sie nur " +
+                "noch im Archiv-Export.", true);
     }
 
     /// <summary>Löschfristen der Karte „Datenschutz“ mit „abgestimmt am / mit“ (nur Überblick).</summary>
     public static JaPunktDto FristenPunkt(IReadOnlyDictionary<string, Einstellung> zeilen)
     {
-        var defs = K.Alle.Where(d => d.Gruppe == "datenschutz" && d.Loescht).ToList();
+        // P5c-2: dazu „Klassenbuchdaten ganzer Schuljahre behalten“ (löscht nicht selbst, daher nicht „Loescht“)
+        var defs = K.Alle.Where(d => d.Gruppe == "datenschutz" && (d.Loescht || d.Schluessel == K.SchuljahrBehalten)).ToList();
         var liste = new List<string>();
         int offen = 0;
         foreach (var d in defs)
@@ -221,7 +260,6 @@ public static partial class Jahresablauf
             }
             liste.Add($"{d.Titel}: {K.Text(d, z?.Wert)} – {abgestimmt}");
         }
-        liste.Add("Klassenbuchdaten ganzer Schuljahre: bleiben in der Datenbank (das Löschen ganzer Schuljahre kommt später)");
         return new JaPunktDto("fristen", "Fristen", offen > 0 ? Gelb : Grau,
             offen > 0
                 ? $"{Anzahl(offen, "Frist ist", "Fristen sind")} noch nicht mit der bzw. dem Datenschutzbeauftragten abgestimmt " +
@@ -230,8 +268,8 @@ public static partial class Jahresablauf
             liste, Ziele: new[] { new JaZielDto("einstellungen", "Einstellungen") });
     }
 
-    private static async Task<(JaKarteDto Karte, List<JaArchivJahrDto> Jahre)> ArchivKarteAsync(AppDbContext db, DateOnly heute,
-        JaArchivAuftragDto? auftrag)
+    private static async Task<(JaKarteDto Karte, List<JaArchivJahrDto> Jahre)> ArchivKarteAsync(AppDbContext db, SchulWerte w,
+        DateOnly heute, JaArchivAuftragDto? auftrag)
     {
         const string titel = "Archiv und Fristen";
         var zeilen = (await db.Schuljahre.AsNoTracking().ToListAsync())
@@ -243,7 +281,12 @@ public static partial class Jahresablauf
         var einstellungen = await db.Einstellungen.AsNoTracking().ToDictionaryAsync(e => e.Schluessel, StringComparer.Ordinal);
 
         var punkte = new List<JaPunktDto>();
-        foreach (var z in zeilen) punkte.AddRange(ArchivPunkte(z, heute, auftrag));
+        foreach (var z in zeilen)
+        {
+            // P5c-2: Ende laut Kalender (ohne Kalender der 31.07.) und die Frist in Jahren
+            var ende = kalender.TryGetValue(z.Schuljahr, out var kz) ? kz.Ende : EndeNachDatum(z.Schuljahr);
+            punkte.AddRange(ArchivPunkte(z, heute, auftrag, new LoeschFrist(w.SchuljahrBehaltenJahre, ende, z.Schuljahr == w.Schuljahr)));
+        }
         punkte.Add(FristenPunkt(einstellungen));
         var jahre = zeilen.Select(z =>
         {
@@ -257,7 +300,8 @@ public static partial class Jahresablauf
         string text = aktiv
             ? "Je abgeschlossenem Schuljahr ein Archiv-Export: Klassenbücher, Kurshefte und Fehlzeiten in einer mit Kennwort " +
               "(AES-256) verschlüsselten Zip-Datei, die die Schule selbst aufbewahrt – die App speichert sie nicht. Danach " +
-              "bestätigen, dass sie geprüft und aufbewahrt ist. Gelöscht wird nichts von selbst."
+              "bestätigen, dass sie geprüft und aufbewahrt ist. Gelöscht wird nichts von selbst: Ist die Frist „Klassenbuchdaten " +
+              "ganzer Schuljahre behalten“ erreicht, erscheint der Knopf „Schuljahr … löschen…“."
             : "Erst nach einem Jahresabschluss: Dann gibt es hier je abgeschlossenem Schuljahr den Archiv-Export (verschlüsselte " +
               "Zip-Datei) und die Bestätigung, dass er geprüft und aufbewahrt ist.";
         var ampel = aktiv ? Schlechteste(punkte.Select(p => p.Ampel)) : Grau;
@@ -347,6 +391,13 @@ public static partial class Jahresablauf
         {
             var zeile = await db.Schuljahre.FirstOrDefaultAsync(s => s.Schuljahr == plan.Schuljahr);
             string? aufgehoben = null;
+            // P5c-2: Ein inzwischen gelöschtes Jahr behält seine Angaben (der bestätigte Export war die Grundlage des Löschens).
+            if (zeile != null && zeile.GeloeschtAm != null)
+            {
+                log.LogWarning("Archiv: Archiv-Export {Schuljahr} abgeholt, das Schuljahr ist aber inzwischen gelöscht – die " +
+                               "Angaben des bestätigten Exports bleiben.", plan.Schuljahr);
+                zeile = null;
+            }
             if (zeile != null)
             {
                 if (zeile.AufbewahrtAm != null)
@@ -369,7 +420,8 @@ public static partial class Jahresablauf
                 Von = plan.Von, Bis = ExportService.BisHoechstensHeute(plan.Bis), MitSchuelerEintraegen = plan.MitSchuelerEintraegen
             });
             Protokoll(db, a.Akteur, $"Archiv-Export {plan.Schuljahr} erstellt",
-                $"{zahlen}, {(plan.MitSchuelerEintraegen ? "mit" : "ohne")} Schülereinträge, Prüfsumme {a.Pruefsumme}" +
+                $"{zahlen}, {(plan.MitSchuelerEintraegen ? "mit Schülereinträgen" : "ohne Schülereinträge")}, Prüfsumme " +
+                $"{a.Pruefsumme}" +
                 (aufgehoben != null ? $". {aufgehoben}" : ""));
             await db.SaveChangesAsync();
             log.LogInformation("Jahresablauf: Archiv-Export {Schuljahr} heruntergeladen von {Akteur} ({Dateien} Dateien, {Groesse} " +

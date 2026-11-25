@@ -36,6 +36,11 @@ namespace VertretungApi.Services;
 //  P6b (Entscheidungen 233, 236): zwei Schalter in der Karte „Datenschutz“ – „Leseprotokoll“ (Standard aus, 70) und
 //  „Grund der Entschuldigung erfassen“ (Standard an = wie bisher). Das Leseprotokoll fragt ihn bei jeder Ansicht aus dem
 //  Zwischenspeicher ab (LeseprotokollAn) – ohne Kalender. „Aufbewahrung der Protokolle“ gilt auch für das Leseprotokoll.
+//
+//  P5c-2 (Entscheidung 266): Frist „Klassenbuchdaten ganzer Schuljahre behalten … Jahre nach dem Ende des Schuljahres“
+//  (Karte „Datenschutz“, Standard 0 = nicht löschen, 1–15). Sie löscht nie selbst (241) – sie gibt nur im Jahresablauf den
+//  Knopf „Schuljahr … löschen…“ frei (Services/JahresablaufLoeschen.cs). Deshalb ist sie keine „Loescht“-Frist: keine
+//  Rückfrage mit Zahl beim Verkürzen, kein Aufräumen nach dem Speichern; die Antwort nennt, ab wann welches Jahr löschbar ist.
 // =====================================================================
 
 public enum EinstellungsTyp { Text, Schuljahr, Datum, Zahl, Schalter }
@@ -67,6 +72,7 @@ public static class EinstellungsKatalog
     public const string EintraegeLoeschen = "Datenschutz.EintraegeLoeschenNachTagen";
     public const string GruendeLoeschen = "Datenschutz.GruendeLoeschenNachTagen";             // P4a (208)
     public const string AbgangKontenLoeschen = "Datenschutz.AbgangKontenLoeschenNachTagen";   // P4a (208)
+    public const string SchuljahrBehalten = "Datenschutz.SchuljahrBehaltenJahre";            // P5c-2 (266)
     public const string ProtokollTage = "Datenschutz.ProtokollTage";
     public const string BerichteNurAdmin = "Datenschutz.BerichteNurAdmin";
     public const string Leseprotokoll = "Datenschutz.Leseprotokoll";                     // P6b (233)
@@ -147,6 +153,19 @@ public static class EinstellungsKatalog
             "0 (aus)", StandardWert: "0",
             DsbFrage: "Wie lange bleiben die Konten abgegangener Schülerinnen und Schüler bestehen?",
             Min: 0, Max: 3650, Einheit: "Tage", NullText: "aus", Loescht: true),
+        // P5c-2 (Entscheidung 266): löscht nie selbst – gibt nur den Knopf im Jahresablauf frei (daher nicht „Loescht“)
+        new EinstellungsDef(SchuljahrBehalten, "datenschutz", "Klassenbuchdaten ganzer Schuljahre behalten",
+            EinstellungsTyp.Zahl,
+            "So viele Jahre nach dem Ende eines abgeschlossenen Schuljahres (laut Kalender) bietet der Jahresablauf an, das " +
+            "ganze Schuljahr aus der Datenbank zu löschen: Klassenbuch, Fehlzeiten, Entschuldigungen, Einträge, Klassen und " +
+            "Kurse, Vertretungen, Grundpläne und Kalender, dazu Schülerinnen und Schüler ohne Daten in einem anderen " +
+            "Schuljahr samt Konto. Gelöscht wird nie von selbst – nur per Knopf (Jahresablauf → „Archiv und Fristen“), nach " +
+            "einem bestätigten Archiv-Export, mit Rückfrage und Passwort. Beispiel 1 Jahr: 2026/27 (Ende 31.07.2027) ab dem " +
+            "01.08.2028. 0 = nicht löschen.",
+            "0 (aus)", StandardWert: "0",
+            DsbFrage: "Wie lange bleiben die Klassenbuchdaten eines abgeschlossenen Schuljahres in der Datenbank (Löschkonzept, " +
+                      "VO-DV I) – und wie lange wird der Archiv-Export aufbewahrt?",
+            Min: 0, Max: 15, Einheit: "Jahre", NullText: "aus"),
         new EinstellungsDef(ProtokollTage, "datenschutz", "Aufbewahrung der Protokolle", EinstellungsTyp.Zahl,
             "So lange bleiben das Kontenprotokoll, das Anmeldeprotokoll, das Leseprotokoll, das Download-Protokoll, das " +
             "Protokoll dieser Einstellungen und die Protokolle der SchILD-Importe; ältere Einträge werden gelöscht. Vom SchILD-Import bleibt je Schuljahr und " +
@@ -295,7 +314,7 @@ public static class EinstellungsKatalog
                     ? t.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture) : wert;
             case EinstellungsTyp.Zahl:
                 if (wert == "0" && d.NullText != null) return $"0 ({d.NullText})";
-                return d.Einheit != null ? $"{wert} {d.Einheit}" : wert;
+                return d.Einheit != null ? $"{wert} {(wert == "1" ? Einzahl(d.Einheit) : d.Einheit)}" : wert;
             case EinstellungsTyp.Schalter:
                 return wert == "true" ? "an" : "aus";
             case EinstellungsTyp.Text:
@@ -304,6 +323,15 @@ public static class EinstellungsKatalog
                 return wert;
         }
     }
+
+    /// <summary>P5c-2: „1 Jahr“ statt „1 Jahre“ (auch „1 Tag“, „1 Stunde“).</summary>
+    public static string Einzahl(string einheit) => einheit switch
+    {
+        "Tage" => "Tag",
+        "Stunden" => "Stunde",
+        "Jahre" => "Jahr",
+        _ => einheit,
+    };
 
     /// <summary>Schuljahr zu einem Tag: ab 1. August das neue (z. B. 15.09.2026 → „2026/27“, 15.03.2027 → „2026/27“).</summary>
     public static string SchuljahrVon(DateOnly d)
@@ -341,7 +369,8 @@ public sealed record SchulWerte(
     int GruendeLoeschenNachTagen = 0,       // P4a (208): 0 = nicht löschen
     int AbgangKontenLoeschenNachTagen = 0,  // P4a (208): 0 = nicht löschen
     bool Leseprotokoll = false,             // P6b (233): Standard aus
-    bool GrundErfassen = true)              // P6b (236): Standard an
+    bool GrundErfassen = true,              // P6b (236): Standard an
+    int SchuljahrBehaltenJahre = 0)         // P5c-2 (266): 0 = ganze Schuljahre nicht löschen
 {
     public const string StandardAppName = "Stundenplan";
 
@@ -535,7 +564,8 @@ public sealed class Schuleinstellungen
             GruendeLoeschenNachTagen: Z(EinstellungsKatalog.GruendeLoeschen),
             AbgangKontenLoeschenNachTagen: Z(EinstellungsKatalog.AbgangKontenLoeschen),
             Leseprotokoll: EinstellungsKatalog.AlsSchalter(R(EinstellungsKatalog.Leseprotokoll), false),
-            GrundErfassen: EinstellungsKatalog.AlsSchalter(R(EinstellungsKatalog.GrundErfassen), true));
+            GrundErfassen: EinstellungsKatalog.AlsSchalter(R(EinstellungsKatalog.GrundErfassen), true),
+            SchuljahrBehaltenJahre: Z(EinstellungsKatalog.SchuljahrBehalten));
     }
 
     // -----------------------------------------------------------------

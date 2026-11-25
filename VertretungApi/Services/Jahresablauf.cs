@@ -24,6 +24,7 @@ namespace VertretungApi.Services;
 //  P5a (215–217, 239–242): Karte „Schuljahreswechsel“ mit Jahresabschluss, Wiedereröffnen und „Neues Schuljahr
 //  vorbereiten“ – Services/JahresablaufSchuljahr.cs. P5c-1: Karte „Archiv und Fristen“ (Archiv-Export, Bestätigung,
 //  Fristen) – Services/JahresablaufArchiv.cs; sie steht unter „Schuljahreswechsel“ (bzw. darüber, wenn dort nichts dran ist).
+//  P5c-2: Löschen ganzer Schuljahre nach der Frist – Services/JahresablaufLoeschen.cs (Knopf in der Karte „Archiv und Fristen“).
 //
 //  „Heute“ = Heute der API (Testdatum, 221). Keine Namen – nur Zahlen, Daten und Bezeichnungen.
 // =====================================================================
@@ -60,7 +61,7 @@ public static partial class Jahresablauf
         // P5c-1: „Archiv und Fristen“ darunter (aktiv) bzw. darüber (Schuljahreswechsel noch nicht dran); ohne
         // abgeschlossenes Schuljahr ganz unten.
         var schuljahr = await SchuljahrKarteAsync(db, w, heute, produktiv, akteur);
-        var (archiv, jahre) = await ArchivKarteAsync(db, heute, auftrag);
+        var (archiv, jahre) = await ArchivKarteAsync(db, w, heute, auftrag);
         if (schuljahr.Aktiv)
         {
             karten.Insert(0, schuljahr);

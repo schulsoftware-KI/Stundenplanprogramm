@@ -19,6 +19,9 @@ namespace VertretungApi.Services;
 //    - Abholen und Verwerfen darf nur, wer den Auftrag gestartet hat (sein Kennwort); andere Admins sehen nur, dass
 //      gerade ein Archiv entsteht.
 //    - Ein Auftrag, der länger als 3 Stunden läuft, wird abgebrochen (Schutz vor einem hängenden Auftrag).
+//    - P5c-2 (270): Während ein Schuljahr gelöscht wird, startet kein Archiv; gelöscht wird nur, solange kein Archiv entsteht
+//      und kein fertiger Archiv-Export dieses Jahres auf den Download wartet (LoeschenPruefen/LoeschenBeenden, unter
+//      derselben Sperre wie Starten).
 //  Was der Server sich nach dem Abholen merkt (Zeile „Schuljahre“, Protokolle), schreibt JahresablaufArchiv.cs.
 // =====================================================================
 
@@ -80,6 +83,7 @@ public sealed class ArchivAuftraege : BackgroundService
     private readonly ILogger<ArchivAuftraege> _log;
     private readonly object _sperre = new();
     private Auftrag? _auftrag;
+    private bool _loeschen;      // P5c-2: gerade wird ein Schuljahr gelöscht
 
     public ArchivAuftraege(IServiceScopeFactory scopes, ILogger<ArchivAuftraege> log)
     {
@@ -120,6 +124,8 @@ public sealed class ArchivAuftraege : BackgroundService
         Auftrag neu;
         lock (_sperre)
         {
+            if (_loeschen)   // P5c-2 (270)
+                return "Gerade wird ein Schuljahr aus der Datenbank gelöscht – bitte danach erneut versuchen.";
             var alt = _auftrag;
             if (alt != null)
             {
@@ -138,6 +144,33 @@ public sealed class ArchivAuftraege : BackgroundService
         }
         _ = Task.Run(() => LaufAsync(neu, kennwort));
         return null;
+    }
+
+    /// <summary>
+    /// P5c-2 (270): Darf <paramref name="schuljahr"/> jetzt gelöscht werden? null = ja; mit <paramref name="sperren"/> startet
+    /// danach kein Archiv mehr, bis <see cref="LoeschenBeenden"/>. Sonst der Grund (ein Archiv entsteht, ein fertiger
+    /// Archiv-Export dieses Jahres wartet auf den Download, ein anderes Löschen läuft).
+    /// </summary>
+    public string? LoeschenPruefen(string schuljahr, bool sperren)
+    {
+        lock (_sperre)
+        {
+            if (_loeschen) return "Gerade wird schon ein Schuljahr gelöscht – bitte warten, bis es fertig ist.";
+            var a = _auftrag;
+            if (a != null && a.Status == Laeuft)
+                return $"Gerade erstellt {a.Akteur} ein Archiv (seit {Uhr(a.Start)} Uhr) – erst danach löschen.";
+            if (a != null && a.Status == Fertig && a.Plan.Art == ArchivArt.Export && a.Plan.Schuljahr == schuljahr)
+                return $"Ein neuer Archiv-Export {schuljahr} von {a.Akteur} wartet noch auf den Download – erst herunterladen und " +
+                       "seine Aufbewahrung bestätigen oder ihn verwerfen, dann löschen.";
+            if (sperren) _loeschen = true;
+            return null;
+        }
+    }
+
+    /// <summary>P5c-2: nach dem Löschen (auch bei Fehlern) – Archive gehen wieder.</summary>
+    public void LoeschenBeenden()
+    {
+        lock (_sperre) _loeschen = false;
     }
 
     /// <summary>Eigenen Auftrag abbrechen bzw. die fertige Datei verwerfen. false = es gab keinen eigenen.</summary>

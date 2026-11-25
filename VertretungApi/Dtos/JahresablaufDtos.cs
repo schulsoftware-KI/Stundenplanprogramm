@@ -12,7 +12,7 @@ public sealed record JaZielDto(string Id, string Text);
 /// <summary>
 /// P5a: Knopf für eine Aktion mit Rückfrage („abschliessen“, „oeffnen“, „vorbereiten“) für ein Schuljahr. Gefahr = roter Knopf.
 /// P5c-1: „archivExport“, „archivBestaetigen“, „archivAuftrag“ (Dialoge der Karte „Archiv und Fristen“); Hinweis = zusätzlicher
-/// Satz für die Rückfrage (z. B. „Wieder öffnen“ nennt den Archiv-Export).
+/// Satz für die Rückfrage (z. B. „Wieder öffnen“ nennt den Archiv-Export). P5c-2: „loeschen“ (Schuljahr aus der Datenbank).
 /// </summary>
 public sealed record JaAktionDto(string Id, string Text, string Schuljahr, bool Gefahr = false, string? Hinweis = null);
 
@@ -171,3 +171,30 @@ public sealed record JaArchivAuftragAntwortDto(JaArchivAuftragDto? Auftrag);
 /// </summary>
 public sealed record JaArchivBestaetigenDto(string? Schuljahr, string? Pruefsumme, bool Geoeffnet, string? Ort,
     DateOnly? AufbewahrenBis);
+
+// ---- P5c-2 (266–270): Schuljahr aus der Datenbank löschen ----
+
+/// <summary>
+/// „Schuljahr … löschen…“: ohne Pruefsumme → 409 mit den Zahlen (JaLoeschRueckfrageDto). Zum Löschen: Bestaetigung = das
+/// eingetippte Schuljahr („2026/27“), Passwort des eigenen Kontos, Pruefsumme der Zahlen aus der Rückfrage.
+/// </summary>
+public sealed record JaLoeschenDto(string? Schuljahr, string? Bestaetigung, string? Passwort, string? Pruefsumme);
+
+/// <summary>Eine Zeile der Rückfrage: Art (Schlüssel), lesbarer Text mit Zahl, Anzahl. Keine Namen.</summary>
+public sealed record JaLoeschZeileDto(string Art, string Text, int Anzahl);
+
+/// <summary>
+/// Rückfrage vor dem Löschen (409). Loeschen = immer true (Kennung für die App); Neu = die Zahlen haben sich seit der letzten
+/// Rückfrage geändert; Archiv = der bestätigte Archiv-Export (Zeitpunkt, Größe, Prüfsumme, Ort).
+/// </summary>
+public sealed record JaLoeschRueckfrageDto(
+    bool Loeschen,
+    string Schuljahr,
+    string Titel,
+    string Fehler,
+    IReadOnlyList<JaLoeschZeileDto> Zahlen,
+    string Pruefsumme,
+    IReadOnlyList<string> Hinweise,
+    string Archiv,
+    bool Neu,
+    string Knopf);

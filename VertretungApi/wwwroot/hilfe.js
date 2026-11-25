@@ -478,6 +478,11 @@ const HI_THEMEN = [
           "weil der nächste Import ihn braucht.",
       ] },
       "Standard ist bei den neuen Fristen „0 (aus)“: Es wird nichts gelöscht, bis du eine Frist einträgst.",
+      // P5c-2 (266)
+      "**Klassenbuchdaten ganzer Schuljahre behalten** (Jahre nach dem Ende des Schuljahres, Standard aus) löscht **nichts " +
+        "selbst** – es gibt nur im Jahresablauf (Karte „Archiv und Fristen“) den Knopf „Schuljahr … löschen…“ frei, nach " +
+        "einem bestätigten Archiv-Export und mit Rückfrage und Passwort. Nach dem Speichern steht da, ab wann welches " +
+        "abgeschlossene Schuljahr löschbar ist.",
       "**Dauer einer Anmeldung** und **„Angemeldet bleiben“** gelten für neue Anmeldungen; wer schon angemeldet ist, " +
         "bleibt es bis zum Ende der bisherigen Dauer. 0 Tage bei „Angemeldet bleiben“ blendet den Haken auf der " +
         "Anmeldeseite aus.",
@@ -613,8 +618,33 @@ const HI_THEMEN = [
         "Ist „aufzubewahren bis“ erreicht, erinnert die Karte daran, dass die Schule die Datei **vernichten** darf – das " +
           "erledigt sie selbst.",
         "Punkt **„Fristen“:** die Löschfristen aus Einstellungen → Datenschutz mit „abgestimmt am / mit“ – gelb, solange eine " +
-          "noch nicht mit der bzw. dem Datenschutzbeauftragten abgestimmt ist. Die Klassenbuchdaten ganzer Schuljahre löscht " +
-          "die App (noch) nicht.",
+          "noch nicht mit der bzw. dem Datenschutzbeauftragten abgestimmt ist.",
+      ] },
+      // P5c-2 (266–270)
+      { zwischen: "Schuljahr löschen" },
+      "Ganze Schuljahre bleiben in der Datenbank, bis die Frist **„Klassenbuchdaten ganzer Schuljahre behalten“** " +
+        "(Einstellungen → Datenschutz, Standard aus) erreicht ist: so viele Jahre nach dem Ende des Schuljahres laut Kalender " +
+        "(1 Jahr: 2026/27 ab dem 01.08.2028). Die Frist **löscht nichts von selbst** – sie gibt nur den roten Knopf " +
+        "**„Schuljahr … löschen…“** frei. Er erscheint erst, wenn das Jahr abgeschlossen ist, sein Archiv-Export nach dem " +
+        "letzten Abschluss erstellt und seine Aufbewahrung bestätigt ist und es nicht das „Aktuelle Schuljahr“ ist.",
+      { liste: [
+        "Der Knopf zählt zuerst, **was gelöscht würde**: Stunden mit Klassenbuch (Anwesenheit, Thema, Hausaufgabe), " +
+          "Entschuldigungen, Einträge, Änderungsverlauf, Klassen, Kurse und Gruppen, Vertretungen (auch Gründe), Grundpläne, " +
+          "Kalender – und Schülerinnen und Schüler, die in keinem anderen Schuljahr Daten haben (Abschluss, Abgang), samt " +
+          "Konto. Zuständigkeiten für das Jahr entfallen (die Konten werden Lehrkraft).",
+        "Zum Bestätigen das **Schuljahr eintippen** und **dein Passwort** eingeben. Haben sich die Zahlen inzwischen " +
+          "geändert, zeigt die App die neuen – dann noch einmal bestätigen.",
+        "**Vorher eine Sicherung** der Datenbank anlegen. Gelöscht wird in einem Schritt – klappt etwas nicht, bleibt alles, " +
+          "wie es war. Danach lässt sich das Jahr **nicht wieder öffnen** und nicht mehr exportieren; die Daten stehen nur " +
+          "noch im Archiv-Export.",
+        "Entschuldigungen, die über das Schuljahr hinausreichen, behalten den Teil außerhalb. Einträge im Änderungsverlauf " +
+          "ohne Stunde (z. B. zu Entschuldigungen und Gruppenlisten) zählen nach ihrem Zeitpunkt (01.08. bis 31.07.) – " +
+          "Nachträge im August danach bleiben.",
+        "Es bleiben: die Protokolle mit eigener Frist (ohne Namen), Schülerinnen und Schüler mit Daten in anderen Jahren, " +
+          "Lehrkräfte und Einstellungen. **Nicht in der App:** die Vertretungsdatei des Desktops (Vertretung_2026_27.xlsx, " +
+          "mit Abwesenheitsgründen) löscht die Schule selbst; ältere Sicherungen laufen mit ihrer Frist aus.",
+        "Kommt keine Antwort (z. B. Verbindung weg), „Aktualisieren“ – die Karte zeigt, ob das Jahr gelöscht ist. Die " +
+          "Erinnerung, den Archiv-Export nach „aufzubewahren bis“ zu vernichten, bleibt auch nach dem Löschen.",
       ] },
       { zwischen: "Halbjahreswechsel" },
       "Die Karte erscheint **4 Wochen vor** „2. Halbjahr ab“ (Einstellungen → Schuljahr) und bleibt bis zum Ende des " +

@@ -9,14 +9,23 @@ namespace Stundenplan_V2.Vertretung
     // =====================================================================
     //  ZaehlerExporter – schreibt die Zählerstände als Excel-Datei (ClosedXML).
     //
-    //  Zwei Blätter:
-    //   - "Zähler Lehrer": je Lehrkraft die Vertretungen je Art, eigene
-    //     Ausfälle, gehaltene (gewichtete) Summe und Saldo.
+    //  Drei Blätter (V4, 281):
+    //   - "Zähler Lehrer": je Lehrkraft die gehaltenen Stunden je Art, Punkte,
+    //     Entfälle mit 0 bzw. −1, Sondergründe, Entfall gesamt und Saldo (274).
     //   - "Zähler Klassen": je Klasse die Stunden je Art und Entfallstunden.
+    //   - "Entfälle": alle Entfälle (dieselbe Liste wie im Blatt „Entfälle“ der
+    //     Vertretungsdatei, 279) – für die Weitergabe ohne die ganze Datei.
     // =====================================================================
 
     public static class ZaehlerExporter
     {
+        public const string EntfallBlatt = "Entfälle";
+
+        /// <summary>Überschrift-Hinweis zur Zählung (281).</summary>
+        public const string SaldoHinweis =
+            "Saldo nach der Zählung ab V4: gehaltene Punkte + Entfälle (−1) + Sondergründe; " +
+            "die ausfallende Lehrkraft einer vertretenen Stunde zählt 0.";
+
         public static void Erzeuge(IEnumerable<VertretungsEintrag> eintraege, string zielPfad, string schuljahr = "")
         {
             var liste = eintraege.ToList();
@@ -24,6 +33,8 @@ namespace Stundenplan_V2.Vertretung
 
             SchreibeLehrer(wb, liste, schuljahr);
             SchreibeKlassen(wb, liste, schuljahr);
+            SchreibeEntfaelle(wb, Zaehlung.EntfallZeilen(liste),
+                "Alle Entfälle" + (string.IsNullOrWhiteSpace(schuljahr) ? "" : $" – Schuljahr {schuljahr}"));
 
             wb.SaveAs(zielPfad);
         }
@@ -39,19 +50,22 @@ namespace Stundenplan_V2.Vertretung
             ws.Cell(r, 1).Style.Font.FontSize = 13;
             ws.Cell(r + 1, 1).Value = $"Stand: {DateTime.Now:dd.MM.yyyy HH:mm}";
             ws.Cell(r + 1, 1).Style.Font.FontColor = XLColor.Gray;
-            r += 3;
+            ws.Cell(r + 2, 1).Value = SaldoHinweis;
+            ws.Cell(r + 2, 1).Style.Font.FontColor = XLColor.Gray;
+            r += 4;
 
             // Kopf
             string[] kopf = { "Lehrkraft", "Vertretung", "Betreuung/Aufsicht", "EVA",
                               "Raumvertretung", "Verlegung", "Zusammenlegung",
-                              "Eigene Ausfälle", "Gehalten (gew.)", "Saldo" };
+                              "Gehalten (Punkte)", "Entfall 0", "Entfall −1", "Sondergrund",
+                              "Sondergrund (Punkte)", "Entfall gesamt", "Saldo" };
             for (int c = 0; c < kopf.Length; c++) ws.Cell(r, c + 1).Value = kopf[c];
             ws.Row(r).Style.Font.Bold = true;
             ws.Range(r, 1, r, kopf.Length).Style.Fill.BackgroundColor = XLColor.LightGray;
             r++;
 
             var stand = VertretungsZaehler.ProLehrer(liste);
-            foreach (var s in stand.Values.OrderByDescending(s => s.GehalteneVertretungen)
+            foreach (var s in stand.Values.OrderByDescending(s => s.Saldo)
                                            .ThenBy(s => s.Bezug, StringComparer.OrdinalIgnoreCase))
             {
                 int P(Vertretungsart a) => s.ProArt.TryGetValue(a, out int n) ? n : 0;
@@ -62,13 +76,18 @@ namespace Stundenplan_V2.Vertretung
                 ws.Cell(r, 5).Value = P(Vertretungsart.Raumvertretung);
                 ws.Cell(r, 6).Value = P(Vertretungsart.Verlegung);
                 ws.Cell(r, 7).Value = P(Vertretungsart.Zusammenlegung);
-                ws.Cell(r, 8).Value = s.EigeneAusfaelle;
-                ws.Cell(r, 9).Value = s.GehalteneVertretungen;
-                ws.Cell(r, 10).Value = s.Saldo;
+                ws.Cell(r, 8).Value = s.GehalteneVertretungen;
+                ws.Cell(r, 9).Value = s.Entfall0;
+                ws.Cell(r, 10).Value = s.EntfallMinus1;
+                ws.Cell(r, 11).Value = s.Sondergruende;
+                ws.Cell(r, 12).Value = s.SondergrundPunkte;
+                ws.Cell(r, 13).Value = s.EigeneAusfaelle;
+                ws.Cell(r, 14).Value = s.Saldo;
                 r++;
             }
 
             ws.Columns().AdjustToContents();
+            ws.Column(1).Width = 14;   // die lange Hinweiszeile soll die erste Spalte nicht aufblähen
         }
 
         private static void SchreibeKlassen(XLWorkbook wb, List<VertretungsEintrag> liste, string schuljahr)
@@ -104,6 +123,53 @@ namespace Stundenplan_V2.Vertretung
             }
 
             ws.Columns().AdjustToContents();
+        }
+
+        /// <summary>
+        /// V4 (279, 281): Blatt „Entfälle“ – eine Zeile je Entfall (nur zum Lesen). Wird auch von
+        /// <see cref="VertretungsStore"/> in die Vertretungsdatei geschrieben (bei jedem Speichern neu).
+        /// </summary>
+        public static void SchreibeEntfaelle(XLWorkbook wb, List<Zaehlung.EntfallZeile> zeilen, string titel)
+        {
+            var ws = wb.Worksheets.Add(EntfallBlatt);
+            int r = 1;
+            ws.Cell(r, 1).Value = titel;
+            ws.Cell(r, 1).Style.Font.Bold = true;
+            ws.Cell(r, 1).Style.Font.FontSize = 13;
+            ws.Cell(r + 1, 1).Value = $"{zeilen.Count} Entfall/Entfälle · nur zum Lesen – wird bei jedem Speichern neu " +
+                                      "geschrieben · Zählung für die Lehrkraft laut Plan";
+            ws.Cell(r + 1, 1).Style.Font.FontColor = XLColor.Gray;
+            r += 3;
+
+            string[] kopf = { "Datum", "Stunde", "Klassen", "Fach", "Lehrkraft", "Anlass", "Grund",
+                              "Zählung", "Sondergrund", "Kommentar", "Quelle" };
+            for (int c = 0; c < kopf.Length; c++) ws.Cell(r, c + 1).Value = kopf[c];
+            ws.Row(r).Style.Font.Bold = true;
+            ws.Range(r, 1, r, kopf.Length).Style.Fill.BackgroundColor = XLColor.LightGray;
+            int kopfZeile = r;
+            r++;
+
+            foreach (var z in zeilen)
+            {
+                ws.Cell(r, 1).Value = z.Datum.Date;
+                ws.Cell(r, 1).Style.DateFormat.Format = "ddd dd.mm.yyyy";
+                ws.Cell(r, 2).Value = z.Stunde;
+                ws.Cell(r, 3).Value = z.Klassen;
+                ws.Cell(r, 4).Value = z.Fach;
+                ws.Cell(r, 5).Value = z.Lehrkraft;
+                ws.Cell(r, 6).Value = z.Anlass;
+                ws.Cell(r, 7).Value = z.Grund;
+                ws.Cell(r, 8).Value = z.Zaehlwert;
+                ws.Cell(r, 9).Value = z.Sondergrund ? "ja" : "";
+                ws.Cell(r, 10).Value = z.Kommentar;
+                ws.Cell(r, 11).Value = z.Quelle;
+                r++;
+            }
+
+            ws.Columns().AdjustToContents();
+            ws.Column(1).Width = 16;
+            if (zeilen.Count > 0) ws.Range(kopfZeile, 1, r - 1, kopf.Length).SetAutoFilter();
+            ws.SheetView.FreezeRows(kopfZeile);
         }
     }
 }

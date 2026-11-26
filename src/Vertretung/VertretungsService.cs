@@ -36,8 +36,8 @@ namespace Stundenplan_V2.Vertretung
     //
     //     Lehrkräfte, die im Slot ECHT unterrichten, und die abwesende
     //     Lehrkraft selbst sind nie Kandidaten. Innerhalb jeder Gruppe wird
-    //     sortiert nach: fachnah, fairer Ausgleich (kleiner Zähler zuerst),
-    //     Name.
+    //     sortiert nach: fachnah, fairer Ausgleich (kleiner Saldo zuerst –
+    //     seit V4, 283: Lehrkräfte mit Minusstunden kommen zuerst), Name.
     // =====================================================================
 
     /// <summary>Herkunft eines Vorschlags.</summary>
@@ -75,7 +75,7 @@ namespace Stundenplan_V2.Vertretung
         public string Lehrer { get; set; } = "";
         public bool Fachnah { get; set; }
         public bool Vertretungsbereit { get; set; }
-        public int AktuellerZaehler { get; set; }   // bisher gehaltene (gewichtete) Vertretungen
+        public int AktuellerZaehler { get; set; }   // V4 (283): Saldo der Lehrkraft (Summe ihrer Zählwerte, 274)
 
         /// <summary>Herkunft: platzierte Vber-Stunde oder nutzbare Hohlstunde.</summary>
         public VorschlagQuelle Quelle { get; set; } = VorschlagQuelle.NuHo;
@@ -93,7 +93,7 @@ namespace Stundenplan_V2.Vertretung
                     _                    => "nutzbare Hohlstunde"
                 });
                 teile.Add(Fachnah ? "fachgerecht" : "fachfremd");
-                teile.Add($"Zähler {AktuellerZaehler}");
+                teile.Add($"Saldo {Zaehlung.WertText(AktuellerZaehler)}");
                 return string.Join(", ", teile);
             }
         }
@@ -190,10 +190,10 @@ namespace Stundenplan_V2.Vertretung
         ///      ganz oben, Einsatz erhöht den Zähler NICHT,
         ///   1) Lehrkräfte mit platzierter Vber-Stunde im Slot (Quelle = Vber),
         ///   2) Lehrkräfte mit nutzbarer Hohlstunde im Slot (Quelle = NuHo).
-        /// Innerhalb jeder Gruppe: fachnah, kleiner Zähler, Name.
+        /// Innerhalb jeder Gruppe: fachnah, kleiner Saldo (283), Name.
         /// Echt unterrichtende Lehrkräfte und die abwesende Lehrkraft selbst
         /// sind ausgeschlossen. <paramref name="zaehlerProLehrer"/> liefert je
-        /// Lehrkraft den bisherigen (gewichteten) Vertretungszähler für den
+        /// Lehrkraft den Saldo (VertretungsZaehler.SaldoProLehrer, 283) für den
         /// fairen Ausgleich (fehlt eine Lehrkraft, gilt 0).
         /// </summary>
         public static List<VertreterVorschlag> Vorschlaege(
@@ -263,7 +263,7 @@ namespace Stundenplan_V2.Vertretung
                 });
             }
 
-            // Gruppen-Reihenfolge UV < Vber < NuHo, dann fachnah/Zähler/Name.
+            // Gruppen-Reihenfolge UV < Vber < NuHo, dann fachnah/Saldo/Name.
             static int Rang(VorschlagQuelle q) => q switch
             {
                 VorschlagQuelle.Uv   => 0,

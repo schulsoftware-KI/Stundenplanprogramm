@@ -356,12 +356,13 @@ namespace Stundenplan_V2.Vertretung
                     "Lehrer abwesend", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
                 return;
 
+            // V4 (275): Die Lehrkraft fehlt → Entfall zählt 0.
             foreach (var z in zuEntfall)
-                BucheIntern(z, tag, Vertretungsart.Entfall, null, speichern: false, zeichnen: false);
+                BucheIntern(z, tag, Vertretungsart.Entfall, null, speichern: false, zeichnen: false, anlass: EntfallAnlass.Lehrkraft);
 
             Speichere();
             Zeichne();
-            SetzeInfo($"{zuEntfall.Count} Stunde(n) von {lehrer} am {tag:dd.MM.} auf Entfall gesetzt.");
+            SetzeInfo($"{zuEntfall.Count} Stunde(n) von {lehrer} am {tag:dd.MM.} auf Entfall gesetzt (Lehrkraft fehlt, Zählung 0).");
         }
 
         // =====================================================
@@ -581,6 +582,9 @@ namespace Stundenplan_V2.Vertretung
             // V3: Stunde einer Dauervertretung – „⟳ bis 18.12.“
             string dauer = DauerMarke(z);
             if (dauer.Length > 0) zeile3 = zeile3.Length > 0 ? zeile3 + "  " + dauer : dauer;
+            // V4 (278): Entfall mit −1 bzw. Sondergrund sichtbar machen (Einzelheiten im Tooltip).
+            string zaehlMarke = ZaehlMarke(z);
+            if (zaehlMarke.Length > 0) zeile3 = zeile3.Length > 0 ? zeile3 + "  " + zaehlMarke : zaehlMarke;
 
             var sp = new StackPanel { Margin = new Thickness(3, 2, 3, 2) };
             var tbKopf = new TextBlock { Text = kopf, FontWeight = FontWeights.Bold, FontSize = 11, TextWrapping = TextWrapping.Wrap };
@@ -610,9 +614,13 @@ namespace Stundenplan_V2.Vertretung
                 Tag = z
             };
             // R3-D-Nachtrag: Tooltip der ganzen Stunde mit dem Raum (am kleinen Raum-Text allein erschien er nicht).
-            if (raumTip != null)
+            // V4 (278): dazu Zählwert, Anlass und ggf. „Sondergrund: Kommentar“ einer Buchung.
+            string? zaehlTip = z.Eintrag != null && z.Eintrag.Art != Vertretungsart.Verlegung
+                ? Zaehlung.TippText(z.Eintrag) : null;
+            string? tip = raumTip != null && zaehlTip != null ? raumTip + "\n" + zaehlTip : raumTip ?? zaehlTip;
+            if (tip != null)
             {
-                border.ToolTip = raumTip;
+                border.ToolTip = tip;
                 ToolTipService.SetInitialShowDelay(border, 300);
             }
 
@@ -731,8 +739,22 @@ namespace Stundenplan_V2.Vertretung
                 menu.Items.Add(new Separator());
             }
 
+            // V4 (275, 278): Entfall nach Anlass – was fehlt, bestimmt die Zählung der Lehrkraft laut Plan.
             var miEntfall = new MenuItem { Header = "Entfall" };
-            miEntfall.Click += (_, __) => Buche(z, datum, Vertretungsart.Entfall, null);
+            var miEntfallL = new MenuItem
+            {
+                Header = "Lehrkraft fehlt (0)",
+                ToolTip = "Krankheit, Fortbildung, Begleitung einer Fahrt … – der Entfall zählt 0"
+            };
+            miEntfallL.Click += (_, __) => Buche(z, datum, Vertretungsart.Entfall, null, EntfallAnlass.Lehrkraft);
+            var miEntfallK = new MenuItem
+            {
+                Header = "Klasse/Kurs fehlt (−1)",
+                ToolTip = "Klassenfahrt, Exkursion, Prüfung … – die Lehrkraft ist freigesetzt, der Entfall zählt −1"
+            };
+            miEntfallK.Click += (_, __) => Buche(z, datum, Vertretungsart.Entfall, null, EntfallAnlass.Klasse);
+            miEntfall.Items.Add(miEntfallL);
+            miEntfall.Items.Add(miEntfallK);
             menu.Items.Add(miEntfall);
 
             var miVertr = new MenuItem { Header = "Vertretung durch …" };
@@ -762,6 +784,15 @@ namespace Stundenplan_V2.Vertretung
             if (z.IstGeaendert && z.Eintrag != null)
             {
                 menu.Items.Add(new Separator());
+                // V4 (277, 278): Zählwert selbst setzen (Sondergrund mit Kommentar) bzw. zurück auf Standard.
+                var miZaehl = new MenuItem
+                {
+                    Header = "Zählwert festlegen …",
+                    ToolTip = "Eigenen Zählwert (−1/0/+1) mit Kommentar setzen bzw. zurück auf Standard"
+                };
+                var eintragZ = z.Eintrag;
+                miZaehl.Click += (_, __) => ZaehlwertFestlegen(z, eintragZ, datum);
+                menu.Items.Add(miZaehl);
                 var miReset = new MenuItem { Header = "Zurücksetzen (Buchung entfernen)" };
                 miReset.Click += (_, __) => Entferne(z, datum);
                 menu.Items.Add(miReset);
@@ -779,7 +810,7 @@ namespace Stundenplan_V2.Vertretung
                 Datum = datum, Stunde = z.Stunde, UNr = z.UNr,
                 Lehrer = z.OriginalLehrer, Fach = z.Fach, Klassen = new List<string>(z.Klassen)
             };
-            var zaehler = VertretungsZaehler.GehaltenProLehrer(_daten.Vertretungen);
+            var zaehler = VertretungsZaehler.SaldoProLehrer(_daten.Vertretungen);
             var vorschlaege = VertretungsService.Vorschlaege(inst, _plan, _daten.Kalender, zaehler);
 
             if (vorschlaege.Count == 0)
@@ -806,33 +837,35 @@ namespace Stundenplan_V2.Vertretung
         //  Buchen / Entfernen
         // =====================================================
 
-        private void Buche(TagesZelle z, DateTime datum, Vertretungsart art, string? vertreter)
-            => BucheIntern(z, datum, art, vertreter, speichern: true, zeichnen: true);
-
-        // True, wenn die einzusetzende Lehrkraft an diesem Tag/Stunde eine
-        // platzierte UV-Stunde hat – dann zählt die Vertretung nicht.
-        private bool IstUvEinsatz(string vertreter, DateTime datum, int stunde)
+        private void Buche(TagesZelle z, DateTime datum, Vertretungsart art, string? vertreter, EntfallAnlass? anlass = null)
         {
-            if (_plan == null) return false;
-            string? wtag = _daten.Kalender?.RasterTagFuer(datum);
-            return wtag != null && _plan.HatUvImSlot(vertreter, wtag, stunde);
+            bool sondergrundWeg = BucheIntern(z, datum, art, vertreter, speichern: true, zeichnen: true, anlass: anlass);
+            // V4 (277): Ein Sondergrund galt der alten Buchung – Hinweis in der Statuszeile.
+            if (sondergrundWeg)
+                SetzeInfo($"{datum:dd.MM.} Std {z.Stunde}: neu gebucht – der Sondergrund der bisherigen Buchung entfällt.");
+            else if (art == Vertretungsart.Entfall)
+                SetzeInfo($"{datum:dd.MM.} Std {z.Stunde}: Entfall ({Zaehlung.AnlassText(anlass)}, Zählung " +
+                          $"{Zaehlung.WertText(Zaehlung.EntfallWert(anlass))} für {z.OriginalLehrer}).");
         }
 
-        private void BucheIntern(TagesZelle z, DateTime datum, Vertretungsart art, string? vertreter,
-            bool speichern, bool zeichnen)
+        /// <summary>Bucht eine Stunde. Liefert true, wenn dabei ein Sondergrund der bisherigen Buchung wegfällt (V4, 277).</summary>
+        private bool BucheIntern(TagesZelle z, DateTime datum, Vertretungsart art, string? vertreter,
+            bool speichern, bool zeichnen, EntfallAnlass? anlass = null)
         {
-            if (_plan == null) return;
+            if (_plan == null) return false;
 
             bool brauchtVertreter = art == Vertretungsart.Vertretung
                                   || art == Vertretungsart.BetreuungAufsicht
                                   || art == Vertretungsart.Zusammenlegung;
             var grund = CbGrund.SelectedItem is VertretungsGrund g ? g : VertretungsGrund.Sonstiges;
+            // V4 (275): Ein Entfall ohne Angabe gilt als „Lehrkraft fehlt“ (0).
+            EntfallAnlass? entfallAnlass = art == Vertretungsart.Entfall ? anlass ?? EntfallAnlass.Lehrkraft : null;
+            bool sondergrundWeg = z.Eintrag?.Sondergrund == true;
 
             // Zählwert: normal aus der Art. Vertritt eine Lehrkraft mit einer
-            // UV-Stunde in diesem Slot, wird der Zähler NICHT erhöht.
-            int zaehlwert = brauchtVertreter ? _daten.Zaehlwert(art) : 0;
-            if (brauchtVertreter && vertreter != null && IstUvEinsatz(vertreter, datum, z.Stunde))
-                zaehlwert = 0;
+            // UV-Stunde in diesem Slot, wird der Zähler NICHT erhöht. V4: Entfall nach Anlass (274/275).
+            int zaehlwert = Zaehlung.StandardWert(art, entfallAnlass, brauchtVertreter ? vertreter : null,
+                datum, z.Stunde, _daten, _plan);
 
             // R3-D: Eine schon gebuchte Raumänderung (z. B. Raumvertretung) bleibt bei der neuen Art
             // erhalten – außer bei Entfall.
@@ -850,7 +883,8 @@ namespace Stundenplan_V2.Vertretung
                     ? _plan.Fachnah(vertreter, z.Fach) : (bool?)null,
                 OriginalRaum = z.GrundRaum,
                 VertretungsRaum = raumNeu,
-                ZaehlwertSnapshot = zaehlwert
+                ZaehlwertSnapshot = zaehlwert,
+                Anlass = entfallAnlass
             };
 
             EntferneEintraege(datum, z.Stunde, z.UNr, z.OriginalLehrer);
@@ -858,6 +892,47 @@ namespace Stundenplan_V2.Vertretung
 
             if (speichern) Speichere();
             if (zeichnen) Zeichne();
+            return sondergrundWeg;
+        }
+
+        // =====================================================
+        //  V4 (277, 278): Zählwert festlegen
+        // =====================================================
+
+        /// <summary>Kurze Marke in der Zelle: „Zählung −1“ bei einem Entfall ≠ 0, „Sondergrund +1“ bei einem Sondergrund.</summary>
+        private static string ZaehlMarke(TagesZelle z)
+        {
+            var e = z.Eintrag;
+            if (e == null || e.Art == Vertretungsart.Verlegung) return "";
+            if (e.Sondergrund) return "Sondergrund " + Zaehlung.WertText(e.ZaehlwertSnapshot);
+            if (e.Art == Vertretungsart.Entfall && e.ZaehlwertSnapshot != 0) return "Zählung " + Zaehlung.WertText(e.ZaehlwertSnapshot);
+            return "";
+        }
+
+        /// <summary>Fenster „Zählwert festlegen“ für die Buchung einer Stunde; speichert und zeichnet neu.</summary>
+        private void ZaehlwertFestlegen(TagesZelle z, VertretungsEintrag e, DateTime datum)
+        {
+            if (_plan == null) return;
+            if (!_daten.Vertretungen.Contains(e)) { SetzeInfo("Die Buchung ist nicht mehr vorhanden – bitte „Aktualisieren“."); return; }
+            int std = Zaehlung.StandardWert(e, _daten, _plan);
+            string stdText = e.Art == Vertretungsart.Entfall
+                ? "Entfall, " + Zaehlung.AnlassText(e.Anlass)
+                : Dauervertretung.ArtText(e.Art) + (string.IsNullOrWhiteSpace(e.VertretungsLehrer) ? "" : " " + e.VertretungsLehrer);
+            string kopf = $"{UntisText.Tag(datum)} {datum:dd.MM.yyyy}, {z.Stunde}. Std  ·  {z.Fach} {string.Join(", ", z.Klassen)}  ·  " +
+                          $"{z.OriginalLehrer}  ·  {Dauervertretung.BuchungText(e)}";
+            var erg = ZaehlwertDialog.Zeige(this, kopf, std, stdText, e);
+            if (erg == null) return;
+
+            if (erg.Standard) Zaehlung.SetzeStandard(e, _daten, _plan);
+            else Zaehlung.SetzeSondergrund(e, erg.Wert, erg.Kommentar);
+
+            bool ok = Speichere();
+            Zeichne();
+            string was = erg.Standard
+                ? $"zurück auf Standard ({Zaehlung.WertText(e.ZaehlwertSnapshot)})"
+                : $"Sondergrund {Zaehlung.WertText(e.ZaehlwertSnapshot)}";
+            if (ok) SetzeInfo($"{datum:dd.MM.} Std {z.Stunde} ({z.OriginalLehrer}): Zählwert {was} für {Zaehlung.Zaehlperson(e)}.");
+            _log?.Invoke($"Wocheneditor: Zählwert {datum:dd.MM.yyyy} Std {z.Stunde} UNr {z.UNr} → {was}.");
         }
 
         private void Entferne(TagesZelle z, DateTime datum)

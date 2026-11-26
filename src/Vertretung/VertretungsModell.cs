@@ -50,6 +50,19 @@ namespace Stundenplan_V2.Vertretung
         Sonstiges
     }
 
+    /// <summary>
+    /// V4 (275): Anlass eines Entfalls – was fehlt, nicht warum. Lehrkraft fehlt (Krankheit, Fortbildung,
+    /// Begleitung einer Fahrt …) → 0; Klasse/Kurs fehlt (die Lehrkraft ist freigesetzt) → −1; Raum gesperrt → 0;
+    /// freie Zeit einer Klasse laut Kalender → Wert des Kalendereintrags (V4b).
+    /// </summary>
+    public enum EntfallAnlass
+    {
+        Lehrkraft,
+        Klasse,
+        Raum,
+        FreieZeit
+    }
+
     /// <summary>Typ eines unterrichtsfreien Zeitraums im Schuljahr.</summary>
     public enum FreieZeitTyp
     {
@@ -154,8 +167,18 @@ namespace Stundenplan_V2.Vertretung
 
         // Festgehaltener Zählwert im Moment der Buchung (aus VertretungsartConfig),
         // damit spätere Konfigurationsänderungen alte Buchungen nicht rückwirkend
-        // verändern.
+        // verändern. V4: Er zählt für genau eine Lehrkraft (Zaehlung.Zaehlperson, 274);
+        // ein Entfall bekommt den Wert seines Anlasses (275), ein Sondergrund den
+        // vom Planer gesetzten Wert (277).
         public int ZaehlwertSnapshot { get; set; }
+
+        // ---- V4: Zählung (Entscheidungen 274, 275, 277) ----
+        /// <summary>Anlass eines Entfalls (nur bei Art = Entfall); null = unbekannt (ältere Dateien) bzw. kein Entfall.</summary>
+        public EntfallAnlass? Anlass { get; set; } = null;
+        /// <summary>Zählwert vom Planer selbst gesetzt (−1/0/+1) – dann ist <see cref="Zaehlkommentar"/> Pflicht.</summary>
+        public bool Sondergrund { get; set; }
+        /// <summary>Kommentar zum Sondergrund (eine Zeile, bis 200 Zeichen); bleibt im Desktop, geht nie in die App.</summary>
+        public string Zaehlkommentar { get; set; } = "";
 
         // ---- Verlegung (M3a, Konzept §15) ----
         // Eine Verlegung besteht aus ZWEI verknüpften Einträgen (Ziel + Quelle)
@@ -233,10 +256,16 @@ namespace Stundenplan_V2.Vertretung
     public class ZaehlerStand
     {
         public string Bezug { get; set; } = "";          // Lehrerkürzel bzw. Klasse|Fach
-        public Dictionary<Vertretungsart, int> ProArt { get; set; } = new();
-        public int GehalteneVertretungen { get; set; }   // Summe gewichtet (Zählwerte)
-        public int EigeneAusfaelle { get; set; }         // eigene ausgefallene Stunden
-        public int Saldo { get; set; }                   // gehaltene − erlassene
+        public Dictionary<Vertretungsart, int> ProArt { get; set; } = new();   // gehaltene Stunden je Art (Anzahl)
+        public int GehalteneVertretungen { get; set; }   // V4: „Gehalten (Punkte)“ – Zählwerte ohne Entfälle und Sondergründe
+        public int EigeneAusfaelle { get; set; }         // V4: „Entfall gesamt“ – eigene entfallene Stunden (Anzahl)
+        public int Saldo { get; set; }                   // V4 (274): Summe aller Zählwerte der Lehrkraft
+
+        // V4 (280): Aufschlüsselung der Entfälle und Sondergründe der Lehrkraft
+        public int Entfall0 { get; set; }                // Entfälle mit Zählwert 0 (ohne Sondergrund), Anzahl
+        public int EntfallMinus1 { get; set; }           // Entfälle mit Zählwert −1 (ohne Sondergrund), Anzahl
+        public int Sondergruende { get; set; }           // Buchungen mit Sondergrund, Anzahl
+        public int SondergrundPunkte { get; set; }       // Summe ihrer Zählwerte
 
         // Für Klassen/Fach-Auswertung:
         public int SollStunden { get; set; }             // ohne freie Tage

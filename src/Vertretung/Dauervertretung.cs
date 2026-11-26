@@ -16,7 +16,8 @@ namespace Stundenplan_V2.Vertretung
     //     dort NICHT gebucht (Lücke mit Hinweis – 159). Weg verlegte Stunden bleiben unangetastet.
     //   - Buchung: je Tag ein eigener VertretungsEintrag mit derselben SerienId; Zählwert wie bei einer
     //     einzelnen Vertretung (UV-Einsatz zählt nicht – 160). Ein neuer Raum (R3-D) wird mitgenommen, wenn er an
-    //     dem Tag frei ist, sonst bleibt der Raum laut Plan.
+    //     dem Tag frei ist, sonst bleibt der Raum laut Plan. V4 (275, 278): Entfall mit Anlass „Lehrkraft fehlt“
+    //     (0); wahlweise ein eigener Zählwert (Sondergrund mit Kommentar) für alle Stunden der Serie.
     //   - Zurücksetzen (162): künftige Buchungen ab einem Datum – nur einer Serie bzw. einer Lehrkraft.
     // =====================================================================
 
@@ -49,6 +50,10 @@ namespace Stundenplan_V2.Vertretung
         public string? Raum { get; set; }
         /// <summary>Bestehende Buchungen (Entfall, andere Vertretung …) ersetzen?</summary>
         public bool Ersetzen { get; set; } = true;
+        /// <summary>V4 (277/278): eigener Zählwert (−1/0/+1) für alle Stunden der Serie; null = Standard.</summary>
+        public int? EigenerZaehlwert { get; set; }
+        /// <summary>V4: Kommentar zum eigenen Zählwert (Pflicht, wenn <see cref="EigenerZaehlwert"/> gesetzt ist).</summary>
+        public string Zaehlkommentar { get; set; } = "";
 
         public DateTime Von { get; set; }
         public DateTime Bis { get; set; }
@@ -262,6 +267,10 @@ namespace Stundenplan_V2.Vertretung
             if (gleich) teile.Add("schon so gebucht – wird Teil der Dauervertretung");
             else if (ersetzt) teile.Add("ersetzt: " + BuchungText(e!));
             else teile.Add("wird gebucht");
+            // V4 (277): Ein Sondergrund der bisherigen Buchung gilt nicht weiter, wenn die Serie Standard zählt.
+            if (e != null && e.Sondergrund && v.EigenerZaehlwert == null
+                && e.Art != Vertretungsart.Raumvertretung)
+                teile.Add($"Sondergrund ({Zaehlung.WertText(e.ZaehlwertSnapshot)}) entfällt");
 
             // Raum (R3-D): neuer Raum der Serie, wenn er an dem Tag frei ist; sonst der einer bestehenden Buchung.
             string? bestehend = !string.IsNullOrWhiteSpace(e?.VertretungsRaum) ? e!.VertretungsRaum!.Trim() : null;
@@ -366,20 +375,19 @@ namespace Stundenplan_V2.Vertretung
 
         /// <summary>
         /// Eintrag für einen Tag der Vorschau – wie eine einzelne Buchung im Wocheneditor (Zählwert der Art; ein
-        /// UV-Einsatz zählt nicht, Entscheidung 160), dazu die SerienId.
+        /// UV-Einsatz zählt nicht, Entscheidung 160), dazu die SerienId. V4: Entfall = Lehrkraft fehlt (0);
+        /// ein eigener Zählwert der Serie gilt als Sondergrund jeder Stunde.
         /// </summary>
         public static VertretungsEintrag Eintrag(DauerVorlage v, DauerTag t, PlanDaten plan, VertretungsDaten daten)
         {
             var z = t.Zelle ?? throw new InvalidOperationException("Tag ohne Stunde.");
             bool brauchtVertreter = v.BrauchtVertreter;
             string? vertreter = brauchtVertreter && !string.IsNullOrWhiteSpace(v.Vertreter) ? v.Vertreter!.Trim() : null;
+            EntfallAnlass? anlass = v.Art == Vertretungsart.Entfall ? EntfallAnlass.Lehrkraft : null;
 
-            int zaehlwert = brauchtVertreter ? daten.Zaehlwert(v.Art) : 0;
-            string? wtag = daten.Kalender.RasterTagFuer(t.Datum);
-            if (brauchtVertreter && vertreter != null && wtag != null && plan.HatUvImSlot(vertreter, wtag, z.Stunde))
-                zaehlwert = 0;
+            int zaehlwert = Zaehlung.StandardWert(v.Art, anlass, vertreter, t.Datum, z.Stunde, daten, plan);
 
-            return new VertretungsEintrag
+            var neu = new VertretungsEintrag
             {
                 Datum = t.Datum.Date, Stunde = z.Stunde, UNr = z.UNr,
                 Art = v.Art, Grund = v.Grund,
@@ -391,8 +399,11 @@ namespace Stundenplan_V2.Vertretung
                 OriginalRaum = z.GrundRaum,
                 VertretungsRaum = v.Art == Vertretungsart.Entfall ? null : t.Raum,
                 ZaehlwertSnapshot = zaehlwert,
+                Anlass = anlass,
                 SerienId = v.SerienId
             };
+            if (v.EigenerZaehlwert is int eigen) Zaehlung.SetzeSondergrund(neu, eigen, v.Zaehlkommentar);
+            return neu;
         }
 
         // =================================================================

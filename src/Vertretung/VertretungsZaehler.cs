@@ -9,13 +9,16 @@ namespace Stundenplan_V2.Vertretung
     //  VertretungsZaehler – der differenzierte Zähler (Konzept §5).
     //
     //  Aggregiert die gebuchten VertretungsEinträge zu Zählerständen:
-    //    - je Lehrkraft: gehaltene Vertretungen (gewichtet nach Zählwert),
-    //      je Art einzeln, eigene Ausfälle und Saldo (gehalten − von anderen
-    //      übernommen).
+    //    - je Lehrkraft: gehaltene Stunden je Art (Anzahl, wie bisher) und –
+    //      seit V4 (274, 280) – Punkte, Entfälle mit 0 bzw. −1, Sondergründe
+    //      und Saldo. Jede Buchung zählt für genau eine Lehrkraft
+    //      (Zaehlung.Zaehlperson): die haltende, sonst die laut Plan. Saldo =
+    //      Summe aller Zählwerte; die ausfallende Lehrkraft einer vertretenen
+    //      Stunde zählt 0 (bis V4: gehalten − von anderen übernommen).
     //    - je Klasse: Entfall- und Vertretungsstunden (Basis für Quoten).
     //
-    //  Für die faire Verteilung der Vorschläge liefert GehaltenProLehrer die
-    //  reine (gewichtete) Vertretungszahl je Lehrkraft.
+    //  Für die faire Verteilung der Vorschläge liefert SaldoProLehrer den
+    //  Saldo je Lehrkraft (283: Minusstunden zuerst).
     // =====================================================================
 
     public static class VertretungsZaehler
@@ -23,70 +26,68 @@ namespace Stundenplan_V2.Vertretung
         private static bool HatVertreter(VertretungsEintrag e)
             => !string.IsNullOrWhiteSpace(e.VertretungsLehrer);
 
-        /// <summary>Zählerstände je Lehrkraft.</summary>
+        /// <summary>Zählerstände je Lehrkraft (V4, 274/280).</summary>
         public static Dictionary<string, ZaehlerStand> ProLehrer(IEnumerable<VertretungsEintrag> eintraege)
         {
-            var gehalten = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            var erlassen = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            var ausfall = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            var proArt = new Dictionary<string, Dictionary<Vertretungsart, int>>(StringComparer.OrdinalIgnoreCase);
-            var alle = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var result = new Dictionary<string, ZaehlerStand>(StringComparer.OrdinalIgnoreCase);
 
-            void Add(Dictionary<string, int> map, string k, int v)
-                => map[k] = (map.TryGetValue(k, out int x) ? x : 0) + v;
+            ZaehlerStand Stand(string lehrer)
+            {
+                if (!result.TryGetValue(lehrer, out var st))
+                    result[lehrer] = st = new ZaehlerStand { Bezug = lehrer };
+                return st;
+            }
 
             foreach (var e in eintraege)
             {
+                // Gehaltene Stunden je Art (Anzahl) – wie bisher bei der haltenden Lehrkraft.
                 if (HatVertreter(e))
                 {
-                    string v = e.VertretungsLehrer!.Trim();
-                    alle.Add(v);
-                    Add(gehalten, v, e.ZaehlwertSnapshot);
-
-                    if (!proArt.TryGetValue(v, out var arten))
-                        proArt[v] = arten = new Dictionary<Vertretungsart, int>();
-                    arten[e.Art] = (arten.TryGetValue(e.Art, out int a) ? a : 0) + 1;
+                    var vs = Stand(e.VertretungsLehrer!.Trim());
+                    vs.ProArt[e.Art] = (vs.ProArt.TryGetValue(e.Art, out int a) ? a : 0) + 1;
                 }
 
-                if (!string.IsNullOrWhiteSpace(e.OriginalLehrer))
+                string orig = (e.OriginalLehrer ?? "").Trim();
+                if (orig.Length > 0)
                 {
-                    string o = e.OriginalLehrer.Trim();
-                    alle.Add(o);
-                    if (HatVertreter(e)) Add(erlassen, o, 1);
-                    if (e.Art == Vertretungsart.Entfall) Add(ausfall, o, 1);
+                    var os = Stand(orig);
+                    if (e.Art == Vertretungsart.Entfall) os.EigeneAusfaelle += 1;   // „Entfall gesamt“
                 }
-            }
 
-            var result = new Dictionary<string, ZaehlerStand>(StringComparer.OrdinalIgnoreCase);
-            foreach (var l in alle)
-            {
-                int g = gehalten.TryGetValue(l, out int gg) ? gg : 0;
-                int er = erlassen.TryGetValue(l, out int ee) ? ee : 0;
-                result[l] = new ZaehlerStand
+                // 274: Punkte zählen für genau eine Lehrkraft.
+                string wer = Zaehlung.Zaehlperson(e);
+                if (wer.Length == 0) continue;
+                var s = Stand(wer);
+                int w = e.ZaehlwertSnapshot;
+                s.Saldo += w;
+                if (e.Sondergrund)
                 {
-                    Bezug = l,
-                    GehalteneVertretungen = g,
-                    EigeneAusfaelle = ausfall.TryGetValue(l, out int af) ? af : 0,
-                    Saldo = g - er,
-                    ProArt = proArt.TryGetValue(l, out var pa) ? pa : new Dictionary<Vertretungsart, int>()
-                };
+                    s.Sondergruende += 1;
+                    s.SondergrundPunkte += w;
+                }
+                else if (e.Art == Vertretungsart.Entfall)
+                {
+                    if (w < 0) s.EntfallMinus1 += 1;
+                    else s.Entfall0 += 1;
+                }
+                else s.GehalteneVertretungen += w;
             }
             return result;
         }
 
         /// <summary>
-        /// Reine (gewichtete) Vertretungszahl je Lehrkraft – für den fairen
-        /// Ausgleich in den Vorschlägen (VertretungsService.Vorschlaege).
+        /// 283: Saldo je Lehrkraft (Summe aller Zählwerte, 274) – für den fairen Ausgleich in den Vorschlägen
+        /// (VertretungsService.Vorschlaege: kleiner Saldo zuerst).
         /// </summary>
-        public static Dictionary<string, int> GehaltenProLehrer(IEnumerable<VertretungsEintrag> eintraege)
+        public static Dictionary<string, int> SaldoProLehrer(IEnumerable<VertretungsEintrag> eintraege)
         {
             var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             foreach (var e in eintraege)
-                if (HatVertreter(e))
-                {
-                    string v = e.VertretungsLehrer!.Trim();
-                    map[v] = (map.TryGetValue(v, out int x) ? x : 0) + e.ZaehlwertSnapshot;
-                }
+            {
+                string wer = Zaehlung.Zaehlperson(e);
+                if (wer.Length == 0) continue;
+                map[wer] = (map.TryGetValue(wer, out int x) ? x : 0) + e.ZaehlwertSnapshot;
+            }
             return map;
         }
 

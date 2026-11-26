@@ -21,8 +21,11 @@ namespace Stundenplan_V2.Vertretung
     //    Kalender       freie Zeiten (Ferien/Feiertage/freie Tage)
     //    Arten          Zählwert-Konfiguration je Vertretungsart
     //    Abwesenheiten  erfasste Abwesenheiten
-    //    Vertretungen   ein Eintrag je Stunden-Instanz (inkl. Verlegungsfelder)
+    //    Vertretungen   ein Eintrag je Stunden-Instanz (inkl. Verlegungsfelder;
+    //                   V4: Anlass, Sondergrund, Zaehlkommentar)
     //    Kompetenzen    Lehrer -> Fächer (UV-abgeleitet + manuell)
+    //    Entfälle       V4 (279): alle Entfälle – nur zum Lesen, bei jedem
+    //                   Speichern neu geschrieben, beim Laden nicht gelesen
     // =====================================================================
 
     /// <summary>Gesamter Inhalt einer Vertretungsdatei.</summary>
@@ -118,6 +121,9 @@ namespace Stundenplan_V2.Vertretung
             SchreibeAbwesenheiten(wb, daten.Abwesenheiten);
             SchreibeVertretungen(wb, daten.Vertretungen);
             SchreibeKompetenzen(wb, daten.Kompetenzen);
+            // V4 (279): alle Entfälle als eigenes Blatt (nur zum Lesen; V4b ergänzt die freien Zeiten der Klassen).
+            ZaehlerExporter.SchreibeEntfaelle(wb, Zaehlung.EntfallZeilen(daten.Vertretungen),
+                "Alle Entfälle" + (string.IsNullOrWhiteSpace(daten.Schuljahr) ? "" : $" – Schuljahr {daten.Schuljahr}"));
 
             wb.SaveAs(pfad);
         }
@@ -225,7 +231,9 @@ namespace Stundenplan_V2.Vertretung
                 "VerlegungsId", "VerlegtVonDatum", "VerlegtVonStunde",
                 "VerlegtNachDatum", "VerlegtNachStunde",
                 // Dauervertretung (V3)
-                "SerienId"
+                "SerienId",
+                // Zählung (V4: 275, 277)
+                "Anlass", "Sondergrund", "Zaehlkommentar"
             };
             for (int c = 0; c < header.Length; c++) ws.Cell(1, c + 1).Value = header[c];
             ws.Row(1).Style.Font.Bold = true;
@@ -266,6 +274,11 @@ namespace Stundenplan_V2.Vertretung
 
                 // ---- Dauervertretung (V3) ----
                 ws.Cell(r, 20).Value = v.SerienId ?? "";
+
+                // ---- Zählung (V4) ----
+                ws.Cell(r, 21).Value = v.Art == Vertretungsart.Entfall && v.Anlass.HasValue ? v.Anlass.Value.ToString() : "";
+                ws.Cell(r, 22).Value = v.Sondergrund ? "ja" : "";
+                ws.Cell(r, 23).Value = v.Sondergrund ? v.Zaehlkommentar ?? "" : "";
 
                 r++;
             }
@@ -436,7 +449,12 @@ namespace Stundenplan_V2.Vertretung
                     VerlegtNachStunde = ZellIntNull(row.Cell(19)),
 
                     // ---- Dauervertretung (V3) – fehlt in Altdateien => leer (Einzelbuchung) ----
-                    SerienId = row.Cell(20).GetString().Trim()
+                    SerienId = row.Cell(20).GetString().Trim(),
+
+                    // ---- Zählung (V4) – fehlt in Altdateien => Anlass unbekannt, kein Sondergrund, Wert wie gespeichert ----
+                    Anlass = art == Vertretungsart.Entfall ? ParseAnlass(row.Cell(21).GetString()) : null,
+                    Sondergrund = ParseBool(row.Cell(22).GetString()),
+                    Zaehlkommentar = row.Cell(23).GetString().Trim()
                 });
             }
         }
@@ -512,6 +530,11 @@ namespace Stundenplan_V2.Vertretung
         }
 
         private static string BoolStr(bool b) => b ? "ja" : "nein";
+
+        /// <summary>V4: Anlass eines Entfalls aus der Spalte „Anlass“ (leer bzw. unbekannt = null).</summary>
+        private static EntfallAnlass? ParseAnlass(string s)
+            => Enum.TryParse<EntfallAnlass>((s ?? "").Trim(), true, out var a) && Enum.IsDefined(typeof(EntfallAnlass), a)
+                ? a : (EntfallAnlass?)null;
 
         private static string NullBoolStr(bool? b)
             => b == null ? "" : (b.Value ? "ja" : "nein");

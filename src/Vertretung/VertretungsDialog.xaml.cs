@@ -253,8 +253,11 @@ namespace Stundenplan_V2.Vertretung
             var subj = (AbwesenheitsSubjekt)CbSubjekt.SelectedItem;
             _letzteGrund = (VertretungsGrund)CbGrund.SelectedItem;
             _letzteAbwesenheiten.Clear();
+            // V4 (275): Anlass eines Entfalls = was fehlt; bei „Klasse“ sind die Lehrkräfte freigesetzt → Entfall (−1).
+            var anlassZeile = Zaehlung.AnlassAus(subj);
+            bool klasseFehlt = subj == AbwesenheitsSubjekt.Klasse;
 
-            var zaehler = VertretungsZaehler.GehaltenProLehrer(_daten.Vertretungen);
+            var zaehler = VertretungsZaehler.SaldoProLehrer(_daten.Vertretungen);
             var alleInstanzen = new List<StundenInstanz>();
 
             foreach (var name in namen)
@@ -288,6 +291,7 @@ namespace Stundenplan_V2.Vertretung
             var vergeben = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);   // Tag|Std|Raum → Gruppe
             var gruppenRaum = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // Tag|Std|Gruppe → Raum
             int ohneFreienRaum = 0;
+            int entfallVorbelegt = 0, teilweiseAnwesend = 0;   // V4: Abwesenheit „Klasse“
 
             // Duplikate entfernen (z. B. gekoppelte Kurse über mehrere gewählte Klassen).
             var gesehen = new HashSet<string>();
@@ -299,6 +303,16 @@ namespace Stundenplan_V2.Vertretung
             {
                 string key = $"{inst.Datum:yyyyMMdd}|{inst.Stunde}|{inst.UNr}|{inst.Lehrer}";
                 if (!gesehen.Add(key)) continue;
+
+                // V4 (275): Entfall (−1) nur, wenn ALLE Klassen der Stunde fehlen; ein Kurs mit weiteren, anwesenden
+                // Klassen bleibt wie bisher mit Vertretung vorbelegt.
+                bool alleKlassenFehlen = klasseFehlt && inst.Klassen.Count > 0
+                    && inst.Klassen.All(k => namen.Contains(k, StringComparer.OrdinalIgnoreCase));
+                if (klasseFehlt && FindeBuchung(inst) == null)
+                {
+                    if (alleKlassenFehlen) entfallVorbelegt++;
+                    else teilweiseAnwesend++;
+                }
 
                 var vorschlaege = VertretungsService.Vorschlaege(inst, _plan, _daten.Kalender, zaehler)
                     .Select(v => new VorschlagAnzeige
@@ -318,10 +332,13 @@ namespace Stundenplan_V2.Vertretung
                     OrigLehrer = inst.Lehrer,
                     RaumText = inst.Raum ?? "",
                     RaumOptionen = RaumOptionenFuer(inst, TagFuer(inst.Datum), sperren),
-                    Art = Vertretungsart.Vertretung,
+                    Art = alleKlassenFehlen ? Vertretungsart.Entfall : Vertretungsart.Vertretung,
                     Vorschlaege = vorschlaege,
                     GewaehlterVertreter = vorschlaege.FirstOrDefault()?.Lehrer,
-                    Bemerkung = ""
+                    Bemerkung = "",
+                    Anlass = anlassZeile,
+                    StandardRechner = StandardWertFuer,
+                    Hinweis = SetzeStatus
                 };
 
                 // R3-D: Raumsperre → Raumvertretung mit dem ersten freien, noch nicht vergebenen Raum.
@@ -352,6 +369,7 @@ namespace Stundenplan_V2.Vertretung
                     zeile.UebernimmBuchung(bestehend);
                     schonGebucht++;
                 }
+                zeile.AktualisiereStandard();   // V4: „Standard (…)“ in der Spalte „Zählung“
                 _zeilen.Add(zeile);
             }
 
@@ -361,6 +379,8 @@ namespace Stundenplan_V2.Vertretung
                   (schonGebucht > 0 ? $", davon {schonGebucht} schon gebucht (gelb, wie gespeichert vorbelegt)" : "") +
                   (raumSperre ? ", Raumvertretung mit freiem Raum vorbelegt (Spalte „neuer Raum“)" +
                                 (ohneFreienRaum > 0 ? $" – {ohneFreienRaum} ohne freien Raum" : "") : "") +
+                  (entfallVorbelegt > 0 ? $", {entfallVorbelegt} mit Entfall (−1, Klasse/Kurs fehlt) vorbelegt" : "") +
+                  (teilweiseAnwesend > 0 ? $", {teilweiseAnwesend} mit Vertretung vorbelegt (weitere Klassen anwesend)" : "") +
                   ". Art/Vertretung prüfen, dann 'Buchen'.");
         }
 
@@ -377,22 +397,27 @@ namespace Stundenplan_V2.Vertretung
                 SetzeStatus("Zuerst eine oder mehrere Zeilen markieren (Strg/Umschalt).");
                 return;
             }
-            foreach (var z in markiert) z.Art = art;
-            SetzeStatus($"{markiert.Count} Zeile(n) auf '{art}' gesetzt.");
+            foreach (var z in markiert)
+            {
+                z.Art = art;
+                z.ZaehlWahl = InstanzZeile.StandardSchluessel;   // V4 (278): Zählung dann „Standard“
+                z.AktualisiereStandard();
+            }
+            SetzeStatus($"{markiert.Count} Zeile(n) auf '{art}' gesetzt (Zählung: Standard).");
         }
 
         // =====================================================
         //  Buchen
         // =====================================================
 
-        // True, wenn die (einzusetzende) Lehrkraft an diesem Tag/Stunde eine
-        // platzierte UV-Stunde hat – dann zählt die Vertretung nicht.
-        private bool IstUvEinsatz(string vertreter, DateTime datum, int stunde)
-        {
-            if (_plan == null) return false;
-            string? wtag = _daten.Kalender?.RasterTagFuer(datum);
-            return wtag != null && _plan.HatUvImSlot(vertreter, wtag, stunde);
-        }
+        /// <summary>
+        /// V4 (274/275): Standard-Zählwert einer Zeile – Art aus dem Blatt „Arten“ (0, wenn die gewählte Lehrkraft dafür
+        /// eine UV-Stunde aufgibt), Entfall nach Anlass, ohne haltende Lehrkraft 0.
+        /// </summary>
+        private int StandardWertFuer(InstanzZeile z)
+            => Zaehlung.StandardWert(z.Art, z.Art == Vertretungsart.Entfall ? z.Anlass : null,
+                InstanzZeile.ArtBrauchtVertreter(z.Art) ? z.GewaehlterVertreter : null,
+                z.Inst.Datum, z.Inst.Stunde, _daten, _plan);
 
         private void BtnBuchen_Click(object sender, RoutedEventArgs e)
         {
@@ -403,6 +428,18 @@ namespace Stundenplan_V2.Vertretung
             if (_zeilen.Count == 0 || _letzteAbwesenheiten.Count == 0)
             {
                 SetzeStatus("Nichts zu buchen – zuerst betroffene Stunden ermitteln.");
+                return;
+            }
+
+            // V4 (277/278): eigener Zählwert nur mit Kommentar (eine Zeile, bis 200 Zeichen) – sonst nichts buchen.
+            var ohneKommentar = _zeilen.Where(z => z.EigenerWert != null && Zaehlung.KommentarFehler(z.Zaehlkommentar) != null).ToList();
+            if (ohneKommentar.Count > 0)
+            {
+                var erste = ohneKommentar[0];
+                SetzeStatus($"Nichts gebucht: {ohneKommentar.Count} Zeile(n) mit eigenem Zählwert ohne gültigen Kommentar " +
+                            $"(z. B. {erste.DatumText}, {erste.Stunde}. Std: {Zaehlung.KommentarFehler(erste.Zaehlkommentar)})");
+                DgInstanzen.SelectedItem = erste;
+                DgInstanzen.ScrollIntoView(erste);
                 return;
             }
 
@@ -465,7 +502,7 @@ namespace Stundenplan_V2.Vertretung
                 if (!vorhanden) _daten.Abwesenheiten.Add(abw);
             }
 
-            int gebucht = 0, uebersprungen = 0, geaendert = 0, unveraendert = 0, verlegungen = 0, behalten = 0, ohneRaum = 0;
+            int gebucht = 0, uebersprungen = 0, geaendert = 0, unveraendert = 0, verlegungen = 0, behalten = 0, ohneRaum = 0, sondergruende = 0;
             var neuGebucht = new List<(InstanzZeile Zeile, VertretungsEintrag Eintrag)>();
             foreach (var z in _zeilen)
             {
@@ -496,9 +533,10 @@ namespace Stundenplan_V2.Vertretung
 
                 // Zählwert: normal aus der Art. Vertritt aber eine Lehrkraft mit
                 // einer UV-Stunde in diesem Slot, wird der Zähler NICHT erhöht.
-                int zaehlwert = brauchtVertreter ? _daten.Zaehlwert(z.Art) : 0;
-                if (brauchtVertreter && vertreter != null && _plan != null && IstUvEinsatz(vertreter, z.Inst.Datum, z.Inst.Stunde))
-                    zaehlwert = 0;
+                // V4 (274/275): Entfall nach Anlass (Lehrkraft fehlt 0, Klasse/Kurs fehlt −1, Raum gesperrt 0).
+                EntfallAnlass? anlass = z.Art == Vertretungsart.Entfall ? z.Anlass : null;
+                int zaehlwert = Zaehlung.StandardWert(z.Art, anlass, brauchtVertreter ? vertreter : null,
+                    z.Inst.Datum, z.Inst.Stunde, _daten, _plan);
 
                 var eintrag = new VertretungsEintrag
                 {
@@ -517,8 +555,15 @@ namespace Stundenplan_V2.Vertretung
                         : (bool?)null,
                     OriginalRaum = z.Inst.Raum,
                     VertretungsRaum = neuerRaum,
-                    ZaehlwertSnapshot = zaehlwert
+                    ZaehlwertSnapshot = zaehlwert,
+                    Anlass = anlass
                 };
+                // V4 (277): eigener Zählwert = Sondergrund mit Kommentar.
+                if (z.EigenerWert is int eigen)
+                {
+                    Zaehlung.SetzeSondergrund(eintrag, eigen, z.Zaehlkommentar);
+                    sondergruende++;
+                }
 
                 _daten.Vertretungen.RemoveAll(v =>
                     v.Datum == eintrag.Datum && v.Stunde == eintrag.Stunde &&
@@ -546,6 +591,7 @@ namespace Stundenplan_V2.Vertretung
             AktualisiereZaehler();
             AktualisiereUebersicht();
             var teile = new List<string> { $"{gebucht} Stunde(n) gebucht und gespeichert" + (geaendert > 0 ? $" (davon {geaendert} geändert)" : "") };
+            if (sondergruende > 0) teile.Add($"{sondergruende} mit eigenem Zählwert (Sondergrund)");
             if (unveraendert > 0) teile.Add($"{unveraendert} unverändert");
             if (behalten > 0) teile.Add($"{behalten} Änderung(en) nicht übernommen");
             if (uebersprungen > 0) teile.Add($"{uebersprungen} übersprungen (keine Vertretungskraft gewählt)");
@@ -608,6 +654,7 @@ namespace Stundenplan_V2.Vertretung
                     ArtText = v.Art.ToString(),
                     Vertreter = v.VertretungsLehrer ?? "",
                     GrundText = v.Grund.ToString(),
+                    ZaehlText = v.Art == Vertretungsart.Verlegung ? "" : Zaehlung.KurzText(v),
                     Bemerkung = v.Bemerkung
                 });
             }
@@ -709,7 +756,7 @@ namespace Stundenplan_V2.Vertretung
         {
             _zaehler.Clear();
             var stand = VertretungsZaehler.ProLehrer(_daten.Vertretungen);
-            foreach (var s in stand.Values.OrderByDescending(s => s.GehalteneVertretungen)
+            foreach (var s in stand.Values.OrderByDescending(s => s.Saldo)
                                            .ThenBy(s => s.Bezug, StringComparer.OrdinalIgnoreCase))
             {
                 int ProArt(Vertretungsart a) => s.ProArt.TryGetValue(a, out int n) ? n : 0;
@@ -720,8 +767,12 @@ namespace Stundenplan_V2.Vertretung
                     Betreuung = ProArt(Vertretungsart.BetreuungAufsicht),
                     EVA = ProArt(Vertretungsart.EVA),
                     Zusammenlegung = ProArt(Vertretungsart.Zusammenlegung),
-                    EigeneAusfaelle = s.EigeneAusfaelle,
-                    Gehalten = s.GehalteneVertretungen,
+                    GehaltenPunkte = s.GehalteneVertretungen,
+                    Entfall0 = s.Entfall0,
+                    EntfallMinus1 = s.EntfallMinus1,
+                    Sondergruende = s.Sondergruende,
+                    SondergrundPunkte = s.SondergrundPunkte,
+                    EntfallGesamt = s.EigeneAusfaelle,
                     Saldo = s.Saldo
                 });
             }
@@ -908,8 +959,114 @@ namespace Stundenplan_V2.Vertretung
             /// <summary>R3-D: „(wie bisher)“ + freie Räume dieser Stunde.</summary>
             public List<RaumOption> RaumOptionen { get; set; } = new();
             public List<VorschlagAnzeige> Vorschlaege { get; set; } = new();
-            public string? GewaehlterVertreter { get; set; }
+            private string? _gewaehlterVertreter;
+            public string? GewaehlterVertreter
+            {
+                get => _gewaehlterVertreter;
+                set
+                {
+                    if (string.Equals(_gewaehlterVertreter, value, StringComparison.Ordinal)) return;
+                    _gewaehlterVertreter = value;
+                    OnChanged(nameof(GewaehlterVertreter));
+                    AktualisiereStandard();   // V4: UV-Einsatz zählt 0 – der Standard hängt von der Lehrkraft ab
+                }
+            }
             public string Bemerkung { get; set; } = "";
+
+            // ---- V4: Zählung je Zeile (275, 277, 278) ----
+            /// <summary>Schlüssel der Auswahl „Standard (…)“.</summary>
+            public const string StandardSchluessel = "S";
+
+            /// <summary>Eintrag der Auswahl „Zählung“; nur der Text von „Standard (…)“ ändert sich.</summary>
+            public sealed class ZaehlOption : INotifyPropertyChanged
+            {
+                public string Schluessel { get; init; } = "";
+                private string _anzeige = "";
+                public string Anzeige
+                {
+                    get => _anzeige;
+                    set { if (_anzeige == value) return; _anzeige = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Anzeige))); }
+                }
+                public event PropertyChangedEventHandler? PropertyChanged;
+            }
+
+            private readonly List<ZaehlOption> _zaehlOptionen = new()
+            {
+                new ZaehlOption { Schluessel = StandardSchluessel, Anzeige = "Standard" },
+                new ZaehlOption { Schluessel = "-1", Anzeige = "−1 (eigener Wert)" },
+                new ZaehlOption { Schluessel = "0", Anzeige = "0 (eigener Wert)" },
+                new ZaehlOption { Schluessel = "+1", Anzeige = "+1 (eigener Wert)" }
+            };
+            public List<ZaehlOption> ZaehlOptionen => _zaehlOptionen;
+
+            /// <summary>Anlass, falls die Zeile als Entfall gebucht wird (aus der Abwesenheit bzw. der Buchung; null = unbekannt).</summary>
+            public EntfallAnlass? Anlass { get; set; }
+            /// <summary>Rechnet den Standard-Zählwert der Zeile (vom Fenster gesetzt).</summary>
+            public Func<InstanzZeile, int>? StandardRechner { get; set; }
+            /// <summary>Hinweis in der Statuszeile (vom Fenster gesetzt).</summary>
+            public Action<string>? Hinweis { get; set; }
+
+            private string _zaehlWahl = StandardSchluessel;
+            /// <summary>„S“ = Standard, sonst „-1“ / „0“ / „+1“ (eigener Wert = Sondergrund).</summary>
+            public string ZaehlWahl
+            {
+                get => _zaehlWahl;
+                set
+                {
+                    // Ein Neuaufbau der Combo kann null schicken – dann die Auswahl behalten.
+                    if (value == null) { OnChanged(nameof(ZaehlWahl)); return; }
+                    if (string.Equals(_zaehlWahl, value, StringComparison.Ordinal)) return;
+                    _zaehlWahl = value;
+                    OnChanged(nameof(ZaehlWahl));
+                    OnChanged(nameof(ZaehlTipp));
+                }
+            }
+
+            private string _zaehlkommentar = "";
+            /// <summary>Kommentar zum eigenen Zählwert (Pflicht bei Sondergrund).</summary>
+            public string Zaehlkommentar
+            {
+                get => _zaehlkommentar;
+                set { _zaehlkommentar = value ?? ""; OnChanged(nameof(Zaehlkommentar)); OnChanged(nameof(ZaehlTipp)); }
+            }
+
+            /// <summary>Eigener Wert (−1/0/+1) oder null = Standard.</summary>
+            public int? EigenerWert => _zaehlWahl switch
+            {
+                "-1" => -1,
+                "0" => 0,
+                "+1" => 1,
+                _ => (int?)null
+            };
+
+            private static string WahlFuer(int wert) => wert < 0 ? "-1" : wert > 0 ? "+1" : "0";
+
+            /// <summary>Standard-Zählwert der Zeile in ihrem jetzigen Zustand.</summary>
+            public int StandardWertJetzt => StandardRechner?.Invoke(this) ?? 0;
+
+            /// <summary>Text „Standard (…)“ neu setzen (nach Änderung von Art bzw. Vertretung).</summary>
+            public void AktualisiereStandard()
+            {
+                _zaehlOptionen[0].Anzeige = $"Standard ({Zaehlung.WertText(StandardWertJetzt)})";
+                OnChanged(nameof(ZaehlTipp));
+            }
+
+            /// <summary>Tooltip der Spalte „Zählung“.</summary>
+            public string ZaehlTipp
+            {
+                get
+                {
+                    string wer = BrauchtVertreter && !string.IsNullOrWhiteSpace(_gewaehlterVertreter)
+                        ? _gewaehlterVertreter!.Trim() : OrigLehrer;
+                    string t = Art == Vertretungsart.Entfall
+                        ? $"Entfall – {Zaehlung.AnlassText(Anlass)}: Standard {Zaehlung.WertText(StandardWertJetzt)}"
+                        : $"Standard {Zaehlung.WertText(StandardWertJetzt)}";
+                    t += $" für {wer}.";
+                    if (EigenerWert is int ew)
+                        t += $"\nEigener Wert {Zaehlung.WertText(ew)} (Sondergrund) – Kommentar Pflicht.";
+                    return t + "\n" + Zaehlung.KommentarHinweis;
+                }
+            }
 
             // ---- V1: schon gebuchte Stunde ----
             private VertretungsEintrag? _bestehend;
@@ -921,7 +1078,8 @@ namespace Stundenplan_V2.Vertretung
             /// <summary>Spalte „gebucht“: gespeicherte Art und Vertretung.</summary>
             public string GebuchtText => _bestehend == null ? ""
                 : IstVerlegung ? "Verlegung (im Wocheneditor ändern)"
-                : BuchungText(_bestehend.Art, _bestehend.VertretungsLehrer, _bestehend.VertretungsRaum);
+                : BuchungText(_bestehend.Art, _bestehend.VertretungsLehrer, _bestehend.VertretungsRaum)
+                  + $" ({Zaehlung.WertText(_bestehend.ZaehlwertSnapshot)}{(_bestehend.Sondergrund ? ", Sondergrund" : "")})";
 
             /// <summary>Zeile wie gespeichert vorbelegen (Art, Vertretung, Bemerkung).</summary>
             public void UebernimmBuchung(VertretungsEintrag b)
@@ -948,6 +1106,10 @@ namespace Stundenplan_V2.Vertretung
                 _neuerRaum = raum.Length > 0
                     ? RaumOptionen.First(x => string.Equals(x.Name, raum, StringComparison.OrdinalIgnoreCase)).Name
                     : "";
+                // V4: Zählung wie gespeichert (Anlass eines Entfalls, Sondergrund mit Kommentar).
+                if (b.Art == Vertretungsart.Entfall) Anlass = b.Anlass;
+                _zaehlWahl = b.Sondergrund ? WahlFuer(b.ZaehlwertSnapshot) : StandardSchluessel;
+                _zaehlkommentar = b.Sondergrund ? b.Zaehlkommentar ?? "" : "";
                 OnChanged(nameof(RaumOptionen));
                 OnChanged(nameof(NeuerRaum));
                 OnChanged(nameof(Vorschlaege));
@@ -955,6 +1117,9 @@ namespace Stundenplan_V2.Vertretung
                 OnChanged(nameof(Bemerkung));
                 OnChanged(nameof(IstGebucht));
                 OnChanged(nameof(GebuchtText));
+                OnChanged(nameof(ZaehlWahl));
+                OnChanged(nameof(Zaehlkommentar));
+                AktualisiereStandard();
             }
 
             /// <summary>Art, Vertretung (falls nötig) und Bemerkung wie gespeichert?</summary>
@@ -967,6 +1132,14 @@ namespace Stundenplan_V2.Vertretung
                 if (RaumWaehlbar && !string.Equals((NeuerRaum ?? "").Trim(), (_bestehend.VertretungsRaum ?? "").Trim(),
                         StringComparison.OrdinalIgnoreCase))
                     return false;
+                // V4 (278): Eine nur in der Zählung geänderte Stunde gilt als Änderung.
+                if (EigenerWert is int ew)
+                {
+                    if (!_bestehend.Sondergrund || _bestehend.ZaehlwertSnapshot != ew
+                        || !string.Equals(Zaehlung.Bereinige(Zaehlkommentar), (_bestehend.Zaehlkommentar ?? "").Trim(), StringComparison.Ordinal))
+                        return false;
+                }
+                else if (_bestehend.Sondergrund) return false;
                 if (!BrauchtVertreter) return true;
                 return string.Equals((GewaehlterVertreter ?? "").Trim(), (_bestehend.VertretungsLehrer ?? "").Trim(),
                     StringComparison.OrdinalIgnoreCase);
@@ -974,7 +1147,9 @@ namespace Stundenplan_V2.Vertretung
 
             /// <summary>Neue Art/Vertretung für die Rückfrage.</summary>
             public string NeuText() => BuchungText(Art, BrauchtVertreter ? GewaehlterVertreter : null,
-                                                   RaumWaehlbar ? NeuerRaum : null);
+                                                   RaumWaehlbar ? NeuerRaum : null)
+                + (EigenerWert is int ew ? $" (Zählung {Zaehlung.WertText(ew)}, Sondergrund)"
+                   : _bestehend?.Sondergrund == true ? " (Zählung wieder Standard)" : "");
 
             private static string BuchungText(Vertretungsart art, string? vertreter, string? raum = null)
             {
@@ -1025,6 +1200,14 @@ namespace Stundenplan_V2.Vertretung
                     OnChanged(nameof(Art));
                     OnChanged(nameof(BrauchtVertreter));
                     OnChanged(nameof(RaumWaehlbar));
+                    // V4 (277): Ein eigener Zählwert galt der alten Art – zurück auf Standard, mit Hinweis.
+                    if (_zaehlWahl != StandardSchluessel)
+                    {
+                        _zaehlWahl = StandardSchluessel;
+                        OnChanged(nameof(ZaehlWahl));
+                        Hinweis?.Invoke($"{DatumText}, {Stunde}. Std: Art geändert – der eigene Zählwert gilt nicht mehr (Zählung wieder Standard).");
+                    }
+                    AktualisiereStandard();
                     // R3-D: Raumvertretung ohne Raum → ersten freien Raum vorschlagen.
                     if (_art == Vertretungsart.Raumvertretung && string.IsNullOrWhiteSpace(_neuerRaum)
                         && RaumOptionen.FirstOrDefault(o => o.IstFreierRaum) is RaumOption frei)
@@ -1057,6 +1240,7 @@ namespace Stundenplan_V2.Vertretung
             public string ArtText { get; set; } = "";
             public string Vertreter { get; set; } = "";
             public string GrundText { get; set; } = "";
+            public string ZaehlText { get; set; } = "";
             public string Bemerkung { get; set; } = "";
         }
 
@@ -1067,8 +1251,13 @@ namespace Stundenplan_V2.Vertretung
             public int Betreuung { get; set; }
             public int EVA { get; set; }
             public int Zusammenlegung { get; set; }
-            public int EigeneAusfaelle { get; set; }
-            public int Gehalten { get; set; }
+            // V4 (280)
+            public int GehaltenPunkte { get; set; }
+            public int Entfall0 { get; set; }
+            public int EntfallMinus1 { get; set; }
+            public int Sondergruende { get; set; }
+            public int SondergrundPunkte { get; set; }
+            public int EntfallGesamt { get; set; }
             public int Saldo { get; set; }
         }
     }

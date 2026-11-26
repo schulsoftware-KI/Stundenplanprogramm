@@ -18,6 +18,7 @@ namespace Stundenplan_V2.Vertretung
     ///    zurücksetzen …“: Buchungen ab einem Datum entfernen – nur einer Dauervertretung bzw. einer Lehrkraft,
     ///    mit Vorschau und Rückfrage; wahlweise endet die Abwesenheit der Lehrkraft am Tag davor.
     ///  - Danach wird „Zeitraum veröffentlichen“ für die betroffenen Tage vorgeschlagen (Entscheidung 161).
+    ///  - V4 (278): „Zählung: Standard / eigener Wert“ mit Kommentar gilt für alle Stunden der Serie.
     /// Die Plandatei wird nicht verändert; gebucht wird in die Vertretungsdatei (Spalte „SerienId“).
     /// </summary>
     public partial class TagesEditorDialog
@@ -92,7 +93,7 @@ namespace Stundenplan_V2.Vertretung
             var win = new Window
             {
                 Title = "Dauervertretung",
-                Width = 700, Height = 720, MinWidth = 560, MinHeight = 520,
+                Width = 700, Height = 780, MinWidth = 560, MinHeight = 560,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 Owner = this, ResizeMode = ResizeMode.CanResizeWithGrip
             };
@@ -113,7 +114,7 @@ namespace Stundenplan_V2.Vertretung
                 Text = "Bucht diese Stunde an jedem Schultag dieses Wochentags von–bis. Ferien und freie Tage laut " +
                        "Kalender werden übersprungen. Fehlt die Vertretungskraft an einem Tag oder ist sie in der Stunde " +
                        "schon belegt, wird dort nicht gebucht (Lücke – die Stunde bleibt offen). Jede Stunde zählt wie " +
-                       "eine einzelne Vertretung.",
+                       "eine einzelne Vertretung (Entfall: Lehrkraft fehlt, 0).",
                 TextWrapping = TextWrapping.Wrap, Foreground = Brushes.DimGray, Margin = new Thickness(0, 0, 0, 10)
             });
 
@@ -135,7 +136,7 @@ namespace Stundenplan_V2.Vertretung
                 Datum = datum, Stunde = z.Stunde, UNr = z.UNr,
                 Lehrer = z.OriginalLehrer, Fach = z.Fach, Klassen = new List<string>(z.Klassen)
             };
-            var zaehler = VertretungsZaehler.GehaltenProLehrer(_daten.Vertretungen);
+            var zaehler = VertretungsZaehler.SaldoProLehrer(_daten.Vertretungen);
             foreach (var v in VertretungsService.Vorschlaege(inst, plan, _daten.Kalender, zaehler))
                 cbVertreter.Items.Add(new VertreterWahl { Lehrer = v.Lehrer, Anzeige = $"{v.Lehrer}  ({v.Begruendung})" });
             string? bisher = z.Eintrag != null && !string.IsNullOrWhiteSpace(z.Eintrag.VertretungsLehrer)
@@ -181,6 +182,36 @@ namespace Stundenplan_V2.Vertretung
                                  : CbGrund.SelectedItem is VertretungsGrund g ? g : VertretungsGrund.Krankheit;
             zeileGrund.Children.Add(cbGrund);
             oben.Children.Add(zeileGrund);
+
+            // V4 (278): Zählung für alle Stunden der Serie – Standard oder eigener Wert mit Kommentar (Sondergrund).
+            var zeileZaehl = new WrapPanel { Margin = new Thickness(0, 0, 0, 2) };
+            zeileZaehl.Children.Add(Beschriftung("Zählung:"));
+            var cbZaehl = new ComboBox { Width = 170, Margin = new Thickness(0, 0, 14, 0) };
+            var itemStandard = new ComboBoxItem { Content = "Standard", Tag = null };
+            cbZaehl.Items.Add(itemStandard);
+            foreach (int zw in Zaehlung.EigeneWerte)
+                cbZaehl.Items.Add(new ComboBoxItem { Content = $"eigener Wert {Zaehlung.WertText(zw)}", Tag = zw });
+            cbZaehl.SelectedItem = itemStandard;
+            // Hat die angeklickte Stunde einen Sondergrund, ihn als Vorgabe zeigen.
+            var sgVorgabe = z.Eintrag != null && z.Eintrag.Sondergrund ? z.Eintrag : null;
+            if (sgVorgabe != null)
+                cbZaehl.SelectedItem = cbZaehl.Items.OfType<ComboBoxItem>()
+                                           .FirstOrDefault(i => i.Tag is int iw && iw == sgVorgabe.ZaehlwertSnapshot) ?? itemStandard;
+            zeileZaehl.Children.Add(cbZaehl);
+            zeileZaehl.Children.Add(Beschriftung("Kommentar:"));
+            var txtZaehlKomm = new TextBox
+            {
+                Width = 300, MaxLength = Zaehlung.KommentarMax, IsEnabled = false, VerticalAlignment = VerticalAlignment.Center,
+                Text = sgVorgabe?.Zaehlkommentar ?? "",
+                ToolTip = "Pflicht bei einem eigenen Zählwert (eine Zeile, bis 200 Zeichen)"
+            };
+            zeileZaehl.Children.Add(txtZaehlKomm);
+            oben.Children.Add(zeileZaehl);
+            oben.Children.Add(new TextBlock
+            {
+                Text = Zaehlung.KommentarHinweis + " Ein eigener Wert gilt als Sondergrund jeder Stunde der Serie.",
+                Foreground = Brushes.DimGray, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6)
+            });
 
             // Raum (R3-D: neuer Raum wird mitgenommen)
             string? neuerRaum = z.RaumGeaendert && !string.IsNullOrWhiteSpace(z.Raum) ? z.Raum!.Trim() : null;
@@ -228,6 +259,9 @@ namespace Stundenplan_V2.Vertretung
             Vertretungsart ArtGewaehlt()
                 => cbArt.SelectedItem is ComboBoxItem it && it.Tag is Vertretungsart a ? a : Vertretungsart.Vertretung;
 
+            int? EigenerWert()
+                => cbZaehl.SelectedItem is ComboBoxItem zi && zi.Tag is int ew ? ew : (int?)null;
+
             void Aktualisiere()
             {
                 var art = ArtGewaehlt();
@@ -242,6 +276,12 @@ namespace Stundenplan_V2.Vertretung
                 if (dpVon.SelectedDate is not DateTime von || dpBis.SelectedDate is not DateTime bis || bis.Date < von.Date)
                 { txtSumme.Text = "Zeitraum ungültig (von ≤ bis)."; return; }
                 string? vertreter = (cbVertreter.SelectedItem as VertreterWahl)?.Lehrer;
+                // V4: Standardwert der gewählten Art (am angeklickten Tag) in der Auswahl „Zählung“ zeigen.
+                int std = Zaehlung.StandardWert(art, art == Vertretungsart.Entfall ? (EntfallAnlass?)EntfallAnlass.Lehrkraft : null,
+                    braucht ? vertreter : null, datum, z.Stunde, _daten, plan);
+                itemStandard.Content = $"Standard ({Zaehlung.WertText(std)})";
+                int? eigenWahl = EigenerWert();
+                txtZaehlKomm.IsEnabled = eigenWahl != null;
                 if (braucht && vertreter == null)
                 { txtSumme.Text = $"Bitte wählen, wer die {Dauervertretung.ArtText(art)} übernimmt."; return; }
 
@@ -253,7 +293,9 @@ namespace Stundenplan_V2.Vertretung
                     Grund = cbGrund.SelectedItem is VertretungsGrund gr ? gr : VertretungsGrund.Sonstiges,
                     Raum = neuerRaum != null && chkRaum.IsChecked == true && art != Vertretungsart.Entfall ? neuerRaum : null,
                     Ersetzen = chkErsetzen.IsChecked == true,
-                    Von = von.Date, Bis = bis.Date, SerienId = serienId
+                    Von = von.Date, Bis = bis.Date, SerienId = serienId,
+                    EigenerZaehlwert = eigenWahl,
+                    Zaehlkommentar = eigenWahl != null ? Zaehlung.Bereinige(txtZaehlKomm.Text) : ""
                 };
                 tage = Dauervertretung.Vorschau(vorlage, plan, _daten, AusUntis);
 
@@ -278,6 +320,7 @@ namespace Stundenplan_V2.Vertretung
                 txtSumme.Text = tage.Count == 0
                     ? $"Im Zeitraum liegt kein {UntisText.Tag(datum)}."
                     : $"{n} Stunde(n) werden gebucht" +
+                      (eigenWahl != null ? $" (Zählung {Zaehlung.WertText(eigenWahl.Value)}, Sondergrund)" : "") +
                       (luecken > 0 ? $", {luecken} Lücke(n)" : "") +
                       (bleibt > 0 ? $", {bleibt} bleiben unverändert" : "") +
                       (frei > 0 ? $", {frei} schulfrei" : "") + ".";
@@ -285,6 +328,7 @@ namespace Stundenplan_V2.Vertretung
             }
 
             cbArt.SelectionChanged += (_, __) => Aktualisiere();
+            cbZaehl.SelectionChanged += (_, __) => Aktualisiere();
             cbVertreter.SelectionChanged += (_, __) => Aktualisiere();
             cbGrund.SelectionChanged += (_, __) => Aktualisiere();
             chkRaum.Checked += (_, __) => Aktualisiere(); chkRaum.Unchecked += (_, __) => Aktualisiere();
@@ -305,6 +349,13 @@ namespace Stundenplan_V2.Vertretung
             {
                 Aktualisiere();   // mit dem aktuellen Stand der Buchungen
                 if (vorlage == null || !tage.Any(t => t.WirdGebucht)) return;
+                // V4 (277): eigener Zählwert nur mit Kommentar.
+                if (vorlage.EigenerZaehlwert != null && Zaehlung.KommentarFehler(txtZaehlKomm.Text) is string kf)
+                {
+                    txtSumme.Text = kf + " Nichts gebucht.";
+                    txtZaehlKomm.Focus();
+                    return;
+                }
                 win.DialogResult = true;
             };
 
@@ -329,7 +380,8 @@ namespace Stundenplan_V2.Vertretung
             Zeichne();
 
             DateTime erster = gebucht.Min(), letzter = gebucht.Max();
-            string wer = v.BrauchtVertreter ? $"{Dauervertretung.ArtText(v.Art)} {v.Vertreter}" : Dauervertretung.ArtText(v.Art);
+            string wer = (v.BrauchtVertreter ? $"{Dauervertretung.ArtText(v.Art)} {v.Vertreter}" : Dauervertretung.ArtText(v.Art))
+                         + (v.EigenerZaehlwert is int ez ? $", Zählung {Zaehlung.WertText(ez)} (Sondergrund)" : "");
             string kurz = $"Dauervertretung {UntisText.Tag(erster)} {v.Stunde}. Std {v.Fach} {string.Join(", ", v.Klassen)} " +
                           $"({v.OriginalLehrer} → {wer}): {gebucht.Count} Stunde(n), {erster:dd.MM.}–{letzter:dd.MM.yyyy}";
             var luecken = tage.Where(t => t.IstLuecke).ToList();

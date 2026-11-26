@@ -43,7 +43,8 @@ namespace Stundenplan_V2.Vertretung
             Func<VertretungsEintrag, string> raum = RaumText;
             if (raumText != null) raum = raumText;
             var tages = eintraege
-                .Where(v => v.Datum.Date == tag.Date)
+                // V4b (276): ein Sondergrund an einer freien Stunde laut Kalender ist keine Vertretung/kein Entfall im Plan
+                .Where(v => v.Datum.Date == tag.Date && v.Anlass != EntfallAnlass.FreieZeit)
                 .OrderBy(v => v.Stunde)
                 .ThenBy(v => string.Join(",", v.Klassen))
                 .ToList();

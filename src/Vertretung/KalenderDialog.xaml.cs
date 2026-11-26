@@ -39,6 +39,10 @@ namespace Stundenplan_V2.Vertretung
     /// Dropdown, über das Feld „Schuljahr“ + „öffnen? Ja“ und beim Speichern. Erster und letzter
     /// Schultag müssen im Schuljahr liegen (01.08.–31.07.): sonst kein Import, beim Speichern
     /// eine Rückfrage.
+    ///
+    /// V4b (276): Spalte „Entfall zählt“ (0 / −1) für freie Zeiten einzelner Klassen; beim Speichern
+    /// liest das Fenster den Plan (Plan-Spalte „Plan“ bzw. die erste), damit das Blatt „Entfälle“ die
+    /// freien Stunden der Klassen enthält.
     /// </summary>
     public partial class KalenderDialog : Window
     {
@@ -66,7 +70,13 @@ namespace Stundenplan_V2.Vertretung
             public string Bis { get; set; } = "";
             public string Bezeichnung { get; set; } = "";
             public string Klassen { get; set; } = "";
+            /// <summary>V4b (276): „0“ oder „−1“ – nur bei Einträgen mit Klassen.</summary>
+            public string EntfallZaehlt { get; set; } = EntfallNull;
         }
+
+        /// <summary>V4b (276): Auswahl der Spalte „Entfall zählt“.</summary>
+        private const string EntfallNull = "0";
+        private const string EntfallMinus = "−1";
 
         public KalenderDialog(string planPfad, Action<string>? log = null)
         {
@@ -79,6 +89,7 @@ namespace Stundenplan_V2.Vertretung
                 : (Path.GetDirectoryName(_planPfad) ?? Directory.GetCurrentDirectory());
 
             ColTyp.ItemsSource = Enum.GetValues(typeof(FreieZeitTyp));
+            ColEntfall.ItemsSource = new[] { EntfallNull, EntfallMinus };
             DgKalender.ItemsSource = _zeilen;
 
             // Änderungen im Grid markieren den Dialog als "ungespeichert".
@@ -619,13 +630,16 @@ namespace Stundenplan_V2.Vertretung
                     return;
                 }
 
+                var klassen = SplitKlassen(z.Klassen);
                 freie.Add(new FreieZeit
                 {
                     Typ = z.Typ,
                     Von = von,
                     Bis = bis,
                     Bezeichnung = z.Bezeichnung?.Trim() ?? "",
-                    BetroffeneKlassen = SplitKlassen(z.Klassen)
+                    BetroffeneKlassen = klassen,
+                    // V4b (276): nur bei freien Zeiten einzelner Klassen
+                    EntfallZaehlwert = klassen.Count > 0 && IstMinus(z.EntfallZaehlt) ? -1 : 0
                 });
             }
 
@@ -665,7 +679,8 @@ namespace Stundenplan_V2.Vertretung
             }
             try
             {
-                VertretungsStore.Speichern(_daten, ziel);
+                // V4b (279): Plan für die freien Stunden der Klassen im Blatt „Entfälle“ (fehlt er, ohne diese Zeilen).
+                VertretungsStore.Speichern(_daten, ziel, PlanFuerEntfaelle());
             }
             catch (Exception ex)
             {
@@ -721,8 +736,32 @@ namespace Stundenplan_V2.Vertretung
             Von = fz.Von.ToString("yyyy-MM-dd"),
             Bis = fz.Bis.ToString("yyyy-MM-dd"),
             Bezeichnung = fz.Bezeichnung,
-            Klassen = string.Join(";", fz.BetroffeneKlassen)
+            Klassen = string.Join(";", fz.BetroffeneKlassen),
+            EntfallZaehlt = !fz.GiltFuerGanzeSchule && fz.EntfallZaehlwert < 0 ? EntfallMinus : EntfallNull
         };
+
+        /// <summary>„−1“ bzw. „-1“ (auch von Hand getippt) → true.</summary>
+        private static bool IstMinus(string? s)
+        {
+            string t = (s ?? "").Trim();
+            return t == EntfallMinus || t == "-1";
+        }
+
+        /// <summary>
+        /// V4b (279): Plan für das Blatt „Entfälle“ beim Speichern – das Fenster hat keinen geladenen Plan; gelesen wird
+        /// die Plan-Spalte „Plan“ (sonst die erste). Nur nötig, wenn es freie Zeiten einzelner Klassen gibt; Fehler → null.
+        /// </summary>
+        private PlanDaten? PlanFuerEntfaelle()
+        {
+            if (!_daten.Kalender.FreieZeiten.Any(f => !f.GiltFuerGanzeSchule)) return null;
+            if (string.IsNullOrWhiteSpace(_planPfad) || !File.Exists(_planPfad)) return null;
+            try { return PlanLeser.Lies(_planPfad); }
+            catch (Exception ex)
+            {
+                _log?.Invoke($"Kalender: Plan für das Blatt „Entfälle“ nicht lesbar ({ex.Message}) – ohne freie Zeiten der Klassen.");
+                return null;
+            }
+        }
 
         private static System.Collections.Generic.List<string> SplitKlassen(string s)
             => string.IsNullOrWhiteSpace(s)

@@ -30,6 +30,14 @@ namespace Stundenplan_V2.Vertretung
     //      statt L1. Das tatsächlich gehaltene Fach/Klasse kommt vom Quell-
     //      Eintrag (über VerlegungsId, auch an einem anderen Tag). Status
     //      VerlegtHin.
+    //
+    //  V4b (276): Freie Zeiten einzelner Klassen laut Kalender. Eine Stunde,
+    //  deren Klassen alle frei sind und die nicht gebucht ist, bleibt Status
+    //  Normal (geht also NICHT an die App – die App zeigt „Frei“ über den
+    //  Kalender, und nicht ins PDF), trägt aber FreiLautKalender und den Text
+    //  „frei (Bezeichnung)“ – der Wocheneditor zeigt sie grau. Ein Sondergrund
+    //  an einer solchen Stunde (Eintrag Art Entfall, Anlass FreieZeit) ändert
+    //  daran nichts. Jede andere Buchung geht vor.
     // =====================================================================
 
     public enum ZellStatus
@@ -69,6 +77,13 @@ namespace Stundenplan_V2.Vertretung
 
         /// <summary>Zugrundeliegende Buchung (falls vorhanden), sonst null.</summary>
         public VertretungsEintrag? Eintrag { get; set; }
+
+        /// <summary>
+        /// V4b (276): Die Klassen der Stunde haben laut Kalender frei (z. B. Stufenfahrt) – abgeleiteter Entfall der
+        /// Lehrkraft laut Plan. Status bleibt Normal (nicht in die App); <see cref="Eintrag"/> ist null bzw. ein
+        /// Sondergrund (Art Entfall, Anlass FreieZeit).
+        /// </summary>
+        public KalenderFrei? FreiLautKalender { get; set; }
 
         public bool IstGeaendert => Status != ZellStatus.Normal;
         public bool IstFrei => Status == ZellStatus.Entfall || Status == ZellStatus.VerlegtWeg;
@@ -159,6 +174,7 @@ namespace Stundenplan_V2.Vertretung
                     : l.FirstOrDefault(x => !ReferenceEquals(x, e));
 
             // 1) Grundplan-Zellen des Tages aufbauen.
+            var grundZellen = new List<TagesZelle>();
             foreach (var kv in plan.Belegung)
             {
                 if (!string.Equals(kv.Key.WTag, wtag, StringComparison.OrdinalIgnoreCase)) continue;
@@ -170,7 +186,7 @@ namespace Stundenplan_V2.Vertretung
                     {
                         // R3-D: Raumplan der Plan-Spalte, sonst Fachraum vor Stammraum (wie die App).
                         string? raum = PlanRaeume.RaumVon(plan, kv.Key.WTag, stunde, unr, teil);
-                        ergebnis.Zellen.Add(new TagesZelle
+                        var grundZelle = new TagesZelle
                         {
                             Stunde = stunde,
                             UNr = unr,
@@ -181,7 +197,9 @@ namespace Stundenplan_V2.Vertretung
                             Raum = raum,
                             GrundRaum = raum,
                             Status = ZellStatus.Normal
-                        });
+                        };
+                        ergebnis.Zellen.Add(grundZelle);
+                        grundZellen.Add(grundZelle);
                     }
                 }
             }
@@ -212,6 +230,8 @@ namespace Stundenplan_V2.Vertretung
                 if (zelle == null) continue;
 
                 zelle.Eintrag = e;
+                // V4b (276/277): Sondergrund an einer freien Stunde laut Kalender – bleibt „frei“ (unten), keine Änderung.
+                if (e.Art == Vertretungsart.Entfall && e.Anlass == EntfallAnlass.FreieZeit) continue;
                 switch (e.Art)
                 {
                     case Vertretungsart.Entfall:
@@ -278,6 +298,44 @@ namespace Stundenplan_V2.Vertretung
                 // Zusammenlegung, hierher verlegt). Entfall/verlegt weg: kein Raum.
                 if (!zelle.IstFrei && !string.IsNullOrWhiteSpace(e.VertretungsRaum))
                     zelle.Raum = e.VertretungsRaum!.Trim();
+            }
+
+            // 3) V4b (276): freie Zeiten einzelner Klassen – ungebuchte Grundplan-Stunden bzw. solche mit Sondergrund.
+            if (kal.FreieZeiten.Any(f => !f.GiltFuerGanzeSchule))
+            {
+                foreach (var z in grundZellen)
+                {
+                    var e = z.Eintrag;
+                    bool sondergrundFrei = e != null && e.Art == Vertretungsart.Entfall && e.Anlass == EntfallAnlass.FreieZeit;
+                    if (e != null && !sondergrundFrei) continue;
+                    if (!KalenderEntfaelle.IstUnterricht(z.Fach, z.Klassen)) continue;
+                    var frei = KalenderEntfaelle.FreiFuer(kal, datum, z.Klassen);
+                    if (frei == null && sondergrundFrei)
+                        frei = new KalenderFrei
+                        {
+                            Bezeichnung = (string.IsNullOrWhiteSpace(e!.Bemerkung) ? "freie Zeit" : e.Bemerkung.Trim()) +
+                                          ", nicht mehr im Kalender",
+                            Wert = 0
+                        };
+                    if (frei == null) continue;
+                    z.FreiLautKalender = frei;
+                    z.Info = $"frei ({frei.Bezeichnung})";
+                }
+            }
+            else
+            {
+                // Sondergrund an einer freien Stunde, deren Eintrag inzwischen aus dem Kalender entfernt wurde.
+                foreach (var z in grundZellen.Where(x => x.Eintrag?.Art == Vertretungsart.Entfall
+                                                         && x.Eintrag.Anlass == EntfallAnlass.FreieZeit))
+                {
+                    z.FreiLautKalender = new KalenderFrei
+                    {
+                        Bezeichnung = (string.IsNullOrWhiteSpace(z.Eintrag!.Bemerkung) ? "freie Zeit" : z.Eintrag.Bemerkung.Trim()) +
+                                      ", nicht mehr im Kalender",
+                        Wert = 0
+                    };
+                    z.Info = $"frei ({z.FreiLautKalender.Bezeichnung})";
+                }
             }
 
             ergebnis.Zellen = ergebnis.Zellen

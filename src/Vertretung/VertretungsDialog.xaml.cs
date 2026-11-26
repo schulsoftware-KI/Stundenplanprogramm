@@ -20,6 +20,10 @@ namespace Stundenplan_V2.Vertretung
     ///
     /// Arbeitet auf "Vertretung_&lt;Schuljahr&gt;.xlsx" neben der Plandatei und
     /// setzt einen angelegten Schuljahreskalender voraus (Button 22).
+    ///
+    /// V4b: Gründe je Abwesenheit (288), Spalte „Ausfall“ für die ausfallende Lehrkraft vertretener Stunden (287, 292),
+    /// Abwesend „Klasse“: Kurse mit anwesenden Klassen ohne Buchung (290), Abwesend „Lehrer“ an einem freien Tag einer
+    /// Klasse: Entfall – Lehrkraft fehlt (295), Zähler mit „Vertreten 0/−1“ und abgeleiteten Entfällen (276, 293).
     /// </summary>
     public partial class VertretungsDialog : Window, IVertretungsFenster
     {
@@ -54,7 +58,7 @@ namespace Stundenplan_V2.Vertretung
                 : (Path.GetDirectoryName(_planPfad) ?? Directory.GetCurrentDirectory());
 
             CbSubjekt.ItemsSource = Enum.GetValues(typeof(AbwesenheitsSubjekt));
-            CbGrund.ItemsSource = Enum.GetValues(typeof(VertretungsGrund));
+            SetzeGruende(AbwesenheitsSubjekt.Lehrer);   // V4b (288): je Abwesenheit, siehe CbSubjekt_SelectionChanged
             CbBulkArt.ItemsSource = Enum.GetValues(typeof(Vertretungsart));
             DgInstanzen.ItemsSource = _zeilen;
             DgZaehler.ItemsSource = _zaehler;
@@ -158,10 +162,20 @@ namespace Stundenplan_V2.Vertretung
         {
             // R3-D-Nachtrag: Namen einer anderen Art (z. B. Lehrkräfte, wenn jetzt „Raum“ gewählt ist) passen nicht mehr.
             if (e.RemovedItems.Count > 0) TxtNamen.Text = "";
+            // V4b (288): bei „Klasse“ nur Gründe für Klassen (Vorgabe „Sonstiges“), sonst wie bisher (Vorgabe „Krankheit“).
+            if (CbSubjekt.SelectedItem is AbwesenheitsSubjekt sg) SetzeGruende(sg);
             if (!_bereit || _plan == null) return;
             if (CbSubjekt.SelectedItem is AbwesenheitsSubjekt subj)
                 FuelleNamen(subj);
             MeldeAuswahl();
+        }
+
+        /// <summary>V4b (288): Liste und Vorgabe des Feldes „Grund“ je Abwesenheit.</summary>
+        private void SetzeGruende(AbwesenheitsSubjekt subj)
+        {
+            bool klasse = subj == AbwesenheitsSubjekt.Klasse;
+            CbGrund.ItemsSource = klasse ? Zaehlung.KlassenGruende : Zaehlung.LehrerGruende;
+            CbGrund.SelectedItem = klasse ? Zaehlung.KlassenGrundVorgabe : VertretungsGrund.Krankheit;
         }
 
         private void FuelleNamen(AbwesenheitsSubjekt subj)
@@ -251,13 +265,14 @@ namespace Stundenplan_V2.Vertretung
             }
 
             var subj = (AbwesenheitsSubjekt)CbSubjekt.SelectedItem;
-            _letzteGrund = (VertretungsGrund)CbGrund.SelectedItem;
+            _letzteGrund = CbGrund.SelectedItem is VertretungsGrund lg ? lg : VertretungsGrund.Sonstiges;
             _letzteAbwesenheiten.Clear();
             // V4 (275): Anlass eines Entfalls = was fehlt; bei „Klasse“ sind die Lehrkräfte freigesetzt → Entfall (−1).
             var anlassZeile = Zaehlung.AnlassAus(subj);
             bool klasseFehlt = subj == AbwesenheitsSubjekt.Klasse;
 
-            var zaehler = VertretungsZaehler.SaldoProLehrer(_daten.Vertretungen);
+            // 283/276: Saldo mit den abgeleiteten Entfällen (freie Zeiten einzelner Klassen)
+            var zaehler = VertretungsZaehler.SaldoProLehrer(KalenderEntfaelle.MitAbgeleiteten(_daten, _plan));
             var alleInstanzen = new List<StundenInstanz>();
 
             foreach (var name in namen)
@@ -292,6 +307,7 @@ namespace Stundenplan_V2.Vertretung
             var gruppenRaum = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // Tag|Std|Gruppe → Raum
             int ohneFreienRaum = 0;
             int entfallVorbelegt = 0, teilweiseAnwesend = 0;   // V4: Abwesenheit „Klasse“
+            int freiVorbelegt = 0;                             // V4b (295): Abwesenheit „Lehrer“ an einem freien Tag der Klasse
 
             // Duplikate entfernen (z. B. gekoppelte Kurse über mehrere gewählte Klassen).
             var gesehen = new HashSet<string>();
@@ -308,6 +324,8 @@ namespace Stundenplan_V2.Vertretung
                 // Klassen bleibt wie bisher mit Vertretung vorbelegt.
                 bool alleKlassenFehlen = klasseFehlt && inst.Klassen.Count > 0
                     && inst.Klassen.All(k => namen.Contains(k, StringComparer.OrdinalIgnoreCase));
+                // V4b (290): Kurse mit weiteren, anwesenden Klassen finden mit der eigenen Lehrkraft statt → ohne Buchung.
+                bool kursFindetStatt = klasseFehlt && !alleKlassenFehlen;
                 if (klasseFehlt && FindeBuchung(inst) == null)
                 {
                     if (alleKlassenFehlen) entfallVorbelegt++;
@@ -334,7 +352,10 @@ namespace Stundenplan_V2.Vertretung
                     RaumOptionen = RaumOptionenFuer(inst, TagFuer(inst.Datum), sperren),
                     Art = alleKlassenFehlen ? Vertretungsart.Entfall : Vertretungsart.Vertretung,
                     Vorschlaege = vorschlaege,
-                    GewaehlterVertreter = vorschlaege.FirstOrDefault()?.Lehrer,
+                    GewaehlterVertreter = kursFindetStatt ? null : vorschlaege.FirstOrDefault()?.Lehrer,
+                    KursFindetStatt = kursFindetStatt,
+                    // V4b (290): Ausfall „fehlt (0)“; bei Abwesenheit „Klasse“ ist die Lehrkraft nicht verhindert (−1).
+                    AusfallWahl = klasseFehlt ? InstanzZeile.AusfallNichtVerhindert : InstanzZeile.AusfallFehlt,
                     Bemerkung = "",
                     Anlass = anlassZeile,
                     StandardRechner = StandardWertFuer,
@@ -364,6 +385,16 @@ namespace Stundenplan_V2.Vertretung
                 // V1: Ist die Stunde schon gebucht, die gespeicherte Art/Vertretung zeigen statt
                 // „Vertretung“ + erstem Vorschlag (sonst überschrieb „Buchen“ die Buchung still).
                 var bestehend = FindeBuchung(inst);
+                // V4b (295): Fehlt die Lehrkraft, während die Klassen der Stunde laut Kalender frei sind, ist es ein Entfall
+                // „Lehrkraft fehlt (0)“ – sie war nicht freigesetzt. Ein Sondergrund an der freien Stunde wird dabei ersetzt.
+                if (subj == AbwesenheitsSubjekt.Lehrer
+                    && (bestehend == null || bestehend.Anlass == EntfallAnlass.FreieZeit)
+                    && ZelleVon(inst, TagFuer(inst.Datum))?.FreiLautKalender != null)
+                {
+                    zeile.Art = Vertretungsart.Entfall;
+                    bestehend = null;
+                    freiVorbelegt++;
+                }
                 if (bestehend != null)
                 {
                     zeile.UebernimmBuchung(bestehend);
@@ -380,7 +411,9 @@ namespace Stundenplan_V2.Vertretung
                   (raumSperre ? ", Raumvertretung mit freiem Raum vorbelegt (Spalte „neuer Raum“)" +
                                 (ohneFreienRaum > 0 ? $" – {ohneFreienRaum} ohne freien Raum" : "") : "") +
                   (entfallVorbelegt > 0 ? $", {entfallVorbelegt} mit Entfall (−1, Klasse/Kurs fehlt) vorbelegt" : "") +
-                  (teilweiseAnwesend > 0 ? $", {teilweiseAnwesend} mit Vertretung vorbelegt (weitere Klassen anwesend)" : "") +
+                  (teilweiseAnwesend > 0 ? $", {teilweiseAnwesend} ohne Buchung (weitere Klassen anwesend – der Kurs findet statt; " +
+                                           "für eine Vertretung ist „Ausfall: nicht verhindert (−1)“ vorbelegt)" : "") +
+                  (freiVorbelegt > 0 ? $", {freiVorbelegt} mit freier Klasse laut Kalender: Entfall (Lehrkraft fehlt, 0)" : "") +
                   ". Art/Vertretung prüfen, dann 'Buchen'.");
         }
 
@@ -503,6 +536,7 @@ namespace Stundenplan_V2.Vertretung
             }
 
             int gebucht = 0, uebersprungen = 0, geaendert = 0, unveraendert = 0, verlegungen = 0, behalten = 0, ohneRaum = 0, sondergruende = 0;
+            int ohneBuchung = 0, nichtVerhindert = 0, ausfallWeg = 0;   // V4b (290, 292, 296)
             var neuGebucht = new List<(InstanzZeile Zeile, VertretungsEintrag Eintrag)>();
             foreach (var z in _zeilen)
             {
@@ -519,7 +553,8 @@ namespace Stundenplan_V2.Vertretung
 
                 if (brauchtVertreter && vertreter == null)
                 {
-                    uebersprungen++;
+                    if (z.KursFindetStatt) ohneBuchung++;   // V4b (290): Kurs findet mit der eigenen Lehrkraft statt
+                    else uebersprungen++;
                     continue;
                 }
 
@@ -564,6 +599,14 @@ namespace Stundenplan_V2.Vertretung
                     Zaehlung.SetzeSondergrund(eintrag, eigen, z.Zaehlkommentar);
                     sondergruende++;
                 }
+                // V4b (287, 292, 296): ausfallende Lehrkraft – Anlass aus der Spalte „Ausfall“; ein vorhandener Sondergrund
+                // dafür (Wocheneditor/Dauervertretung) bleibt, solange weiter eine andere Lehrkraft hält.
+                if (Zaehlung.UebernimmAusfall(z.Bestehend, eintrag, z.AusfallAnlassGewaehlt)) ausfallWeg++;
+                if (Zaehlung.HatAusfall(eintrag))
+                {
+                    Zaehlung.SetzeAusfall(eintrag, z.AusfallAnlassGewaehlt);
+                    if (!eintrag.SondergrundAusfall && eintrag.ZaehlwertAusfall < 0) nichtVerhindert++;
+                }
 
                 _daten.Vertretungen.RemoveAll(v =>
                     v.Datum == eintrag.Datum && v.Stunde == eintrag.Stunde &&
@@ -576,7 +619,7 @@ namespace Stundenplan_V2.Vertretung
                 neuGebucht.Add((z, eintrag));
             }
 
-            try { VertretungsStore.Speichern(_daten, _vertretungsPfad); }
+            try { VertretungsStore.Speichern(_daten, _vertretungsPfad, _plan); }   // V4b: Plan für das Blatt „Entfälle“
             catch (Exception ex)
             {
                 MessageBox.Show("Fehler beim Speichern:\n\n" + ex.Message +
@@ -592,6 +635,9 @@ namespace Stundenplan_V2.Vertretung
             AktualisiereUebersicht();
             var teile = new List<string> { $"{gebucht} Stunde(n) gebucht und gespeichert" + (geaendert > 0 ? $" (davon {geaendert} geändert)" : "") };
             if (sondergruende > 0) teile.Add($"{sondergruende} mit eigenem Zählwert (Sondergrund)");
+            if (nichtVerhindert > 0) teile.Add($"{nichtVerhindert} mit Ausfall „nicht verhindert“ (−1)");
+            if (ausfallWeg > 0) teile.Add($"bei {ausfallWeg} entfallen Anlass/Sondergrund der ausfallenden Lehrkraft (hält niemand anderes mehr)");
+            if (ohneBuchung > 0) teile.Add($"{ohneBuchung} ohne Buchung (Kurs mit anwesenden Klassen findet statt)");
             if (unveraendert > 0) teile.Add($"{unveraendert} unverändert");
             if (behalten > 0) teile.Add($"{behalten} Änderung(en) nicht übernommen");
             if (uebersprungen > 0) teile.Add($"{uebersprungen} übersprungen (keine Vertretungskraft gewählt)");
@@ -653,7 +699,8 @@ namespace Stundenplan_V2.Vertretung
                     Orig = v.OriginalLehrer,
                     ArtText = v.Art.ToString(),
                     Vertreter = v.VertretungsLehrer ?? "",
-                    GrundText = v.Grund.ToString(),
+                    // V4b (276): Sondergrund an einer freien Stunde laut Kalender – Bezeichnung der freien Zeit
+                    GrundText = v.Anlass == EntfallAnlass.FreieZeit ? $"{v.Bemerkung} (Kalender)".Trim() : Zaehlung.GrundText(v.Grund),
                     ZaehlText = v.Art == Vertretungsart.Verlegung ? "" : Zaehlung.KurzText(v),
                     Bemerkung = v.Bemerkung
                 });
@@ -726,7 +773,8 @@ namespace Stundenplan_V2.Vertretung
 
             try
             {
-                ZaehlerExporter.Erzeuge(_daten.Vertretungen, dlg.FileName, _daten.Schuljahr);
+                // V4b (276, 281): mit den abgeleiteten Entfällen (freie Zeiten einzelner Klassen)
+                ZaehlerExporter.Erzeuge(KalenderEntfaelle.MitAbgeleiteten(_daten, _plan), dlg.FileName, _daten.Schuljahr);
             }
             catch (Exception ex)
             {
@@ -755,7 +803,7 @@ namespace Stundenplan_V2.Vertretung
         private void AktualisiereZaehler()
         {
             _zaehler.Clear();
-            var stand = VertretungsZaehler.ProLehrer(_daten.Vertretungen);
+            var stand = VertretungsZaehler.ProLehrer(KalenderEntfaelle.MitAbgeleiteten(_daten, _plan));   // V4b (276)
             foreach (var s in stand.Values.OrderByDescending(s => s.Saldo)
                                            .ThenBy(s => s.Bezug, StringComparer.OrdinalIgnoreCase))
             {
@@ -770,6 +818,8 @@ namespace Stundenplan_V2.Vertretung
                     GehaltenPunkte = s.GehalteneVertretungen,
                     Entfall0 = s.Entfall0,
                     EntfallMinus1 = s.EntfallMinus1,
+                    Vertreten0 = s.Vertreten0,
+                    VertretenMinus1 = s.VertretenMinus1,
                     Sondergruende = s.Sondergruende,
                     SondergrundPunkte = s.SondergrundPunkte,
                     EntfallGesamt = s.EigeneAusfaelle,
@@ -781,6 +831,14 @@ namespace Stundenplan_V2.Vertretung
         // =====================================================
         //  Hilfsfunktionen
         // =====================================================
+
+        /// <summary>V4b (295): Zelle des effektiven Tages zu einer Stunde (Schlüssel wie beim Buchen).</summary>
+        private static TagesZelle? ZelleVon(StundenInstanz inst, Tagesplan tp)
+            => tp.Zellen.FirstOrDefault(c => c.Stunde == inst.Stunde && c.UNr == inst.UNr &&
+                                             string.Equals(c.OriginalLehrer, inst.Lehrer, StringComparison.OrdinalIgnoreCase) &&
+                                             string.Equals(c.Fach, inst.Fach, StringComparison.OrdinalIgnoreCase))
+               ?? tp.Zellen.FirstOrDefault(c => c.Stunde == inst.Stunde && c.UNr == inst.UNr &&
+                                                string.Equals(c.OriginalLehrer, inst.Lehrer, StringComparison.OrdinalIgnoreCase));
 
         /// <summary>V1: gespeicherte Buchung derselben Stunde (Schlüssel wie beim Buchen: Datum, Stunde, UNr, Lehrkraft).</summary>
         private VertretungsEintrag? FindeBuchung(StundenInstanz inst)
@@ -968,10 +1026,64 @@ namespace Stundenplan_V2.Vertretung
                     if (string.Equals(_gewaehlterVertreter, value, StringComparison.Ordinal)) return;
                     _gewaehlterVertreter = value;
                     OnChanged(nameof(GewaehlterVertreter));
+                    OnChanged(nameof(AusfallMoeglich));
+                    OnChanged(nameof(AusfallTipp));
                     AktualisiereStandard();   // V4: UV-Einsatz zählt 0 – der Standard hängt von der Lehrkraft ab
                 }
             }
             public string Bemerkung { get; set; } = "";
+
+            /// <summary>V4b (290): Abwesend „Klasse“, aber weitere Klassen der Stunde sind da – ohne Buchung vorbelegt.</summary>
+            public bool KursFindetStatt { get; set; }
+
+            // ---- V4b (287, 292): ausfallende Lehrkraft einer vertretenen Stunde ----
+            public const string AusfallFehlt = "L";
+            public const string AusfallNichtVerhindert = "N";
+
+            /// <summary>Eintrag der Auswahl „Ausfall“.</summary>
+            public sealed class AusfallOption
+            {
+                public string Schluessel { get; init; } = "";
+                public string Anzeige { get; init; } = "";
+            }
+
+            // Einmal erzeugt (wie ArtenListe): jede Zeile bekommt dieselbe Liste.
+            private static readonly List<AusfallOption> AusfallListe = new()
+            {
+                new AusfallOption { Schluessel = AusfallFehlt, Anzeige = "fehlt (0)" },
+                new AusfallOption { Schluessel = AusfallNichtVerhindert, Anzeige = "nicht verhindert (−1)" }
+            };
+            public List<AusfallOption> AusfallOptionen => AusfallListe;
+
+            private string _ausfallWahl = AusfallFehlt;
+            /// <summary>„L“ = Lehrkraft fehlt (0), „N“ = nicht verhindert (−1).</summary>
+            public string AusfallWahl
+            {
+                get => _ausfallWahl;
+                set
+                {
+                    if (value == null) { OnChanged(nameof(AusfallWahl)); return; }   // Neuaufbau der Combo
+                    if (string.Equals(_ausfallWahl, value, StringComparison.Ordinal)) return;
+                    _ausfallWahl = value;
+                    OnChanged(nameof(AusfallWahl));
+                    OnChanged(nameof(AusfallTipp));
+                }
+            }
+
+            public AusfallAnlass AusfallAnlassGewaehlt
+                => _ausfallWahl == AusfallNichtVerhindert ? AusfallAnlass.NichtVerhindert : AusfallAnlass.Lehrkraft;
+
+            /// <summary>Hält eine andere Lehrkraft die Stunde (dann zählt auch die ausfallende, 287)?</summary>
+            public bool AusfallMoeglich
+                => Zaehlung.HatAusfall(_art, ArtBrauchtVertreter(_art) ? _gewaehlterVertreter : null, OrigLehrer);
+
+            /// <summary>Tooltip der Spalte „Ausfall“.</summary>
+            public string AusfallTipp
+                => $"Warum fehlt {OrigLehrer}? „fehlt (0)“ = krank bzw. dienstlich verhindert; „nicht verhindert (−1)“ = sie hätte " +
+                   "eigentlich einen Entfall gehabt." +
+                   (_bestehend != null && Zaehlung.HatAusfall(_bestehend) && _bestehend.SondergrundAusfall
+                       ? $"\nGebucht: Sondergrund {Zaehlung.WertText(_bestehend.ZaehlwertAusfall)} – bleibt beim Buchen (ändern im Wocheneditor)."
+                       : "\nEinen eigenen Wert dafür im Wocheneditor („Zählwert festlegen …“) bzw. in der Dauervertretung.");
 
             // ---- V4: Zählung je Zeile (275, 277, 278) ----
             /// <summary>Schlüssel der Auswahl „Standard (…)“.</summary>
@@ -1062,6 +1174,9 @@ namespace Stundenplan_V2.Vertretung
                         ? $"Entfall – {Zaehlung.AnlassText(Anlass)}: Standard {Zaehlung.WertText(StandardWertJetzt)}"
                         : $"Standard {Zaehlung.WertText(StandardWertJetzt)}";
                     t += $" für {wer}.";
+                    if (AusfallMoeglich)
+                        t += $"\nAusfall {OrigLehrer}: {Zaehlung.AusfallKurz(AusfallAnlassGewaehlt)} " +
+                             $"({Zaehlung.WertText(Zaehlung.AusfallWert(AusfallAnlassGewaehlt))}).";
                     if (EigenerWert is int ew)
                         t += $"\nEigener Wert {Zaehlung.WertText(ew)} (Sondergrund) – Kommentar Pflicht.";
                     return t + "\n" + Zaehlung.KommentarHinweis;
@@ -1076,10 +1191,11 @@ namespace Stundenplan_V2.Vertretung
             /// <summary>Teil einer Verlegung (zwei verknüpfte Einträge) – nur im Wocheneditor änderbar.</summary>
             public bool IstVerlegung => _bestehend != null && !string.IsNullOrEmpty(_bestehend.VerlegungsId);
             /// <summary>Spalte „gebucht“: gespeicherte Art und Vertretung.</summary>
+            /// <summary>V4b (289): mit Zählung und Anlass, bei vertretenen Stunden beide Teile.</summary>
             public string GebuchtText => _bestehend == null ? ""
                 : IstVerlegung ? "Verlegung (im Wocheneditor ändern)"
                 : BuchungText(_bestehend.Art, _bestehend.VertretungsLehrer, _bestehend.VertretungsRaum)
-                  + $" ({Zaehlung.WertText(_bestehend.ZaehlwertSnapshot)}{(_bestehend.Sondergrund ? ", Sondergrund" : "")})";
+                  + ": " + Zaehlung.KurzText(_bestehend);
 
             /// <summary>Zeile wie gespeichert vorbelegen (Art, Vertretung, Bemerkung).</summary>
             public void UebernimmBuchung(VertretungsEintrag b)
@@ -1110,6 +1226,13 @@ namespace Stundenplan_V2.Vertretung
                 if (b.Art == Vertretungsart.Entfall) Anlass = b.Anlass;
                 _zaehlWahl = b.Sondergrund ? WahlFuer(b.ZaehlwertSnapshot) : StandardSchluessel;
                 _zaehlkommentar = b.Sondergrund ? b.Zaehlkommentar ?? "" : "";
+                // V4b (292): Anlass der ausfallenden Lehrkraft wie gebucht (unbekannt → „fehlt (0)“).
+                if (Zaehlung.HatAusfall(b))
+                    _ausfallWahl = b.AnlassAusfall == AusfallAnlass.NichtVerhindert ? AusfallNichtVerhindert : AusfallFehlt;
+                KursFindetStatt = false;
+                OnChanged(nameof(AusfallWahl));
+                OnChanged(nameof(AusfallMoeglich));
+                OnChanged(nameof(AusfallTipp));
                 OnChanged(nameof(RaumOptionen));
                 OnChanged(nameof(NeuerRaum));
                 OnChanged(nameof(Vorschlaege));
@@ -1140,6 +1263,10 @@ namespace Stundenplan_V2.Vertretung
                         return false;
                 }
                 else if (_bestehend.Sondergrund) return false;
+                // V4b (292): Eine nur im Ausfall-Anlass geänderte Stunde gilt als Änderung (unbekannt = „fehlt“).
+                if (AusfallMoeglich && Zaehlung.HatAusfall(_bestehend)
+                    && AusfallAnlassGewaehlt != (_bestehend.AnlassAusfall ?? AusfallAnlass.Lehrkraft))
+                    return false;
                 if (!BrauchtVertreter) return true;
                 return string.Equals((GewaehlterVertreter ?? "").Trim(), (_bestehend.VertretungsLehrer ?? "").Trim(),
                     StringComparison.OrdinalIgnoreCase);
@@ -1149,7 +1276,10 @@ namespace Stundenplan_V2.Vertretung
             public string NeuText() => BuchungText(Art, BrauchtVertreter ? GewaehlterVertreter : null,
                                                    RaumWaehlbar ? NeuerRaum : null)
                 + (EigenerWert is int ew ? $" (Zählung {Zaehlung.WertText(ew)}, Sondergrund)"
-                   : _bestehend?.Sondergrund == true ? " (Zählung wieder Standard)" : "");
+                   : _bestehend?.Sondergrund == true ? " (Zählung wieder Standard)" : "")
+                + (AusfallMoeglich && (_bestehend == null || !Zaehlung.HatAusfall(_bestehend)
+                                       || AusfallAnlassGewaehlt != (_bestehend.AnlassAusfall ?? AusfallAnlass.Lehrkraft))
+                    ? $" (Ausfall {OrigLehrer}: {Zaehlung.AusfallKurz(AusfallAnlassGewaehlt)})" : "");
 
             private static string BuchungText(Vertretungsart art, string? vertreter, string? raum = null)
             {
@@ -1200,6 +1330,8 @@ namespace Stundenplan_V2.Vertretung
                     OnChanged(nameof(Art));
                     OnChanged(nameof(BrauchtVertreter));
                     OnChanged(nameof(RaumWaehlbar));
+                    OnChanged(nameof(AusfallMoeglich));   // V4b (292)
+                    OnChanged(nameof(AusfallTipp));
                     // V4 (277): Ein eigener Zählwert galt der alten Art – zurück auf Standard, mit Hinweis.
                     if (_zaehlWahl != StandardSchluessel)
                     {
@@ -1255,6 +1387,9 @@ namespace Stundenplan_V2.Vertretung
             public int GehaltenPunkte { get; set; }
             public int Entfall0 { get; set; }
             public int EntfallMinus1 { get; set; }
+            // V4b (293)
+            public int Vertreten0 { get; set; }
+            public int VertretenMinus1 { get; set; }
             public int Sondergruende { get; set; }
             public int SondergrundPunkte { get; set; }
             public int EntfallGesamt { get; set; }

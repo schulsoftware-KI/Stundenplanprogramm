@@ -19,6 +19,7 @@ namespace Stundenplan_V2.Vertretung
     ///    mit Vorschau und Rückfrage; wahlweise endet die Abwesenheit der Lehrkraft am Tag davor.
     ///  - Danach wird „Zeitraum veröffentlichen“ für die betroffenen Tage vorgeschlagen (Entscheidung 161).
     ///  - V4 (278): „Zählung: Standard / eigener Wert“ mit Kommentar gilt für alle Stunden der Serie.
+    ///  - V4b (296): ebenso „Ausfall“ (fehlt 0 / nicht verhindert −1) und ein eigener Wert der ausfallenden Lehrkraft.
     /// Die Plandatei wird nicht verändert; gebucht wird in die Vertretungsdatei (Spalte „SerienId“).
     /// </summary>
     public partial class TagesEditorDialog
@@ -136,8 +137,7 @@ namespace Stundenplan_V2.Vertretung
                 Datum = datum, Stunde = z.Stunde, UNr = z.UNr,
                 Lehrer = z.OriginalLehrer, Fach = z.Fach, Klassen = new List<string>(z.Klassen)
             };
-            var zaehler = VertretungsZaehler.SaldoProLehrer(_daten.Vertretungen);
-            foreach (var v in VertretungsService.Vorschlaege(inst, plan, _daten.Kalender, zaehler))
+            foreach (var v in VertretungsService.Vorschlaege(inst, plan, _daten.Kalender, Saldo()))
                 cbVertreter.Items.Add(new VertreterWahl { Lehrer = v.Lehrer, Anzeige = $"{v.Lehrer}  ({v.Begruendung})" });
             string? bisher = z.Eintrag != null && !string.IsNullOrWhiteSpace(z.Eintrag.VertretungsLehrer)
                 ? z.Eintrag.VertretungsLehrer!.Trim() : null;
@@ -177,7 +177,8 @@ namespace Stundenplan_V2.Vertretung
             // Grund
             var zeileGrund = new WrapPanel { Margin = new Thickness(0, 0, 0, 6) };
             zeileGrund.Children.Add(Beschriftung("Grund:"));
-            var cbGrund = new ComboBox { Width = 170, ItemsSource = Enum.GetValues(typeof(VertretungsGrund)) };
+            // V4b (288): Gründe wie bisher (Lehrkraft fehlt), dazu der Grund der angeklickten Buchung, falls er fehlt.
+            var cbGrund = new ComboBox { Width = 170, ItemsSource = Zaehlung.GruendeMit(Zaehlung.LehrerGruende, z.Eintrag?.Grund) };
             cbGrund.SelectedItem = z.Eintrag != null ? z.Eintrag.Grund
                                  : CbGrund.SelectedItem is VertretungsGrund g ? g : VertretungsGrund.Krankheit;
             zeileGrund.Children.Add(cbGrund);
@@ -212,6 +213,45 @@ namespace Stundenplan_V2.Vertretung
                 Text = Zaehlung.KommentarHinweis + " Ein eigener Wert gilt als Sondergrund jeder Stunde der Serie.",
                 Foreground = Brushes.DimGray, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6)
             });
+
+            // V4b (287, 296): ausfallende Lehrkraft – Anlass und eigener Wert für alle Stunden der Serie (nur, wenn eine
+            // andere Lehrkraft die Stunde hält: Vertretung, Betreuung/Aufsicht).
+            var ausfallVorgabe = z.Eintrag != null && Zaehlung.HatAusfall(z.Eintrag) ? z.Eintrag : null;
+            var panelAusfall = new StackPanel();
+            var zeileAusfall = new WrapPanel { Margin = new Thickness(0, 0, 0, 2) };
+            zeileAusfall.Children.Add(Beschriftung($"Ausfall {z.OriginalLehrer}:"));
+            var cbAusfall = new ComboBox { Width = 170, Margin = new Thickness(0, 0, 14, 0) };
+            var itemFehlt = new ComboBoxItem { Content = "fehlt (0)", Tag = AusfallAnlass.Lehrkraft };
+            var itemNichtV = new ComboBoxItem
+            {
+                Content = "nicht verhindert (−1)", Tag = AusfallAnlass.NichtVerhindert,
+                ToolTip = "Die Lehrkraft war gar nicht verhindert und hätte eigentlich einen Entfall gehabt."
+            };
+            cbAusfall.Items.Add(itemFehlt);
+            cbAusfall.Items.Add(itemNichtV);
+            cbAusfall.SelectedItem = ausfallVorgabe?.AnlassAusfall == AusfallAnlass.NichtVerhindert ? itemNichtV : itemFehlt;
+            zeileAusfall.Children.Add(cbAusfall);
+            var cbAusfallWert = new ComboBox { Width = 170, Margin = new Thickness(0, 0, 14, 0) };
+            var itemAusfallStd = new ComboBoxItem { Content = "Zählung laut Anlass", Tag = null };
+            cbAusfallWert.Items.Add(itemAusfallStd);
+            foreach (int zw in Zaehlung.EigeneWerte)
+                cbAusfallWert.Items.Add(new ComboBoxItem { Content = $"eigener Wert {Zaehlung.WertText(zw)}", Tag = zw });
+            cbAusfallWert.SelectedItem = ausfallVorgabe != null && ausfallVorgabe.SondergrundAusfall
+                ? cbAusfallWert.Items.OfType<ComboBoxItem>().FirstOrDefault(i => i.Tag is int iwa && iwa == ausfallVorgabe.ZaehlwertAusfall) ?? itemAusfallStd
+                : itemAusfallStd;
+            zeileAusfall.Children.Add(cbAusfallWert);
+            panelAusfall.Children.Add(zeileAusfall);
+            var zeileAusfallKomm = new WrapPanel { Margin = new Thickness(0, 0, 0, 6) };
+            zeileAusfallKomm.Children.Add(Beschriftung("Kommentar (Ausfall):"));
+            var txtAusfallKomm = new TextBox
+            {
+                Width = 360, MaxLength = Zaehlung.KommentarMax, IsEnabled = false, VerticalAlignment = VerticalAlignment.Center,
+                Text = ausfallVorgabe != null && ausfallVorgabe.SondergrundAusfall ? ausfallVorgabe.KommentarAusfall ?? "" : "",
+                ToolTip = "Pflicht bei einem eigenen Wert der ausfallenden Lehrkraft (eine Zeile, bis 200 Zeichen) – keine Gesundheitsangaben"
+            };
+            zeileAusfallKomm.Children.Add(txtAusfallKomm);
+            panelAusfall.Children.Add(zeileAusfallKomm);
+            oben.Children.Add(panelAusfall);
 
             // Raum (R3-D: neuer Raum wird mitgenommen)
             string? neuerRaum = z.RaumGeaendert && !string.IsNullOrWhiteSpace(z.Raum) ? z.Raum!.Trim() : null;
@@ -262,12 +302,22 @@ namespace Stundenplan_V2.Vertretung
             int? EigenerWert()
                 => cbZaehl.SelectedItem is ComboBoxItem zi && zi.Tag is int ew ? ew : (int?)null;
 
+            int? AusfallEigenerWert()
+                => cbAusfallWert.SelectedItem is ComboBoxItem ai && ai.Tag is int aw ? aw : (int?)null;
+
+            AusfallAnlass AusfallGewaehlt()
+                => cbAusfall.SelectedItem is ComboBoxItem ci && ci.Tag is AusfallAnlass aa ? aa : AusfallAnlass.Lehrkraft;
+
             void Aktualisiere()
             {
                 var art = ArtGewaehlt();
                 bool braucht = Dauervertretung.BrauchtVertreter(art);
                 cbVertreter.IsEnabled = braucht;
                 chkRaum.IsEnabled = art != Vertretungsart.Entfall;
+                // V4b (296): „Ausfall“ nur, wenn eine andere Lehrkraft die Stunde hält
+                panelAusfall.Visibility = braucht ? Visibility.Visible : Visibility.Collapsed;
+                int? ausfallEigen = braucht ? AusfallEigenerWert() : null;
+                txtAusfallKomm.IsEnabled = ausfallEigen != null;
                 liste.Items.Clear();
                 tage = new();
                 vorlage = null;
@@ -295,7 +345,10 @@ namespace Stundenplan_V2.Vertretung
                     Ersetzen = chkErsetzen.IsChecked == true,
                     Von = von.Date, Bis = bis.Date, SerienId = serienId,
                     EigenerZaehlwert = eigenWahl,
-                    Zaehlkommentar = eigenWahl != null ? Zaehlung.Bereinige(txtZaehlKomm.Text) : ""
+                    Zaehlkommentar = eigenWahl != null ? Zaehlung.Bereinige(txtZaehlKomm.Text) : "",
+                    Ausfall = AusfallGewaehlt(),
+                    AusfallEigenerWert = ausfallEigen,
+                    AusfallKommentar = ausfallEigen != null ? Zaehlung.Bereinige(txtAusfallKomm.Text) : ""
                 };
                 tage = Dauervertretung.Vorschau(vorlage, plan, _daten, AusUntis);
 
@@ -321,6 +374,9 @@ namespace Stundenplan_V2.Vertretung
                     ? $"Im Zeitraum liegt kein {UntisText.Tag(datum)}."
                     : $"{n} Stunde(n) werden gebucht" +
                       (eigenWahl != null ? $" (Zählung {Zaehlung.WertText(eigenWahl.Value)}, Sondergrund)" : "") +
+                      (braucht ? $", Ausfall {z.OriginalLehrer}: " + (ausfallEigen != null
+                          ? $"{Zaehlung.WertText(ausfallEigen.Value)} (Sondergrund)"
+                          : $"{Zaehlung.AusfallKurz(AusfallGewaehlt())} ({Zaehlung.WertText(Zaehlung.AusfallWert(AusfallGewaehlt()))})") : "") +
                       (luecken > 0 ? $", {luecken} Lücke(n)" : "") +
                       (bleibt > 0 ? $", {bleibt} bleiben unverändert" : "") +
                       (frei > 0 ? $", {frei} schulfrei" : "") + ".";
@@ -329,6 +385,8 @@ namespace Stundenplan_V2.Vertretung
 
             cbArt.SelectionChanged += (_, __) => Aktualisiere();
             cbZaehl.SelectionChanged += (_, __) => Aktualisiere();
+            cbAusfall.SelectionChanged += (_, __) => Aktualisiere();
+            cbAusfallWert.SelectionChanged += (_, __) => Aktualisiere();
             cbVertreter.SelectionChanged += (_, __) => Aktualisiere();
             cbGrund.SelectionChanged += (_, __) => Aktualisiere();
             chkRaum.Checked += (_, __) => Aktualisiere(); chkRaum.Unchecked += (_, __) => Aktualisiere();
@@ -356,6 +414,14 @@ namespace Stundenplan_V2.Vertretung
                     txtZaehlKomm.Focus();
                     return;
                 }
+                // V4b (287): ebenso beim eigenen Wert der ausfallenden Lehrkraft.
+                if (vorlage.BrauchtVertreter && vorlage.AusfallEigenerWert != null
+                    && Zaehlung.KommentarFehler(txtAusfallKomm.Text) is string kfa)
+                {
+                    txtSumme.Text = "Ausfall: " + kfa + " Nichts gebucht.";
+                    txtAusfallKomm.Focus();
+                    return;
+                }
                 win.DialogResult = true;
             };
 
@@ -381,7 +447,11 @@ namespace Stundenplan_V2.Vertretung
 
             DateTime erster = gebucht.Min(), letzter = gebucht.Max();
             string wer = (v.BrauchtVertreter ? $"{Dauervertretung.ArtText(v.Art)} {v.Vertreter}" : Dauervertretung.ArtText(v.Art))
-                         + (v.EigenerZaehlwert is int ez ? $", Zählung {Zaehlung.WertText(ez)} (Sondergrund)" : "");
+                         + (v.EigenerZaehlwert is int ez ? $", Zählung {Zaehlung.WertText(ez)} (Sondergrund)" : "")
+                         + (v.BrauchtVertreter
+                             ? ", Ausfall " + (v.AusfallEigenerWert is int eaw ? $"{Zaehlung.WertText(eaw)} (Sondergrund)"
+                                                 : $"{Zaehlung.AusfallKurz(v.Ausfall)} ({Zaehlung.WertText(Zaehlung.AusfallWert(v.Ausfall))})")
+                             : "");
             string kurz = $"Dauervertretung {UntisText.Tag(erster)} {v.Stunde}. Std {v.Fach} {string.Join(", ", v.Klassen)} " +
                           $"({v.OriginalLehrer} → {wer}): {gebucht.Count} Stunde(n), {erster:dd.MM.}–{letzter:dd.MM.yyyy}";
             var luecken = tage.Where(t => t.IstLuecke).ToList();

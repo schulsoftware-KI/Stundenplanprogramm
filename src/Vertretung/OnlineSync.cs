@@ -130,7 +130,10 @@ namespace Stundenplan_V2.Vertretung
                 Datum = DateOnly.FromDateTime(datum.Date)
             };
 
-            foreach (var z in tp.Zellen.Where(z => z.IstGeaendert))
+            // V4b (276, 282): freie Stunden laut Kalender (auch mit Sondergrund) gehen nie als Änderung an die App –
+            // die App zeigt sie über den Kalender als „Frei“. Zählwerte, Anlässe und Kommentare gehen nie mit.
+            foreach (var z in tp.Zellen.Where(z => z.IstGeaendert && z.FreiLautKalender == null
+                                                   && z.Eintrag?.Anlass != EntfallAnlass.FreieZeit))
             {
                 dto.Eintraege.Add(new PlanEintragDto
                 {

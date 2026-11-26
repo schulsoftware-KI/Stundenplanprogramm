@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Vertretung erfassen"
-        Width="1500" Height="760"
+        Width="1560" Height="760"
         MinWidth="780" MinHeight="520"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResizeWithGrip">
@@ -27,7 +27,7 @@
                     </Grid.RowDefinitions>
 
                     <TextBlock Grid.Row="0" Margin="0,0,0,8" TextWrapping="Wrap"
-                               Text="Abwesenheit eintragen (mehrere Namen kommagetrennt möglich) und 'Betroffene Stunden ermitteln'. Je Stunde Art und ggf. Vertretung wählen – die Liste ist nach fachgerecht, vertretungsbereit und Saldo sortiert (Minusstunden zuerst). Bei 'Klasse' als Abwesenheit sind die Stunden mit Entfall (−1) vorbelegt, wenn alle ihre Klassen fehlen (die Lehrkraft ist freigesetzt). 'Zählung' setzt einen eigenen Wert (−1/0/+1) nur mit Kommentar – nur für die Zählung, keine Gesundheitsangaben. 'neuer Raum' wechselt den Raum (bei 'Raum' als Abwesenheit = Raumsperre: Raumvertretung mit freiem Raum vorbelegt; belegte Räume stehen unten und brauchen eine Rückfrage). Mehrere markierte Zeilen lassen sich über die Leiste gemeinsam auf eine Art setzen. 'Buchen' schreibt alles in die Vertretungsdatei."/>
+                               Text="Abwesenheit eintragen (mehrere Namen kommagetrennt möglich) und 'Betroffene Stunden ermitteln'. Je Stunde Art und ggf. Vertretung wählen – die Liste ist nach fachgerecht, vertretungsbereit und Saldo sortiert (Minusstunden zuerst). Bei 'Klasse' als Abwesenheit sind die Stunden mit Entfall (−1) vorbelegt, wenn alle ihre Klassen fehlen (die Lehrkraft ist freigesetzt); Kurse mit weiteren, anwesenden Klassen bleiben ohne Buchung (der Kurs findet statt). 'Ausfall' sagt, warum die Lehrkraft laut Plan einer vertretenen Stunde fehlt: 'fehlt (0)' oder 'nicht verhindert (−1)' (einen eigenen Wert dafür im Wocheneditor bzw. in der Dauervertretung). 'Zählung' setzt einen eigenen Wert (−1/0/+1) nur mit Kommentar – nur für die Zählung, keine Gesundheitsangaben. 'neuer Raum' wechselt den Raum (bei 'Raum' als Abwesenheit = Raumsperre: Raumvertretung mit freiem Raum vorbelegt; belegte Räume stehen unten und brauchen eine Rückfrage). Mehrere markierte Zeilen lassen sich über die Leiste gemeinsam auf eine Art setzen. 'Buchen' schreibt alles in die Vertretungsdatei."/>
 
                     <!-- Eingabe der Abwesenheit -->
                     <StackPanel Grid.Row="1" Margin="0,0,0,8">
@@ -100,8 +100,8 @@
                             <DataGridTextColumn Header="Raum" Binding="{Binding RaumText}" IsReadOnly="True" Width="80"/>
                             <DataGridTextColumn Header="entfällt bei" Binding="{Binding OrigLehrer}" IsReadOnly="True" Width="90"/>
                             <!-- V1: schon gebuchte Stunden – Zeile gelb, gespeicherte Art/Vertretung vorbelegt -->
-                            <DataGridTextColumn Header="gebucht" Binding="{Binding GebuchtText}" IsReadOnly="True" Width="160"/>
-                            <DataGridTemplateColumn Header="Art" Width="150">
+                            <DataGridTextColumn Header="gebucht" Binding="{Binding GebuchtText}" IsReadOnly="True" Width="200"/>
+                            <DataGridTemplateColumn Header="Art" Width="135">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <!-- F1 (09.11.2026): UpdateSourceTrigger=PropertyChanged ist nötig. Die Combo
@@ -113,7 +113,7 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn Header="Vertretung durch" Width="220">
+                            <DataGridTemplateColumn Header="Vertretung durch" Width="205">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <ComboBox ItemsSource="{Binding Vorschlaege}"
@@ -127,7 +127,29 @@
                             <!-- R3-D: freie Räume dieser Stunde; „(wie bisher)“ = Raum laut Plan.
                                  R3-D-Nachtrag: Trennzeilen „– weitere Räume –“ und „– belegte Räume –“ (nicht wählbar);
                                  belegte Räume bewusst wählbar, Rückfrage beim Buchen. -->
-                            <DataGridTemplateColumn Header="neuer Raum" Width="180">
+                            <!-- V4b (292): Anlass der ausfallenden Lehrkraft – nur, wenn eine andere Lehrkraft die Stunde hält -->
+                            <DataGridTemplateColumn Header="Ausfall" Width="140">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <ComboBox ItemsSource="{Binding AusfallOptionen}"
+                                                  DisplayMemberPath="Anzeige"
+                                                  SelectedValuePath="Schluessel"
+                                                  SelectedValue="{Binding AusfallWahl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  ToolTip="{Binding AusfallTipp}">
+                                            <ComboBox.Style>
+                                                <Style TargetType="ComboBox">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding AusfallMoeglich}" Value="False">
+                                                            <Setter Property="Visibility" Value="Hidden"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </ComboBox.Style>
+                                        </ComboBox>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn Header="neuer Raum" Width="160">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <ComboBox ItemsSource="{Binding RaumOptionen}"
@@ -164,7 +186,7 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTextColumn Header="Kommentar (Zählung)" Binding="{Binding Zaehlkommentar}" Width="170">
+                            <DataGridTextColumn Header="Kommentar (Zählung)" Binding="{Binding Zaehlkommentar}" Width="150">
                                 <DataGridTextColumn.EditingElementStyle>
                                     <Style TargetType="TextBox">
                                         <Setter Property="MaxLength" Value="200"/>
@@ -217,8 +239,9 @@
                             <DataGridTextColumn Header="Art" Binding="{Binding ArtText}" Width="130"/>
                             <DataGridTextColumn Header="Vertretung" Binding="{Binding Vertreter}" Width="100"/>
                             <DataGridTextColumn Header="Grund" Binding="{Binding GrundText}" Width="110"/>
-                            <!-- V4: Zählwert der Buchung (für die haltende bzw. die Lehrkraft laut Plan) -->
-                            <DataGridTextColumn Header="Zählung" Binding="{Binding ZaehlText}" Width="120"/>
+                            <!-- V4: Zählwert der Buchung (für die haltende bzw. die Lehrkraft laut Plan); V4b (289): mit Anlass,
+                                 bei vertretenen Stunden beide Teile -->
+                            <DataGridTextColumn Header="Zählung" Binding="{Binding ZaehlText}" Width="200"/>
                             <DataGridTextColumn Header="Bemerkung" Binding="{Binding Bemerkung}" Width="*"/>
                         </DataGrid.Columns>
                     </DataGrid>
@@ -233,8 +256,8 @@
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
                     <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
-                        <TextBlock Text="Vertretungs- und Entfallzähler für das Schuljahr. Saldo = gehaltene Punkte + Entfälle (−1) + Sondergründe; die ausfallende Lehrkraft einer vertretenen Stunde zählt 0."
-                                   VerticalAlignment="Center" Margin="0,0,16,0" TextWrapping="Wrap" MaxWidth="640"/>
+                        <TextBlock Text="Vertretungs- und Entfallzähler für das Schuljahr. Saldo = Gehalten (Punkte) − Entfall −1 − Vertreten −1 + Sondergr. (Punkte). Bei vertretenen Stunden zählt auch die ausfallende Lehrkraft (fehlt 0, nicht verhindert −1); freie Zeiten einzelner Klassen laut Kalender sind Entfälle der Lehrkraft laut Plan."
+                                   VerticalAlignment="Center" Margin="0,0,16,0" TextWrapping="Wrap" MaxWidth="760"/>
                         <Button x:Name="BtnZaehlerAktualisieren" Content="Aktualisieren" Padding="10,4"
                                 Click="BtnZaehlerAktualisieren_Click"/>
                         <Button x:Name="BtnZaehlerExcel" Content="Als Excel exportieren" Padding="10,4"
@@ -253,6 +276,9 @@
                             <DataGridTextColumn Header="Gehalten (Punkte)" Binding="{Binding GehaltenPunkte}" Width="115"/>
                             <DataGridTextColumn Header="Entfall 0" Binding="{Binding Entfall0}" Width="75"/>
                             <DataGridTextColumn Header="Entfall −1" Binding="{Binding EntfallMinus1}" Width="80"/>
+                            <!-- V4b (293): ausfallende Lehrkraft vertretener Stunden -->
+                            <DataGridTextColumn Header="Vertreten 0" Binding="{Binding Vertreten0}" Width="85"/>
+                            <DataGridTextColumn Header="Vertreten −1" Binding="{Binding VertretenMinus1}" Width="90"/>
                             <DataGridTextColumn Header="Sondergrund" Binding="{Binding Sondergruende}" Width="90"/>
                             <DataGridTextColumn Header="Sondergr. (Punkte)" Binding="{Binding SondergrundPunkte}" Width="115"/>
                             <DataGridTextColumn Header="Entfall gesamt" Binding="{Binding EntfallGesamt}" Width="100"/>

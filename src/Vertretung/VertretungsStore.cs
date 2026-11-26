@@ -18,14 +18,19 @@ namespace Stundenplan_V2.Vertretung
     //  Sheets:
     //    Meta           Schuljahr, Pfad der Plandatei, Version, Start/Ende,
     //                   Rastertage, Ferien-Quelle
-    //    Kalender       freie Zeiten (Ferien/Feiertage/freie Tage)
+    //    Kalender       freie Zeiten (Ferien/Feiertage/freie Tage; V4b: Spalte
+    //                   „EntfallZaehlwert“ bei freien Zeiten einzelner Klassen)
     //    Arten          Zählwert-Konfiguration je Vertretungsart
     //    Abwesenheiten  erfasste Abwesenheiten
     //    Vertretungen   ein Eintrag je Stunden-Instanz (inkl. Verlegungsfelder;
-    //                   V4: Anlass, Sondergrund, Zaehlkommentar)
+    //                   V4: Anlass, Sondergrund, Zaehlkommentar; V4b: Spalten
+    //                   24–27 zur ausfallenden Lehrkraft)
     //    Kompetenzen    Lehrer -> Fächer (UV-abgeleitet + manuell)
     //    Entfälle       V4 (279): alle Entfälle – nur zum Lesen, bei jedem
-    //                   Speichern neu geschrieben, beim Laden nicht gelesen
+    //                   Speichern neu geschrieben, beim Laden nicht gelesen;
+    //                   V4b: mit freien Zeiten der Klassen (Plan nötig) und
+    //                   vertretenen Stunden, bei denen die ausfallende
+    //                   Lehrkraft nicht 0 zählt
     // =====================================================================
 
     /// <summary>Gesamter Inhalt einer Vertretungsdatei.</summary>
@@ -111,7 +116,11 @@ namespace Stundenplan_V2.Vertretung
         //  Speichern
         // =================================================================
 
-        public static void Speichern(VertretungsDaten daten, string pfad)
+        /// <param name="plan">
+        /// V4b (276, 279): Plan für die abgeleiteten Entfälle im Blatt „Entfälle“ (freie Zeiten einzelner Klassen);
+        /// null = ohne diese Zeilen (Hinweis in der Überschrift).
+        /// </param>
+        public static void Speichern(VertretungsDaten daten, string pfad, PlanDaten? plan = null)
         {
             using var wb = new XLWorkbook();
 
@@ -121,9 +130,11 @@ namespace Stundenplan_V2.Vertretung
             SchreibeAbwesenheiten(wb, daten.Abwesenheiten);
             SchreibeVertretungen(wb, daten.Vertretungen);
             SchreibeKompetenzen(wb, daten.Kompetenzen);
-            // V4 (279): alle Entfälle als eigenes Blatt (nur zum Lesen; V4b ergänzt die freien Zeiten der Klassen).
-            ZaehlerExporter.SchreibeEntfaelle(wb, Zaehlung.EntfallZeilen(daten.Vertretungen),
-                "Alle Entfälle" + (string.IsNullOrWhiteSpace(daten.Schuljahr) ? "" : $" – Schuljahr {daten.Schuljahr}"));
+            // V4 (279): alle Entfälle als eigenes Blatt (nur zum Lesen); V4b: mit den freien Zeiten der Klassen.
+            bool ohnePlan = plan == null && daten.Kalender.FreieZeiten.Any(f => !f.GiltFuerGanzeSchule);
+            ZaehlerExporter.SchreibeEntfaelle(wb, Zaehlung.EntfallZeilen(KalenderEntfaelle.MitAbgeleiteten(daten, plan)),
+                "Alle Entfälle" + (string.IsNullOrWhiteSpace(daten.Schuljahr) ? "" : $" – Schuljahr {daten.Schuljahr}") +
+                (ohnePlan ? " (ohne freie Zeiten laut Kalender – Plan nicht gelesen)" : ""));
 
             wb.SaveAs(pfad);
         }
@@ -156,7 +167,7 @@ namespace Stundenplan_V2.Vertretung
         private static void SchreibeKalender(XLWorkbook wb, SchuljahrKalender kal)
         {
             var ws = wb.Worksheets.Add("Kalender");
-            string[] header = { "Typ", "Von", "Bis", "Bezeichnung", "Klassen" };
+            string[] header = { "Typ", "Von", "Bis", "Bezeichnung", "Klassen", "EntfallZaehlwert" };
             for (int c = 0; c < header.Length; c++) ws.Cell(1, c + 1).Value = header[c];
             ws.Row(1).Style.Font.Bold = true;
 
@@ -168,6 +179,8 @@ namespace Stundenplan_V2.Vertretung
                 ws.Cell(r, 3).Value = fz.Bis.Date;
                 ws.Cell(r, 4).Value = fz.Bezeichnung;
                 ws.Cell(r, 5).Value = string.Join(TRENNER, fz.BetroffeneKlassen);
+                // V4b (276, 279): nur bei freien Zeiten einzelner Klassen (fehlt = 0)
+                if (!fz.GiltFuerGanzeSchule) ws.Cell(r, 6).Value = KalenderEntfaelle.Norm(fz.EntfallZaehlwert);
                 ws.Cell(r, 2).Style.DateFormat.Format = "yyyy-mm-dd";
                 ws.Cell(r, 3).Style.DateFormat.Format = "yyyy-mm-dd";
                 r++;
@@ -233,7 +246,9 @@ namespace Stundenplan_V2.Vertretung
                 // Dauervertretung (V3)
                 "SerienId",
                 // Zählung (V4: 275, 277)
-                "Anlass", "Sondergrund", "Zaehlkommentar"
+                "Anlass", "Sondergrund", "Zaehlkommentar",
+                // ausfallende Lehrkraft (V4b: 287, 296)
+                "AusfallAnlass", "AusfallZaehlwert", "AusfallSondergrund", "AusfallKommentar"
             };
             for (int c = 0; c < header.Length; c++) ws.Cell(1, c + 1).Value = header[c];
             ws.Row(1).Style.Font.Bold = true;
@@ -279,6 +294,15 @@ namespace Stundenplan_V2.Vertretung
                 ws.Cell(r, 21).Value = v.Art == Vertretungsart.Entfall && v.Anlass.HasValue ? v.Anlass.Value.ToString() : "";
                 ws.Cell(r, 22).Value = v.Sondergrund ? "ja" : "";
                 ws.Cell(r, 23).Value = v.Sondergrund ? v.Zaehlkommentar ?? "" : "";
+
+                // ---- ausfallende Lehrkraft (V4b, 296) – nur, wenn eine andere Lehrkraft die Stunde hält ----
+                if (Zaehlung.HatAusfall(v))
+                {
+                    ws.Cell(r, 24).Value = v.AnlassAusfall.HasValue ? v.AnlassAusfall.Value.ToString() : "";
+                    ws.Cell(r, 25).Value = v.ZaehlwertAusfall;
+                    ws.Cell(r, 26).Value = v.SondergrundAusfall ? "ja" : "";
+                    ws.Cell(r, 27).Value = v.SondergrundAusfall ? v.KommentarAusfall ?? "" : "";
+                }
 
                 r++;
             }
@@ -353,13 +377,16 @@ namespace Stundenplan_V2.Vertretung
                 var typStr = row.Cell(1).GetString().Trim();
                 if (string.IsNullOrWhiteSpace(typStr)) continue;
                 Enum.TryParse<FreieZeitTyp>(typStr, true, out var typ);
+                var klassen = SplitListe(row.Cell(5).GetString());
                 d.Kalender.FreieZeiten.Add(new FreieZeit
                 {
                     Typ = typ,
                     Von = ZellDatum(row.Cell(2)),
                     Bis = ZellDatum(row.Cell(3)),
                     Bezeichnung = row.Cell(4).GetString(),
-                    BetroffeneKlassen = SplitListe(row.Cell(5).GetString())
+                    BetroffeneKlassen = klassen,
+                    // V4b (276): fehlt in älteren Dateien → 0
+                    EntfallZaehlwert = klassen.Count > 0 ? KalenderEntfaelle.Norm((int)ZellZahl(row.Cell(6))) : 0
                 });
             }
         }
@@ -424,7 +451,7 @@ namespace Stundenplan_V2.Vertretung
                 string oRaum = row.Cell(10).GetString();
                 string vRaum = row.Cell(11).GetString();
 
-                d.Vertretungen.Add(new VertretungsEintrag
+                var eintrag = new VertretungsEintrag
                 {
                     Datum = ZellDatum(row.Cell(1)),
                     Stunde = (int)ZellZahl(row.Cell(2)),
@@ -455,7 +482,17 @@ namespace Stundenplan_V2.Vertretung
                     Anlass = art == Vertretungsart.Entfall ? ParseAnlass(row.Cell(21).GetString()) : null,
                     Sondergrund = ParseBool(row.Cell(22).GetString()),
                     Zaehlkommentar = row.Cell(23).GetString().Trim()
-                });
+                };
+
+                // ---- ausfallende Lehrkraft (V4b) – fehlt in Altdateien => Anlass unbekannt, Wert 0, kein Sondergrund ----
+                if (Zaehlung.HatAusfall(eintrag))
+                {
+                    eintrag.AnlassAusfall = ParseAusfall(row.Cell(24).GetString());
+                    eintrag.ZaehlwertAusfall = Math.Max(-1, Math.Min(1, (int)ZellZahl(row.Cell(25))));
+                    eintrag.SondergrundAusfall = ParseBool(row.Cell(26).GetString());
+                    eintrag.KommentarAusfall = eintrag.SondergrundAusfall ? row.Cell(27).GetString().Trim() : "";
+                }
+                d.Vertretungen.Add(eintrag);
             }
         }
 
@@ -535,6 +572,11 @@ namespace Stundenplan_V2.Vertretung
         private static EntfallAnlass? ParseAnlass(string s)
             => Enum.TryParse<EntfallAnlass>((s ?? "").Trim(), true, out var a) && Enum.IsDefined(typeof(EntfallAnlass), a)
                 ? a : (EntfallAnlass?)null;
+
+        /// <summary>V4b: Anlass der ausfallenden Lehrkraft aus der Spalte „AusfallAnlass“ (leer bzw. unbekannt = null).</summary>
+        private static AusfallAnlass? ParseAusfall(string s)
+            => Enum.TryParse<AusfallAnlass>((s ?? "").Trim(), true, out var a) && Enum.IsDefined(typeof(AusfallAnlass), a)
+                ? a : (AusfallAnlass?)null;
 
         private static string NullBoolStr(bool? b)
             => b == null ? "" : (b.Value ? "ja" : "nein");

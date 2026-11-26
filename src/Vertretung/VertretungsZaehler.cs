@@ -17,6 +17,13 @@ namespace Stundenplan_V2.Vertretung
     //      Stunde zählt 0 (bis V4: gehalten − von anderen übernommen).
     //    - je Klasse: Entfall- und Vertretungsstunden (Basis für Quoten).
     //
+    //  V4b (287, 293): Hält eine ANDERE Lehrkraft die Stunde, zählt dazu die
+    //  ausfallende Lehrkraft laut Plan mit ihrem Wert (fehlt 0, nicht
+    //  verhindert −1, Sondergrund) – Spalten „Vertreten 0“/„Vertreten −1“,
+    //  Sondergründe beider Rollen zusammen. Abgeleitete Entfälle aus freien
+    //  Zeiten einzelner Klassen (276) zählen wie Entfälle; der Aufrufer gibt
+    //  sie mit (KalenderEntfaelle.MitAbgeleiteten).
+    //
     //  Für die faire Verteilung der Vorschläge liefert SaldoProLehrer den
     //  Saldo je Lehrkraft (283: Minusstunden zuerst).
     // =====================================================================
@@ -71,6 +78,21 @@ namespace Stundenplan_V2.Vertretung
                     else s.Entfall0 += 1;
                 }
                 else s.GehalteneVertretungen += w;
+
+                // 287/293: ausfallende Lehrkraft einer vertretenen Stunde.
+                if (Zaehlung.HatAusfall(e))
+                {
+                    var a = Stand(orig);
+                    int wa = e.ZaehlwertAusfall;
+                    a.Saldo += wa;
+                    if (e.SondergrundAusfall)
+                    {
+                        a.Sondergruende += 1;
+                        a.SondergrundPunkte += wa;
+                    }
+                    else if (wa < 0) a.VertretenMinus1 += 1;
+                    else a.Vertreten0 += 1;
+                }
             }
             return result;
         }
@@ -85,8 +107,14 @@ namespace Stundenplan_V2.Vertretung
             foreach (var e in eintraege)
             {
                 string wer = Zaehlung.Zaehlperson(e);
-                if (wer.Length == 0) continue;
-                map[wer] = (map.TryGetValue(wer, out int x) ? x : 0) + e.ZaehlwertSnapshot;
+                if (wer.Length > 0)
+                    map[wer] = (map.TryGetValue(wer, out int x) ? x : 0) + e.ZaehlwertSnapshot;
+                // V4b (287): ausfallende Lehrkraft einer vertretenen Stunde
+                if (Zaehlung.HatAusfall(e))
+                {
+                    string orig = e.OriginalLehrer.Trim();
+                    map[orig] = (map.TryGetValue(orig, out int y) ? y : 0) + e.ZaehlwertAusfall;
+                }
             }
             return map;
         }
@@ -113,6 +141,12 @@ namespace Stundenplan_V2.Vertretung
                 {
                     if (string.IsNullOrWhiteSpace(klasse)) continue;
                     var z = Get(klasse.Trim());
+                    // V4b (280): freie Zeiten laut Kalender getrennt von gebuchten Entfällen
+                    if (e.Art == Vertretungsart.Entfall && e.Anlass == EntfallAnlass.FreieZeit)
+                    {
+                        z.FreiLautKalender += 1;
+                        continue;
+                    }
                     z.ProArt[e.Art] = (z.ProArt.TryGetValue(e.Art, out int a) ? a : 0) + 1;
                     if (e.Art == Vertretungsart.Entfall) z.EntfallStunden += 1;
                 }

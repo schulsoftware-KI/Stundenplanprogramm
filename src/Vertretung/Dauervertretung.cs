@@ -19,6 +19,8 @@ namespace Stundenplan_V2.Vertretung
     //     dem Tag frei ist, sonst bleibt der Raum laut Plan. V4 (275, 278): Entfall mit Anlass „Lehrkraft fehlt“
     //     (0); wahlweise ein eigener Zählwert (Sondergrund mit Kommentar) für alle Stunden der Serie.
     //   - Zurücksetzen (162): künftige Buchungen ab einem Datum – nur einer Serie bzw. einer Lehrkraft.
+    //   - V4b (287, 296): Anlass (fehlt 0 / nicht verhindert −1) und eigener Wert der ausfallenden Lehrkraft gelten
+    //     für alle Stunden der Serie, Vorgabe „fehlt (0)“.
     // =====================================================================
 
     /// <summary>Ergebnis der Vorschau für einen Tag.</summary>
@@ -54,6 +56,12 @@ namespace Stundenplan_V2.Vertretung
         public int? EigenerZaehlwert { get; set; }
         /// <summary>V4: Kommentar zum eigenen Zählwert (Pflicht, wenn <see cref="EigenerZaehlwert"/> gesetzt ist).</summary>
         public string Zaehlkommentar { get; set; } = "";
+        /// <summary>V4b (296): Anlass der ausfallenden Lehrkraft für alle Stunden der Serie (nur, wenn eine andere Lehrkraft hält).</summary>
+        public AusfallAnlass Ausfall { get; set; } = AusfallAnlass.Lehrkraft;
+        /// <summary>V4b (296): eigener Zählwert der ausfallenden Lehrkraft (−1/0/+1); null = laut Anlass.</summary>
+        public int? AusfallEigenerWert { get; set; }
+        /// <summary>V4b: Kommentar dazu (Pflicht, wenn <see cref="AusfallEigenerWert"/> gesetzt ist).</summary>
+        public string AusfallKommentar { get; set; } = "";
 
         public DateTime Von { get; set; }
         public DateTime Bis { get; set; }
@@ -271,6 +279,9 @@ namespace Stundenplan_V2.Vertretung
             if (e != null && e.Sondergrund && v.EigenerZaehlwert == null
                 && e.Art != Vertretungsart.Raumvertretung)
                 teile.Add($"Sondergrund ({Zaehlung.WertText(e.ZaehlwertSnapshot)}) entfällt");
+            // V4b (296): ebenso der Sondergrund der ausfallenden Lehrkraft
+            if (e != null && Zaehlung.HatAusfall(e) && e.SondergrundAusfall && v.AusfallEigenerWert == null)
+                teile.Add($"Sondergrund Ausfall ({Zaehlung.WertText(e.ZaehlwertAusfall)}) entfällt");
 
             // Raum (R3-D): neuer Raum der Serie, wenn er an dem Tag frei ist; sonst der einer bestehenden Buchung.
             string? bestehend = !string.IsNullOrWhiteSpace(e?.VertretungsRaum) ? e!.VertretungsRaum!.Trim() : null;
@@ -403,6 +414,12 @@ namespace Stundenplan_V2.Vertretung
                 SerienId = v.SerienId
             };
             if (v.EigenerZaehlwert is int eigen) Zaehlung.SetzeSondergrund(neu, eigen, v.Zaehlkommentar);
+            // V4b (287, 296): ausfallende Lehrkraft – Anlass und ggf. eigener Wert der Serie.
+            if (Zaehlung.HatAusfall(neu))
+            {
+                Zaehlung.SetzeAusfall(neu, v.Ausfall);
+                if (v.AusfallEigenerWert is int ea) Zaehlung.SetzeAusfallSondergrund(neu, ea, v.AusfallKommentar);
+            }
             return neu;
         }
 

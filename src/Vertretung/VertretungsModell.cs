@@ -47,7 +47,8 @@ namespace Stundenplan_V2.Vertretung
         Exkursion,
         Pruefung,
         Dienstbefreiung,
-        Sonstiges
+        Sonstiges,
+        Praktikum   // V4b (288): neu, als letzter Wert angehängt (ältere Programmstände lesen ihn als „Krankheit“)
     }
 
     /// <summary>
@@ -61,6 +62,17 @@ namespace Stundenplan_V2.Vertretung
         Klasse,
         Raum,
         FreieZeit
+    }
+
+    /// <summary>
+    /// V4b (287): Anlass der ausfallenden Lehrkraft einer vertretenen Stunde (eine ANDERE Lehrkraft hält sie).
+    /// Lehrkraft fehlt (krank/dienstlich) → 0 (Vorgabe); Lehrkraft nicht verhindert → −1 (sie hätte eigentlich einen
+    /// Entfall gehabt). null am Eintrag = unbekannt (Buchungen bis V4a) → 0.
+    /// </summary>
+    public enum AusfallAnlass
+    {
+        Lehrkraft,
+        NichtVerhindert
     }
 
     /// <summary>Typ eines unterrichtsfreien Zeitraums im Schuljahr.</summary>
@@ -107,6 +119,12 @@ namespace Stundenplan_V2.Vertretung
         public DateTime Bis { get; set; }            // inklusive
         public string Bezeichnung { get; set; } = "";
         public List<string> BetroffeneKlassen { get; set; } = new(); // leer = ganze Schule
+
+        /// <summary>
+        /// V4b (276): Zählwert der Entfälle, die eine freie Zeit einzelner Klassen auslöst – 0 (Vorgabe) oder −1.
+        /// Nur bei Einträgen mit Klassen; ganze Schule: ohne Bedeutung (keine Stunden).
+        /// </summary>
+        public int EntfallZaehlwert { get; set; }
 
         public bool GiltFuerGanzeSchule => BetroffeneKlassen.Count == 0;
 
@@ -179,6 +197,19 @@ namespace Stundenplan_V2.Vertretung
         public bool Sondergrund { get; set; }
         /// <summary>Kommentar zum Sondergrund (eine Zeile, bis 200 Zeichen); bleibt im Desktop, geht nie in die App.</summary>
         public string Zaehlkommentar { get; set; } = "";
+
+        // ---- V4b (287, 296): ausfallende Lehrkraft einer vertretenen Stunde ----
+        // Nur, wenn eine ANDERE Lehrkraft die Stunde hält (Vertretung, Betreuung, Zusammenlegung, EVA mit Aufsicht –
+        // Zaehlung.HatAusfall). Die Buchung zählt dann für zwei Lehrkräfte: die haltende (ZaehlwertSnapshot) und die
+        // laut Plan (ZaehlwertAusfall). Spalten 24–27 im Blatt „Vertretungen“.
+        /// <summary>Anlass der ausfallenden Lehrkraft; null = unbekannt (Buchungen bis V4a, Wert 0).</summary>
+        public AusfallAnlass? AnlassAusfall { get; set; } = null;
+        /// <summary>Zählwert der ausfallenden Lehrkraft (Anlass bzw. Sondergrund).</summary>
+        public int ZaehlwertAusfall { get; set; }
+        /// <summary>Zählwert der ausfallenden Lehrkraft vom Planer selbst gesetzt (−1/0/+1, Kommentar Pflicht).</summary>
+        public bool SondergrundAusfall { get; set; }
+        /// <summary>Kommentar zum Sondergrund der ausfallenden Lehrkraft (eine Zeile, bis 200 Zeichen; nie in die App).</summary>
+        public string KommentarAusfall { get; set; } = "";
 
         // ---- Verlegung (M3a, Konzept §15) ----
         // Eine Verlegung besteht aus ZWEI verknüpften Einträgen (Ziel + Quelle)
@@ -267,9 +298,14 @@ namespace Stundenplan_V2.Vertretung
         public int Sondergruende { get; set; }           // Buchungen mit Sondergrund, Anzahl
         public int SondergrundPunkte { get; set; }       // Summe ihrer Zählwerte
 
+        // V4b (293): ausfallende Lehrkraft vertretener Stunden (ohne Sondergrund; Sondergründe stehen oben mit)
+        public int Vertreten0 { get; set; }              // vertreten, Lehrkraft fehlt bzw. unbekannt (0), Anzahl
+        public int VertretenMinus1 { get; set; }         // vertreten, Lehrkraft nicht verhindert (−1), Anzahl
+
         // Für Klassen/Fach-Auswertung:
         public int SollStunden { get; set; }             // ohne freie Tage
         public int EntfallStunden { get; set; }
+        public int FreiLautKalender { get; set; }        // V4b (280): Entfälle aus freien Zeiten der Klasse (Kalender)
         public double EntfallQuote => SollStunden > 0 ? (double)EntfallStunden / SollStunden : 0.0;
     }
 }

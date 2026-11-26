@@ -1011,6 +1011,7 @@ namespace Stundenplan_V2.Vertretung
             var erg = ZaehlwertDialog.Zeige(this, kopf, std, stdText, e, mitAusfall);
             if (erg == null) return;
 
+            bool warSondergrund = e.Sondergrund;   // Nachtrag V4b (K3): „zurück auf Standard“ nur, wenn es vorher einer war
             if (erg.Standard) Zaehlung.SetzeStandard(e, _daten, _plan);
             else Zaehlung.SetzeSondergrund(e, erg.Wert, erg.Kommentar);
             string wasAusfall = "";
@@ -1027,7 +1028,7 @@ namespace Stundenplan_V2.Vertretung
             bool ok = Speichere();
             Zeichne();
             string was = erg.Standard
-                ? $"zurück auf Standard ({Zaehlung.WertText(e.ZaehlwertSnapshot)})"
+                ? (warSondergrund ? "zurück auf " : "") + $"Standard ({Zaehlung.WertText(e.ZaehlwertSnapshot)})"
                 : $"Sondergrund {Zaehlung.WertText(e.ZaehlwertSnapshot)}";
             if (ok) SetzeInfo($"{datum:dd.MM.} Std {z.Stunde} ({z.OriginalLehrer}): Zählwert {was} für {Zaehlung.Zaehlperson(e)}{wasAusfall}.");
             _log?.Invoke($"Wocheneditor: Zählwert {datum:dd.MM.yyyy} Std {z.Stunde} UNr {z.UNr} → {was}{wasAusfall}.");
@@ -1471,6 +1472,15 @@ namespace Stundenplan_V2.Vertretung
         private bool Speichere()
         {
             try { VertretungsStore.Speichern(_daten, _vertretungsPfad, _plan); }   // V4b: Plan für das Blatt „Entfälle“
+            catch (VertretungsdateiGeaendertException ex)
+            {
+                // Nachtrag V4b (Befund 1): nichts überschreiben – den Stand der Datei laden, die Änderung ist verworfen.
+                NeuLaden();
+                MessageBox.Show(ex.Message + "\n\nDer Wocheneditor zeigt jetzt den Stand der Datei. Bitte die letzte Änderung " +
+                    "wiederholen.", "Wocheneditor", MessageBoxButton.OK, MessageBoxImage.Warning);
+                _log?.Invoke("Wocheneditor: nicht gespeichert – Vertretungsdatei inzwischen geändert, neu geladen.");
+                return false;
+            }
             catch (Exception ex)
             {
                 MessageBox.Show("Fehler beim Speichern:\n\n" + ex.Message +

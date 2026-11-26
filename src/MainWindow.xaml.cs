@@ -590,6 +590,15 @@ namespace Stundenplan_V2
             var dialog = new Stundenplan_V2.Vertretung.KalenderDialog(excelPfad, s => Log(s))
             { Owner = this };
             dialog.ShowDialog();
+
+            // Nachtrag V4b (Befund 1): Offene Fenster von Button 23/24 lesen die Vertretungsdatei neu – sonst arbeiten sie
+            // mit dem alten Kalender weiter (und könnten ihn beim nächsten Buchen zurückschreiben).
+            if (_vertretungsFenster != null || _tagesEditorFenster != null)
+            {
+                _vertretungsFenster?.NeuLaden();
+                _tagesEditorFenster?.NeuLaden();
+                Log("Kalender geschlossen – „Vertretung erfassen“ und Wocheneditor haben die Vertretungsdatei neu gelesen.");
+            }
         }
         // =====================================================
         // VERTRETUNG ERFASSEN (Button 23) – öffnet BEIDE Fenster, Fokus auf „erfassen".

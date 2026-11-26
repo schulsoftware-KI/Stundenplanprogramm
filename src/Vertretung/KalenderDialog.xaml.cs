@@ -682,6 +682,13 @@ namespace Stundenplan_V2.Vertretung
                 // V4b (279): Plan für die freien Stunden der Klassen im Blatt „Entfälle“ (fehlt er, ohne diese Zeilen).
                 VertretungsStore.Speichern(_daten, ziel, PlanFuerEntfaelle());
             }
+            catch (VertretungsdateiGeaendertException ex)
+            {
+                // Nachtrag V4b (Befund 1)
+                MessageBox.Show(ex.Message + "\n\nBitte „Verwerfen und schließen“, den Kalender neu öffnen und die Änderungen " +
+                    "wiederholen.", "Kalender", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
             catch (Exception ex)
             {
                 MessageBox.Show("Fehler beim Schreiben:\n\n" + ex.Message +
@@ -737,7 +744,8 @@ namespace Stundenplan_V2.Vertretung
             Bis = fz.Bis.ToString("yyyy-MM-dd"),
             Bezeichnung = fz.Bezeichnung,
             Klassen = string.Join(";", fz.BetroffeneKlassen),
-            EntfallZaehlt = !fz.GiltFuerGanzeSchule && fz.EntfallZaehlwert < 0 ? EntfallMinus : EntfallNull
+            // Nachtrag V4b (K1): bei Einträgen der ganzen Schule leer – der Wert gilt nur für freie Zeiten einzelner Klassen.
+            EntfallZaehlt = fz.GiltFuerGanzeSchule ? "" : fz.EntfallZaehlwert < 0 ? EntfallMinus : EntfallNull
         };
 
         /// <summary>„−1“ bzw. „-1“ (auch von Hand getippt) → true.</summary>

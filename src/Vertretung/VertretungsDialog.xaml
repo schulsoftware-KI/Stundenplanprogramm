@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Vertretung erfassen"
-        Width="1560" Height="760"
+        Width="1595" Height="760"
         MinWidth="780" MinHeight="520"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResizeWithGrip">
@@ -128,7 +128,7 @@
                                  R3-D-Nachtrag: Trennzeilen „– weitere Räume –“ und „– belegte Räume –“ (nicht wählbar);
                                  belegte Räume bewusst wählbar, Rückfrage beim Buchen. -->
                             <!-- V4b (292): Anlass der ausfallenden Lehrkraft – nur, wenn eine andere Lehrkraft die Stunde hält -->
-                            <DataGridTemplateColumn Header="Ausfall" Width="140">
+                            <DataGridTemplateColumn Header="Ausfall" Width="175"><!-- Nachtrag V4b (K4): „nicht verhindert (−1)“ ganz lesbar -->
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <ComboBox ItemsSource="{Binding AusfallOptionen}"
@@ -262,6 +262,8 @@
                                 Click="BtnZaehlerAktualisieren_Click"/>
                         <Button x:Name="BtnZaehlerExcel" Content="Als Excel exportieren" Padding="10,4"
                                 Margin="12,0,0,0" Click="BtnZaehlerExcel_Click"/>
+                        <!-- Nachtrag V4b (K2): Zeitpunkt der letzten Berechnung -->
+                        <TextBlock x:Name="TxtZaehlerStand" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="Gray"/>
                     </StackPanel>
                     <DataGrid x:Name="DgZaehler" Grid.Row="1"
                               AutoGenerateColumns="False" CanUserAddRows="False" IsReadOnly="True"

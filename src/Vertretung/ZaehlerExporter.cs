@@ -146,7 +146,7 @@ namespace Stundenplan_V2.Vertretung
             ws.Cell(r, 1).Style.Font.FontSize = 13;
             ws.Cell(r + 1, 1).Value = $"{zeilen.Count} Zeile(n) · nur zum Lesen – wird bei jedem Speichern neu geschrieben · " +
                                       "Zählung für die Lehrkraft laut Plan · Quelle: gebucht, Kalender (freie Zeit einer " +
-                                      "Klasse) bzw. vertreten (ausfallende Lehrkraft zählt nicht 0)";
+                                      "Klasse) bzw. vertreten (ausfallende Lehrkraft „nicht verhindert“ oder mit Sondergrund)";   // Nachtrag V4b (K5)
             ws.Cell(r + 1, 1).Style.Font.FontColor = XLColor.Gray;
             r += 3;
 

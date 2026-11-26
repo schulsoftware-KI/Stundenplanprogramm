@@ -43,6 +43,23 @@ namespace Stundenplan_V2.Vertretung
 
         private readonly List<Abwesenheit> _letzteAbwesenheiten = new();
         private VertretungsGrund _letzteGrund = VertretungsGrund.Sonstiges;
+        // Nachtrag V4b (N-1): Eingaben beim letzten erfolgreichen Ermitteln (Schlüssel und Text für die Rückfrage).
+        private string _ermitteltFuer = "";
+        private string _ermitteltText = "";
+
+        /// <summary>Nachtrag V4b (N-1): Datum, Stunden und Namen der Felder als Vergleichsschlüssel.</summary>
+        private string EingabeSchluessel()
+            => $"{DpVon.SelectedDate:yyyyMMdd}|{TxtVonStunde.Text.Trim()}|{DpBis.SelectedDate:yyyyMMdd}|{TxtBisStunde.Text.Trim()}|" +
+               string.Join(",", SplitNamen(TxtNamen.Text).Select(x => x.Trim().ToUpperInvariant()));
+
+        /// <summary>Nachtrag V4b (N-1): Liste und Abwesenheiten des letzten Ermittelns verwerfen.</summary>
+        private void LeereErmittlung()
+        {
+            _zeilen.Clear();
+            _letzteAbwesenheiten.Clear();
+            _ermitteltFuer = "";
+            _ermitteltText = "";
+        }
 
         private readonly ObservableCollection<InstanzZeile> _zeilen = new();
         private readonly ObservableCollection<ZaehlerZeile> _zaehler = new();
@@ -247,19 +264,23 @@ namespace Stundenplan_V2.Vertretung
             else if (_plan.Raeume == null || _plan.Raeume.IstVeraltet(_planPfad))
                 _plan.Raeume = PlanRaeume.Lade(_plan);
 
+            // Nachtrag V4b (N-1): Schlägt das Ermitteln fehl, bleiben keine alten Zeilen stehen (sonst bucht „Buchen“ sie).
             var namen = SplitNamen(TxtNamen.Text);
             if (namen.Count == 0)
             {
+                LeereErmittlung();
                 SetzeStatus("Bitte mindestens einen Namen angeben (Feld 'Namen', mehrere mit Komma).");
                 return;
             }
             if (DpVon.SelectedDate == null || DpBis.SelectedDate == null)
             {
+                LeereErmittlung();
                 SetzeStatus("Bitte Von- und Bis-Datum wählen.");
                 return;
             }
             if (DpBis.SelectedDate.Value.Date < DpVon.SelectedDate.Value.Date)
             {
+                LeereErmittlung();
                 SetzeStatus("Das Bis-Datum liegt vor dem Von-Datum.");
                 return;
             }
@@ -267,6 +288,10 @@ namespace Stundenplan_V2.Vertretung
             var subj = (AbwesenheitsSubjekt)CbSubjekt.SelectedItem;
             _letzteGrund = CbGrund.SelectedItem is VertretungsGrund lg ? lg : VertretungsGrund.Sonstiges;
             _letzteAbwesenheiten.Clear();
+            // Nachtrag V4b (N-1): wofür ermittelt wurde – „Buchen“ fragt nach, wenn die Felder inzwischen anders sind.
+            _ermitteltFuer = EingabeSchluessel();
+            _ermitteltText = $"{subj} {string.Join(", ", namen)}, {DpVon.SelectedDate.Value:dd.MM.yyyy}" +
+                             (DpBis.SelectedDate.Value.Date != DpVon.SelectedDate.Value.Date ? $"–{DpBis.SelectedDate.Value:dd.MM.yyyy}" : "");
             // V4 (275): Anlass eines Entfalls = was fehlt; bei „Klasse“ sind die Lehrkräfte freigesetzt → Entfall (−1).
             var anlassZeile = Zaehlung.AnlassAus(subj);
             bool klasseFehlt = subj == AbwesenheitsSubjekt.Klasse;
@@ -464,6 +489,26 @@ namespace Stundenplan_V2.Vertretung
                 return;
             }
 
+            // Nachtrag V4b (N-1): „Abwesend“, Datum, Stunden oder Namen nach dem Ermitteln geändert (auch über den Wocheneditor,
+            // der die Felder mitsetzt)? Dann nur nach Rückfrage die Zeilen der Liste buchen.
+            bool subjAnders = CbSubjekt.SelectedItem is AbwesenheitsSubjekt subjJetzt && _letzteAbwesenheiten[0].Subjekt != subjJetzt;
+            if ((subjAnders || EingabeSchluessel() != _ermitteltFuer) &&
+                MessageBox.Show($"Die Zeilen in der Liste wurden für „{_ermitteltText}“ ermittelt – die Felder oben zeigen " +
+                                "inzwischen etwas anderes (Abwesend, Datum, Stunden oder Namen).\n\nTrotzdem die Zeilen der Liste buchen?" +
+                                (subjAnders ? $" (Grund wie beim Ermitteln: {Zaehlung.GrundText(_letzteGrund)})" : "") +
+                                "\n(Nein = nichts buchen; dann „Betroffene Stunden ermitteln“.)",
+                        "Vertretung", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes)
+            {
+                SetzeStatus("Nichts gebucht – die Felder passen nicht mehr zur Liste. Bitte „Betroffene Stunden ermitteln“.");
+                return;
+            }
+            // Nachtrag V4b (Befund 2): Es gilt der Grund, der beim Buchen eingestellt ist (nicht schon der beim Ermitteln) –
+            // auch für schon gebuchte Stunden (dann Rückfrage „… würden geändert“). Gehört die Gründe-Liste oben inzwischen zu
+            // einer anderen Abwesenheit („Abwesend“ geändert), bleibt der Grund vom Ermitteln.
+            if (!subjAnders && CbGrund.SelectedItem is VertretungsGrund grundJetzt) _letzteGrund = grundJetzt;
+            foreach (var abwJetzt in _letzteAbwesenheiten) abwJetzt.Grund = _letzteGrund;
+            foreach (var zeileJetzt in _zeilen) zeileJetzt.GrundBeimBuchen = _letzteGrund;
+
             // V4 (277/278): eigener Zählwert nur mit Kommentar (eine Zeile, bis 200 Zeichen) – sonst nichts buchen.
             var ohneKommentar = _zeilen.Where(z => z.EigenerWert != null && Zaehlung.KommentarFehler(z.Zaehlkommentar) != null).ToList();
             if (ohneKommentar.Count > 0)
@@ -527,12 +572,13 @@ namespace Stundenplan_V2.Vertretung
             // Abwesenheiten festhalten (nicht doppelt).
             foreach (var abw in _letzteAbwesenheiten)
             {
-                bool vorhanden = _daten.Abwesenheiten.Any(a =>
+                var vorhanden = _daten.Abwesenheiten.FirstOrDefault(a =>
                     a.Subjekt == abw.Subjekt &&
                     string.Equals(a.Name, abw.Name, StringComparison.OrdinalIgnoreCase) &&
                     a.VonDatum == abw.VonDatum && a.VonStunde == abw.VonStunde &&
                     a.BisDatum == abw.BisDatum && a.BisStunde == abw.BisStunde);
-                if (!vorhanden) _daten.Abwesenheiten.Add(abw);
+                if (vorhanden == null) _daten.Abwesenheiten.Add(abw);
+                else vorhanden.Grund = abw.Grund;   // Nachtrag V4b (Befund 2): derselbe Zeitraum mit neuem Grund
             }
 
             int gebucht = 0, uebersprungen = 0, geaendert = 0, unveraendert = 0, verlegungen = 0, behalten = 0, ohneRaum = 0, sondergruende = 0;
@@ -620,6 +666,17 @@ namespace Stundenplan_V2.Vertretung
             }
 
             try { VertretungsStore.Speichern(_daten, _vertretungsPfad, _plan); }   // V4b: Plan für das Blatt „Entfälle“
+            catch (VertretungsdateiGeaendertException ex)
+            {
+                // Nachtrag V4b (Befund 1): nichts überschreiben – den Stand der Datei laden; die Zeilen bleiben, wie
+                // sie eingestellt sind, und lassen sich gleich noch einmal buchen.
+                NeuLaden();
+                MessageBox.Show(ex.Message + "\n\nDie Daten wurden neu geladen – bitte noch einmal „Buchen“.",
+                    "Vertretung", MessageBoxButton.OK, MessageBoxImage.Warning);
+                SetzeStatus("Nichts gebucht – die Vertretungsdatei war inzwischen geändert und wurde neu geladen. Bitte noch einmal „Buchen“.");
+                _log?.Invoke("Vertretung: nicht gespeichert – Vertretungsdatei inzwischen geändert, neu geladen.");
+                return;
+            }
             catch (Exception ex)
             {
                 MessageBox.Show("Fehler beim Speichern:\n\n" + ex.Message +
@@ -798,7 +855,23 @@ namespace Stundenplan_V2.Vertretung
         //  Zähler
         // =====================================================
 
-        private void BtnZaehlerAktualisieren_Click(object sender, RoutedEventArgs e) => AktualisiereZaehler();
+        /// <summary>Nachtrag V4b (K2): liest die Vertretungsdatei neu (auch Änderungen aus dem Wocheneditor) und rechnet.</summary>
+        private void BtnZaehlerAktualisieren_Click(object sender, RoutedEventArgs e)
+        {
+            if (!_bereit) return;
+            if (!string.IsNullOrEmpty(_vertretungsPfad))
+            {
+                try { _daten = VertretungsStore.Laden(_vertretungsPfad); }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Vertretungsdatei konnte nicht gelesen werden:\n\n" + ex.Message +
+                        "\n\n(Häufigste Ursache: Datei ist parallel in Excel geöffnet.) Es gilt der bisherige Stand.",
+                        "Vertretung", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            }
+            AktualisiereZaehler();
+            AktualisiereUebersicht();
+        }
 
         private void AktualisiereZaehler()
         {
@@ -826,6 +899,7 @@ namespace Stundenplan_V2.Vertretung
                     Saldo = s.Saldo
                 });
             }
+            TxtZaehlerStand.Text = $"Stand {DateTime.Now:HH:mm:ss} · {_zaehler.Count} Lehrkräfte";   // Nachtrag V4b (K2)
         }
 
         // =====================================================
@@ -1245,11 +1319,22 @@ namespace Stundenplan_V2.Vertretung
                 AktualisiereStandard();
             }
 
-            /// <summary>Art, Vertretung (falls nötig) und Bemerkung wie gespeichert?</summary>
+            /// <summary>
+            /// Nachtrag V4b (Befund 2): Grund, mit dem gebucht wird (setzt „Buchen“); null = Grund nicht vergleichen.
+            /// </summary>
+            public VertretungsGrund? GrundBeimBuchen { get; set; }
+
+            /// <summary>Anderer Grund als gespeichert? (nicht bei Raumvertretung und Verlegung – dort ohne Bedeutung)</summary>
+            private bool GrundGeaendert()
+                => _bestehend != null && GrundBeimBuchen is VertretungsGrund gb && _bestehend.Grund != gb
+                   && Art != Vertretungsart.Raumvertretung && !IstVerlegung;
+
+            /// <summary>Art, Vertretung (falls nötig), Bemerkung und Grund wie gespeichert?</summary>
             public bool Unveraendert()
             {
                 if (_bestehend == null) return false;
                 if (Art != _bestehend.Art) return false;
+                if (GrundGeaendert()) return false;   // Nachtrag V4b (Befund 2)
                 if (!string.Equals((Bemerkung ?? "").Trim(), (_bestehend.Bemerkung ?? "").Trim(), StringComparison.Ordinal))
                     return false;
                 if (RaumWaehlbar && !string.Equals((NeuerRaum ?? "").Trim(), (_bestehend.VertretungsRaum ?? "").Trim(),
@@ -1279,7 +1364,9 @@ namespace Stundenplan_V2.Vertretung
                    : _bestehend?.Sondergrund == true ? " (Zählung wieder Standard)" : "")
                 + (AusfallMoeglich && (_bestehend == null || !Zaehlung.HatAusfall(_bestehend)
                                        || AusfallAnlassGewaehlt != (_bestehend.AnlassAusfall ?? AusfallAnlass.Lehrkraft))
-                    ? $" (Ausfall {OrigLehrer}: {Zaehlung.AusfallKurz(AusfallAnlassGewaehlt)})" : "");
+                    ? $" (Ausfall {OrigLehrer}: {Zaehlung.AusfallKurz(AusfallAnlassGewaehlt)})" : "")
+                + (GrundGeaendert()
+                    ? $" (Grund {Zaehlung.GrundText(_bestehend!.Grund)} → {Zaehlung.GrundText(GrundBeimBuchen!.Value)})" : "");
 
             private static string BuchungText(Vertretungsart art, string? vertreter, string? raum = null)
             {

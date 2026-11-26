@@ -55,6 +55,23 @@ namespace Stundenplan_V2.Vertretung
         /// <summary>Zählwert einer Art aus der aktuellen Konfiguration (Default 0).</summary>
         public int Zaehlwert(Vertretungsart art)
             => Arten.FirstOrDefault(a => a.Art == art)?.Zaehlwert ?? 0;
+
+        // Nachtrag V4b (Befund 1): Datei und Änderungszeit beim Laden bzw. letzten Speichern (nicht in der Datei).
+        // Speichern prüft damit, ob ein anderer die Datei inzwischen geschrieben hat – sonst überschriebe ein
+        // veraltetes Fenster dessen Stand (z. B. den Kalender).
+        public string? DateiPfad { get; set; }
+        public DateTime? DateiStandUtc { get; set; }
+    }
+
+    /// <summary>
+    /// Nachtrag V4b (Befund 1): Die Vertretungsdatei wurde geändert, seit diese Daten geladen bzw. gespeichert wurden –
+    /// es wurde nichts geschrieben.
+    /// </summary>
+    public class VertretungsdateiGeaendertException : IOException
+    {
+        public VertretungsdateiGeaendertException(string datei)
+            : base($"Die Vertretungsdatei {datei} wurde geändert, seit dieses Fenster sie gelesen hat (z. B. in einer " +
+                   "zweiten Programminstanz oder in Excel). Damit nichts überschrieben wird, wurde nicht gespeichert.") { }
     }
 
     public static class VertretungsStore
@@ -122,6 +139,7 @@ namespace Stundenplan_V2.Vertretung
         /// </param>
         public static void Speichern(VertretungsDaten daten, string pfad, PlanDaten? plan = null)
         {
+            PruefeDateiStand(daten, pfad);   // Nachtrag V4b (Befund 1)
             using var wb = new XLWorkbook();
 
             SchreibeMeta(wb, daten);
@@ -137,6 +155,27 @@ namespace Stundenplan_V2.Vertretung
                 (ohnePlan ? " (ohne freie Zeiten laut Kalender – Plan nicht gelesen)" : ""));
 
             wb.SaveAs(pfad);
+            MerkeDateiStand(daten, pfad);
+        }
+
+        /// <summary>
+        /// Nachtrag V4b (Befund 1): Wurde dieselbe Datei seit dem Laden bzw. letzten Speichern dieser Daten von anderer
+        /// Seite geschrieben, wird nicht gespeichert (<see cref="VertretungsdateiGeaendertException"/>). Neue Daten
+        /// (ohne Stand) und eine andere Zieldatei (neues Schuljahr) prüft sie nicht.
+        /// </summary>
+        private static void PruefeDateiStand(VertretungsDaten daten, string pfad)
+        {
+            if (daten.DateiStandUtc is not DateTime gelesen || string.IsNullOrEmpty(daten.DateiPfad)) return;
+            if (!File.Exists(pfad)) return;
+            if (!string.Equals(Path.GetFullPath(pfad), daten.DateiPfad, StringComparison.OrdinalIgnoreCase)) return;
+            if (File.GetLastWriteTimeUtc(pfad) != gelesen)
+                throw new VertretungsdateiGeaendertException(Path.GetFileName(pfad));
+        }
+
+        private static void MerkeDateiStand(VertretungsDaten daten, string pfad)
+        {
+            daten.DateiPfad = Path.GetFullPath(pfad);
+            daten.DateiStandUtc = File.GetLastWriteTimeUtc(pfad);
         }
 
         private static void SchreibeMeta(XLWorkbook wb, VertretungsDaten d)
@@ -345,6 +384,7 @@ namespace Stundenplan_V2.Vertretung
             LiesVertretungen(wb, d);
             LiesKompetenzen(wb, d);
 
+            MerkeDateiStand(d, pfad);   // Nachtrag V4b (Befund 1)
             return d;
         }
 

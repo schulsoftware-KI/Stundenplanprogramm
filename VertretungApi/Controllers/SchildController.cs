@@ -65,7 +65,7 @@ public class SchildController : ControllerBase
         var werte = await _einst.LesenAsync(_db);
         string sj = string.IsNullOrWhiteSpace(schuljahr) ? werte.Schuljahr : schuljahr.Trim();
         int ab = abschnitt is >= 1 and <= 4 ? abschnitt.Value : 1;
-        bool pseudo = !Produktiv;
+        bool pseudo = Betrieb.PseudoErwartet(Produktiv);   // PB-1a (299): auch im Probebetrieb
         var heute = KlassenbuchService.Heute();
 
         var kal = await _db.Kalender.AsNoTracking().FirstOrDefaultAsync(k => k.Schuljahr == sj);
@@ -109,7 +109,7 @@ public class SchildController : ControllerBase
 
         return Ok(new
         {
-            betrieb = Produktiv ? "Echtbetrieb" : "Entwicklung",
+            betrieb = Betrieb.Art(Produktiv),   // PB-1a (299): „Entwicklung“ | „Probebetrieb“ | „Echtbetrieb“
             pseudo,
             nimmt = pseudo ? "nur Pseudodaten" : "nur echte Daten",
             schuljahr = sj,
@@ -270,7 +270,7 @@ public class SchildController : ControllerBase
             })
             .ToListAsync();
         int gesamt = await _db.SchildImportProtokolle.CountAsync();
-        return Ok(new { protokolle = liste, gesamt, betrieb = Produktiv ? "Echtbetrieb" : "Entwicklung" });
+        return Ok(new { protokolle = liste, gesamt, betrieb = Betrieb.Art(Produktiv) });
     }
 
     /// <summary>„Desktop (Windows-Benutzer)“ fürs Importprotokoll – ohne Steuerzeichen, gekürzt.</summary>

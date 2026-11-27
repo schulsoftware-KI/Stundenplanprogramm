@@ -176,7 +176,7 @@ public class KontenController : ControllerBase
                 .OrderByDescending(x => x.Zeit).ThenByDescending(x => x.Id).FirstOrDefaultAsync();
             if (p != null)
                 gesperrtDurch = $"{p.Akteur}{(string.IsNullOrWhiteSpace(p.Details) ? "" : " – " + p.Details)} " +
-                                $"({p.Zeit.ToLocalTime():dd.MM.yyyy})";
+                                $"({Ortszeit.AusUtc(p.Zeit):dd.MM.yyyy})";
         }
         return Ok(dto with { BenutzernameVorschlag = vorschlag, GesperrtDurch = gesperrtDurch });
     }

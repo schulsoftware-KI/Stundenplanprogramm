@@ -124,7 +124,7 @@ public static partial class Jahresablauf
         var punkte = new List<JaPunktDto>
         {
             GrundplanPunkt(vorher, neu, h),
-            await ImportPunktAsync(db, w.Schuljahr, h, heute, !produktiv),
+            await ImportPunktAsync(db, w.Schuljahr, h, heute, Betrieb.PseudoErwartet(produktiv)),   // PB-1a (299)
             await OffenPunktAsync(db, w, kal, h, heute, akteur),
             await RueckwegPunktAsync(db, w, kal, h),
         };
@@ -202,7 +202,7 @@ public static partial class Jahresablauf
                 : new JaPunktDto("import", titel, Gelb,
                     $"Noch offen{art}: nach dem Halbjahreswechsel in SchILD im Desktop „SchILD-Daten…“ mit Abschnitt 2 und " +
                     $"„Änderungen gelten ab“ {D(h)} importieren.", Ziele: ziel);
-        var am = DateOnly.FromDateTime(DateTime.SpecifyKind(p.Zeit, DateTimeKind.Utc).ToLocalTime());
+        var am = Ortszeit.TagAusUtc(p.Zeit);
         string zahlen = $"neu {p.Neu}, Klassenwechsel {p.Klassenwechsel}, Kurs-/Gruppenwechsel {p.Kurswechsel}, Abgänge {p.Abgaenge}";
         if (p.GiltAb == h)
             return new JaPunktDto("import", titel, Gruen,
@@ -296,7 +296,7 @@ public static partial class Jahresablauf
         var ganz = liste.FirstOrDefault(p => p.Art == SchildRueckweg.ArtDatei && p.Von <= noetigAb && p.Bis >= bis);
         if (ganz != null)
         {
-            var am = DateOnly.FromDateTime(DateTime.SpecifyKind(ganz.Zeit, DateTimeKind.Utc).ToLocalTime());
+            var am = Ortszeit.TagAusUtc(ganz.Zeit);
             return new JaPunktDto("rueckweg", titel, Gruen,
                 $"Datei geschrieben am {D(am)} (Abholcode von {ganz.Akteur}) für {D(ganz.Von)} – {D(ganz.Bis)}. Ob sie in SchILD " +
                 "eingelesen wurde, weiß die App nicht.", Ziele: ziel);
@@ -334,7 +334,7 @@ public static partial class Jahresablauf
             .ToListAsync();
         var zeilen = liste.Take(MaxListe).Select(p =>
         {
-            var am = DateOnly.FromDateTime(DateTime.SpecifyKind(p.Zeit, DateTimeKind.Utc).ToLocalTime());
+            var am = Ortszeit.TagAusUtc(p.Zeit);
             return $"{D(am)}: {ArtText(p.Art)} {D(p.Von)} – {D(p.Bis)} ({p.Akteur})";
         }).ToList();
         var punkt = new JaPunktDto("rueckwegVerlauf", $"Bisher im Schuljahr {w.Schuljahr}", Grau,

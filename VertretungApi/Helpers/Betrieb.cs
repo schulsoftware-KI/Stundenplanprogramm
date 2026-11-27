@@ -18,6 +18,16 @@ namespace VertretungApi.Helpers;
 //  Schlüssel und Passwörter gehören nie ins (öffentliche) Repo, sondern in Umgebungs-
 //  variablen (z. B. Jwt__Key, Api__PushKey, ConnectionStrings__Postgres) oder in die nicht
 //  eingecheckte Datei appsettings.Production.json (Vorlage: appsettings.Production.Beispiel.json).
+//
+//  PB-1a:
+//  - Entscheidung 299: Betriebsart „Probebetrieb“ – Schalter Betrieb:Probebetrieb, wirkt nur im Echtbetrieb. Dann
+//    erwartet die API Pseudodaten (SchILD-Import, Status für den Desktop, Rückweg, Jahreswechsel-Import) statt echter
+//    Daten; alle übrigen Regeln des Echtbetriebs bleiben (Startprüfung, Schlüssel, TOTP-Pflicht für Admins, Seeds,
+//    Testkonten und Testdatum gesperrt). Die Frage „Pseudo oder echt?“ beantwortet nur PseudoErwartet().
+//  - Entscheidung 310: Betrieb:Zeitzone (Helpers/Ortszeit.cs) – geprüft auch in der Entwicklung.
+//  - Entscheidung 312: Ist die Umgebungsvariable VERTRETUNG_EINSTELLUNGEN gesetzt, liest die API diese JSON-Datei
+//    zusätzlich – nach appsettings.json und appsettings.<Umgebung>.json, vor Umgebungsvariablen und Befehlszeile
+//    (Linux: /etc/vertretung/appsettings.Production.json, bleibt bei jedem Update, wo sie ist).
 // =====================================================================
 
 public static class Betrieb
@@ -35,6 +45,105 @@ public static class Betrieb
 
     /// <summary>Echtbetrieb = jede Umgebung außer Development.</summary>
     public static bool Produktiv(IHostEnvironment env) => !env.IsDevelopment();
+
+    // -----------------------------------------------------------------
+    //  PB-1a (299): Betriebsart „Probebetrieb“
+    // -----------------------------------------------------------------
+
+    public const string ProbebetriebSchluessel = "Betrieb:Probebetrieb";
+
+    /// <summary>Probebetrieb wirksam (nur im Echtbetrieb mit Betrieb:Probebetrieb = true; beim Start gesetzt).</summary>
+    public static bool Probebetrieb { get; private set; }
+
+    /// <summary>Beim Start (Program.cs): in der Entwicklung bleibt der Schalter wirkungslos (Hinweis der Startprüfung).</summary>
+    public static void ProbebetriebFestlegen(IConfiguration cfg, bool produktiv)
+        => Probebetrieb = produktiv && Zugriffsschutz.Schalter(cfg, ProbebetriebSchluessel, out _);
+
+    /// <summary>
+    /// Die eine Stelle für „Pseudo oder echt?“ (83, 299): Pseudodaten in der Entwicklung und im Probebetrieb, echte Daten
+    /// nur im Echtbetrieb. Genutzt von SchILD-Import, SchILD-Status, Rückweg und den Import-Punkten im Jahresablauf.
+    /// </summary>
+    public static bool PseudoErwartet(bool produktiv) => !produktiv || Probebetrieb;
+
+    /// <summary>Name der Betriebsart: „Entwicklung“, „Probebetrieb“ oder „Echtbetrieb“ (Startlog, Status für den Desktop).</summary>
+    public static string Art(bool produktiv) => !produktiv ? "Entwicklung" : Probebetrieb ? "Probebetrieb" : "Echtbetrieb";
+
+    // -----------------------------------------------------------------
+    //  PB-1a (312): Einstellungsdatei außerhalb des Programmordners
+    // -----------------------------------------------------------------
+
+    public const string EinstellungsdateiVariable = "VERTRETUNG_EINSTELLUNGEN";
+
+    /// <summary>
+    /// Liest die Datei aus VERTRETUNG_EINSTELLUNGEN zusätzlich ein – nach den appsettings-Dateien, vor Umgebungsvariablen
+    /// und Befehlszeile (Umgebungsvariablen gehen ihr also weiter vor). Rückgabe: voller Pfad bzw. null (Variable nicht
+    /// gesetzt); <paramref name="fehler"/> = Datei fehlt, ist nicht lesbar oder kein gültiges JSON.
+    /// </summary>
+    public static string? EinstellungsdateiEinbinden(IConfigurationBuilder cfg, out string? fehler)
+    {
+        fehler = null;
+        var roh = Environment.GetEnvironmentVariable(EinstellungsdateiVariable);
+        if (string.IsNullOrWhiteSpace(roh)) return null;
+        string pfad;
+        try
+        {
+            pfad = Path.GetFullPath(roh.Trim().Trim('"'));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            fehler = $"{EinstellungsdateiVariable} enthält keinen gültigen Dateipfad.";
+            return null;
+        }
+        if (!File.Exists(pfad))
+        {
+            fehler = $"{EinstellungsdateiVariable} zeigt auf „{pfad}“ – diese Datei gibt es nicht (Pfad prüfen bzw. die " +
+                     "Variable entfernen).";
+            return null;
+        }
+
+        var quelle = new Microsoft.Extensions.Configuration.Json.JsonConfigurationSource
+        {
+            Path = pfad,
+            Optional = false,
+            ReloadOnChange = false
+        };
+        quelle.ResolveFileProvider();
+        // Stelle: direkt hinter der letzten JSON-Datei (appsettings.json, appsettings.<Umgebung>.json, ggf. Benutzergeheimnisse) –
+        // davor stehen nur die Umgebungsvariablen mit DOTNET_/ASPNETCORE_ für den Host, dahinter die übrigen
+        // Umgebungsvariablen und die Befehlszeile.
+        var quellen = cfg.Sources;
+        int stelle = -1;
+        for (int i = 0; i < quellen.Count; i++)
+            if (quellen[i] is Microsoft.Extensions.Configuration.Json.JsonConfigurationSource) stelle = i + 1;
+        if (stelle < 0)
+        {
+            stelle = quellen.Count;
+            for (int i = quellen.Count - 1; i >= 0; i--)
+                if (quellen[i] is Microsoft.Extensions.Configuration.EnvironmentVariables.EnvironmentVariablesConfigurationSource
+                    { Prefix: null or "" })
+                {
+                    stelle = i;
+                    break;
+                }
+        }
+        try
+        {
+            quellen.Insert(stelle, quelle);   // ConfigurationManager liest die Quellen dabei neu
+        }
+        catch (Exception ex) when (ex is FormatException or InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            quellen.Remove(quelle);
+            bool nichtLesbar = ex is UnauthorizedAccessException or IOException
+                               || ex.InnerException is UnauthorizedAccessException or IOException;
+            fehler = nichtLesbar
+                ? $"Die Einstellungsdatei „{pfad}“ ({EinstellungsdateiVariable}) ist nicht lesbar – Rechte prüfen (Linux: " +
+                  "Eigentümer ist der Dienstbenutzer, Rechte 600)."
+                : $"Die Einstellungsdatei „{pfad}“ ({EinstellungsdateiVariable}) ist kein gültiges JSON – Klammern, Kommas " +
+                  "und Anführungszeichen prüfen.";
+            return null;
+        }
+        return pfad;
+    }
 
     public static bool IstPostgres(IConfiguration cfg)
         => string.Equals(cfg["Database:Provider"], "Postgres", StringComparison.OrdinalIgnoreCase);
@@ -79,6 +188,18 @@ public static class Betrieb
         var begrenzung = VertretungApi.Services.BegrenzungsWerte.Lesen(cfg, fehler);
         if (produktiv && (begrenzung.JeKontoJeMinute == 0 || begrenzung.OhneAnmeldungJeMinute == 0 || begrenzung.DesktopJeMinute == 0))
             hinweise.Add("Begrenzung: Mindestens eine Anfragebegrenzung ist ausgeschaltet (0) – im Echtbetrieb nicht empfohlen.");
+
+        // PB-1a (310): Zeitzone des Programms – auch in der Entwicklung (ein Tippfehler fiele sonst erst auf dem Server auf).
+        if (Ortszeit.Lesen(cfg, out _, out var zonenFehler) == null && zonenFehler != null)
+            fehler.Add(zonenFehler);
+
+        // PB-1a (299 a): Betriebsart Probebetrieb – nur true/false; in der Entwicklung wirkungslos.
+        bool probe = Zugriffsschutz.Schalter(cfg, ProbebetriebSchluessel, out var probeUngueltig);
+        if (probeUngueltig)
+            fehler.Add($"{ProbebetriebSchluessel} muss true oder false sein.");
+        else if (probe && !produktiv)
+            hinweise.Add($"{ProbebetriebSchluessel} ist gesetzt, wirkt aber nur im Echtbetrieb – in der Entwicklung nimmt die " +
+                         "API ohnehin nur Pseudodaten an.");
 
         // P4a (Entscheidung 221): Testdatum nur in der Entwicklung – im Echtbetrieb startet der Server damit nicht.
         if (!string.IsNullOrWhiteSpace(cfg[Testdatum.Schluessel]))
@@ -165,19 +286,25 @@ public static class Betrieb
     }
 
     /// <summary>Gibt die Fehler der Startprüfung gut lesbar auf der Konsole aus.</summary>
-    public static void FehlerAusgeben(IEnumerable<string> fehler)
+    /// <param name="produktiv">PB-1a: false = Fehler in der Entwicklung (z. B. Zeitzone, Testdatum) – ohne die Hinweise zu Schlüsseln.</param>
+    public static void FehlerAusgeben(IEnumerable<string> fehler, bool produktiv = true)
     {
         var e = Console.Error;
         e.WriteLine();
         e.WriteLine("==========================================================================");
-        e.WriteLine(" VertretungApi startet nicht: Die Einstellungen taugen nicht für den Echtbetrieb.");
+        e.WriteLine(produktiv
+            ? " VertretungApi startet nicht: Die Einstellungen taugen nicht für den Echtbetrieb."
+            : " VertretungApi startet nicht: Die Einstellungen enthalten Fehler.");
         e.WriteLine("==========================================================================");
         foreach (var f in fehler) e.WriteLine(" - " + f);
         e.WriteLine();
-        e.WriteLine(" Schlüssel erzeugen (PowerShell):");
-        e.WriteLine("   $b = New-Object byte[] 48; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)");
-        e.WriteLine(" Zum Entwickeln stattdessen im Modus Development starten (Visual Studio bzw. dotnet run).");
-        e.WriteLine(" Siehe README, Abschnitt „Produktionsmodus (Phase 5.1)“.");
+        if (produktiv)
+        {
+            e.WriteLine(" Schlüssel erzeugen (PowerShell):");
+            e.WriteLine("   $b = New-Object byte[] 48; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)");
+            e.WriteLine(" Zum Entwickeln stattdessen im Modus Development starten (Visual Studio bzw. dotnet run).");
+        }
+        e.WriteLine(" Siehe README, Abschnitt „Produktionsmodus (Phase 5.1)“ bzw. „Probebetrieb, Zeitzone, Einstellungsdatei (PB-1a)“.");
         e.WriteLine();
     }
 

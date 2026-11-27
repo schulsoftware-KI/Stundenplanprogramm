@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using VertretungApi.Data;
 using VertretungApi.Dtos;
+using VertretungApi.Helpers;
 using VertretungApi.Model;
 
 namespace VertretungApi.Services;
@@ -70,6 +71,9 @@ public sealed record ArchivFortschritt(string Schritt, int Erledigt, int Gesamt)
 
 public static class ExportService
 {
+    /// <summary>PB-1a (299 e, F11): Vermerk in Klassenbuch-PDF, Jahresarchiv/Archiv-Export und CSV im Probebetrieb.</summary>
+    public const string ProbebetriebVermerk = "PROBEBETRIEB – Testdaten (erfundene Daten, kein Schulbetrieb)";
+
     private static readonly StringComparer Cmp = StringComparer.OrdinalIgnoreCase;
     private static readonly string[] OberstufenStufen = { "EF", "Q1", "Q2" };
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
@@ -118,6 +122,8 @@ public static class ExportService
         AppDbContext db, IReadOnlyList<string> gruppen, string dateiTeil, DateOnly von, DateOnly bis, string? schuljahr = null)
     {
         var sb = new StringBuilder();
+        // PB-1a (299 e, F11): im Probebetrieb eine erste Zeile mit dem Vermerk (die Spaltenköpfe folgen darunter)
+        if (Betrieb.Probebetrieb) CsvZeile(sb, ProbebetriebVermerk);
         CsvZeile(sb, "SchILD-Id", "Name", "Vorname", "Klasse", "Kurs",
             "Fehlstunden", "entschuldigt", "unentschuldigt", "offen", "Verspätungen", "Minuten");
 
@@ -416,6 +422,8 @@ public static class ExportService
 
         fortschritt?.Invoke(new ArchivFortschritt("Inhaltsverzeichnis", erledigt, gesamt));
         var inhalt = new StringBuilder();
+        // PB-1a (299 e, F11): im Probebetrieb ganz oben – keine Verwechslung mit einem echten Archiv
+        if (Betrieb.Probebetrieb) inhalt.Append(ProbebetriebVermerk).Append("\r\n\r\n");
         if (kopf != null)
         {
             foreach (var z in kopf) inhalt.Append(z).Append("\r\n");
@@ -424,7 +432,7 @@ public static class ExportService
         {
             inhalt.Append("Jahresarchiv – Klassenbücher und Kurshefte\r\n");
             inhalt.Append($"Zeitraum: {von:dd.MM.yyyy} – {bisEff:dd.MM.yyyy}\r\n");
-            inhalt.Append($"Erstellt am {DateTime.Now:dd.MM.yyyy HH:mm} von {u.Name}\r\n");
+            inhalt.Append($"Erstellt am {Ortszeit.Jetzt:dd.MM.yyyy HH:mm} von {u.Name}\r\n");
             inhalt.Append(schuelerEintraege ? "Schülereinträge: aufgenommen\r\n" : "Schülereinträge: nicht aufgenommen\r\n");
             inhalt.Append("Verschlüsselt mit AES-256 (WinZip-AES) – öffnen mit 7-Zip, WinZip oder WinRAR und dem Kennwort\r\n");
             inhalt.Append("(der Windows-Explorer kann es nicht).\r\n");

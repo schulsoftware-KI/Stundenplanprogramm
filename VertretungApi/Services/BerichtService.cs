@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using VertretungApi.Data;
 using VertretungApi.Dtos;
+using VertretungApi.Helpers;
 using VertretungApi.Model;
 
 namespace VertretungApi.Services;
@@ -39,7 +40,7 @@ public sealed record BerichtKopf(
     DateOnly Von,
     DateOnly Bis,
     string ErstelltVon,
-    DateTime ErstelltAm,               // Ortszeit des Servers
+    DateTime ErstelltAm,               // Wanduhr der Zeitzone des Programms (PB-1a, Helpers/Ortszeit.cs)
     bool MitSchuelerEintraegen);
 
 /// <summary>Eine Stunde im Bericht.</summary>
@@ -169,7 +170,7 @@ public static class BerichtService
         var fehlzeiten = await FehlzeitenService.KlasseAsync(db, k, von, bisEff, schuljahr);
 
         var kopf = new BerichtKopf("Klassenbuch", fehlzeiten.Titel, null, await SchuljahrAsync(db, von),
-            von, bisEff, u.Name, DateTime.Now, false);
+            von, bisEff, u.Name, Ortszeit.Jetzt, false);
         var lektionen = await db.Lektionen.AsNoTracking().Include(x => x.Anwesenheiten)
             .Where(x => x.Datum >= von && x.Datum <= bisEff && x.Klassen.ToUpper().Contains(k))
             .ToListAsync();
@@ -203,7 +204,7 @@ public static class BerichtService
         var bisEff = BisHoechstensHeute(bis);
         string titel = klassen.Count > 0 ? $"{fach} · {string.Join(", ", klassen)}" : fach;
         var kopf = new BerichtKopf("Kursheft", titel, $"Lehrkraft laut Plan: {l}", await SchuljahrAsync(db, von),
-            von, bisEff, u.Name, DateTime.Now, false);
+            von, bisEff, u.Name, Ortszeit.Jetzt, false);
         var lektionen = await db.Lektionen.AsNoTracking().Include(x => x.Anwesenheiten)
             .Where(x => x.Datum >= von && x.Datum <= bisEff && x.GrundLehrer == l && (x.GrundUNr == unr || x.UNr == unr))
             .ToListAsync();
@@ -376,9 +377,9 @@ public static class BerichtService
         _ => status
     };
 
-    /// <summary>„02.11. 08:15" in Ortszeit des Servers (gespeichert wird UTC).</summary>
+    /// <summary>„02.11. 08:15" in der Zeitzone des Programms (gespeichert wird UTC; PB-1a, 310).</summary>
     private static string Zeit(DateTime utc)
-        => DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime().ToString("dd.MM. HH:mm");
+        => Ortszeit.AusUtc(utc).ToString("dd.MM. HH:mm");
 
     /// <summary>„Mo 02.11.2026"</summary>
     public static string TagText(DateOnly d) => $"{Wt[(int)d.DayOfWeek]} {d:dd.MM.yyyy}";

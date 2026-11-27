@@ -1,5 +1,6 @@
 using VertretungApi.Data;
 using VertretungApi.Dtos;
+using VertretungApi.Helpers;
 using VertretungApi.Model;
 
 namespace VertretungApi.Services;
@@ -91,7 +92,7 @@ public sealed class ArchivAuftraege : BackgroundService
         _log = log;
     }
 
-    private static string Uhr(DateTime utc) => DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime().ToString("HH:mm");
+    private static string Uhr(DateTime utc) => Ortszeit.AusUtc(utc).ToString("HH:mm");
 
     private static ArchivAuftragStand Schnappschuss(Auftrag a)
         => new(a.Id, a.Plan, a.Akteur, a.KontoId, a.Status, a.Schritt, a.Erledigt, a.Gesamt, a.Start, a.FertigAm, a.Groesse,

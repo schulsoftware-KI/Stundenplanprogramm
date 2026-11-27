@@ -92,7 +92,7 @@ public class AuskunftController : ControllerBase
 
     /// <summary>Erstes Datum mit Daten des Kontos (angelegt am); unbekannt = null (dann heute).</summary>
     private static DateOnly? ErstesDatumKonto(Benutzer k)
-        => k.AngelegtAm is DateTime a ? DateOnly.FromDateTime(DateTime.SpecifyKind(a, DateTimeKind.Utc).ToLocalTime()) : null;
+        => k.AngelegtAm is DateTime a ? Ortszeit.TagAusUtc(a) : null;
 
     private async Task<IActionResult> PdfAsync(AuskunftDokument dok, string was, DateOnly? von)
     {

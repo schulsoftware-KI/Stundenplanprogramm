@@ -100,7 +100,7 @@ public class EinstellungenController : ControllerBase
                 d.Schluessel, d.Gruppe, d.Titel, d.Typ.ToString().ToLowerInvariant(), roh, d.StandardText,
                 Wirksam(d, roh, w, kal, produktiv), d.Hilfe, d.DsbFrage, z?.AbgestimmtAm, z?.AbgestimmtMit, z?.GeaendertAm, z?.GeaendertVon,
                 d.Typ == EinstellungsTyp.Zahl ? d.Min : null, d.Typ == EinstellungsTyp.Zahl ? d.Max : null,
-                d.MaxLaenge > 0 ? d.MaxLaenge : null, d.Einheit, d.Loescht));
+                d.MaxLaenge > 0 ? d.MaxLaenge : null, d.Einheit, d.Loescht, d.StandardWert));
         }
 
         var hinweise = new List<string>();

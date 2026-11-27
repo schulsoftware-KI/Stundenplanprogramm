@@ -70,7 +70,8 @@ const HI_GRUPPEN = [
  *   { zwischen: "…" }            Zwischenüberschrift
  *   { farben: [[art, text]] }    Aufzählung mit Farbfeld (Farben wie im Plan)
  *   { begriffe: [[wort, text]] } Begriffsliste
- *   { nur: "personal" | "schueler" | "admin" | "app" | "keineApp", teile: [...] }  nur für diese Fälle
+ *   { nur: "personal" | "schueler" | "admin" | "app" | "keineApp" | "bleiben" | "ohneBleiben" | "probebetrieb", teile: [...] }
+ *                                nur für diese Fälle
  * ohneAnmeldung: true = auch vor der Anmeldung lesbar.
  */
 const HI_THEMEN = [
@@ -90,6 +91,9 @@ const HI_THEMEN = [
         "dem 6-stelligen Code aus deiner Authenticator-App – siehe „Zweiter Faktor“.",
       "**Passwort vergessen?** Ein neues Startpasswort bekommst du von deiner Klassenleitung bzw. " +
         "Stufenkoordination, Lehrkräfte vom Admin. Per E-Mail geht das nicht.",
+      // PB-1a (299 c): Testserver
+      { nur: "probebetrieb", teile: ["Steht oben **„Probebetrieb – nur Testdaten“**, ist das ein Testserver: Alle Namen " +
+        "und Pläne sind erfunden. Trag dort bitte nichts Echtes ein – keine echten Namen und keine echten Vorfälle."] },
     ],
   },
   {
@@ -778,6 +782,7 @@ function hiNur(nur, r) {
   if (nur === "keineApp") return !alsApp();
   if (nur === "bleiben") return state.bleibenTage > 0;       // P3
   if (nur === "ohneBleiben") return !(state.bleibenTage > 0);
+  if (nur === "probebetrieb") return state.probebetrieb === true;   // PB-1a (299)
   return true;
 }
 

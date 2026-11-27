@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using VertretungApi.Data;
 using VertretungApi.Dtos;
+using VertretungApi.Helpers;
 using VertretungApi.Model;
 
 namespace VertretungApi.Services;
@@ -373,6 +374,7 @@ public sealed class SchildImportLauf
 
     private readonly SchildImportDto _dto;
     private readonly bool _produktiv;
+    private readonly bool _pseudoErwartet;                                      // PB-1a (299): Entwicklung bzw. Probebetrieb
     private readonly DateOnly _heute;
     private readonly DateOnly _giltAb;
     private readonly DateOnly _vortag;
@@ -404,6 +406,7 @@ public sealed class SchildImportLauf
     {
         _dto = dto;
         _produktiv = produktiv;
+        _pseudoErwartet = Betrieb.PseudoErwartet(produktiv);
         _heute = heute;
         _halbjahrAb = halbjahrAb;
         _aktuell = SchildImportService.Leer(aktuellesSchuljahr);
@@ -475,11 +478,13 @@ public sealed class SchildImportLauf
         var dto = _dto;
         ImExport = dto.Schueler!.Count;
 
-        // ---- 1. Umgebung (83) ----
-        if (!_produktiv && !dto.Pseudo)
-            Sperre("Umgebung", "Die Entwicklungs-API nimmt nur Pseudodaten an (Entscheidung 83). Echte SchILD-Daten " +
-                               "werden nur im Echtbetrieb importiert.");
-        if (_produktiv && dto.Pseudo)
+        // ---- 1. Umgebung (83; PB-1a 299: der Probebetrieb nimmt nur Pseudodaten) ----
+        if (_pseudoErwartet && !dto.Pseudo)
+            Sperre("Umgebung", _produktiv
+                ? "Der Probebetrieb nimmt nur Pseudodaten an – echte SchILD-Daten gehören nicht auf diesen Server."
+                : "Die Entwicklungs-API nimmt nur Pseudodaten an (Entscheidung 83). Echte SchILD-Daten " +
+                  "werden nur im Echtbetrieb importiert.");
+        if (!_pseudoErwartet && dto.Pseudo)
             Sperre("Umgebung", "Der Echtbetrieb nimmt keine Pseudodaten an (Entscheidung 83).");
         if (Gesperrt) return;
 

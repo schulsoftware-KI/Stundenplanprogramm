@@ -50,6 +50,8 @@
 //  bleiben" kommen ohne Anmeldung aus /api/auth/optionen (Entscheidung 201):
 //  Name der App im Titel (appName()), Schulname auf der Anmeldeseite.
 //  Jahresablauf (P4a, Code in jahresablauf.js): Kontomenü „Jahresablauf" (nur Admin).
+//  Probebetrieb (PB-1a, Entscheidung 299): Läuft der Server im Probebetrieb (Testserver, nur erfundene Daten), meldet
+//  /api/auth/optionen „probebetrieb: true“ – die App zeigt dann dauerhaft das Band „Probebetrieb – nur Testdaten“.
 //  Testdatum (P4a, Entscheidung 221): Setzt die Entwicklungs-API „Entwicklung:Heute", meldet sie es über
 //  /api/auth/optionen; die App rechnet dann mit diesem Tag als heute (heuteIso, startMontag) und zeigt ein Band.
 //  Zugangsschutz (P6a, Entscheidungen 225–231): Anmeldung in zwei Schritten bei einem Konto mit zweitem Faktor
@@ -116,6 +118,7 @@ const state = {
   schule: { name: "", kurzname: "", app: "Stundenplan" }, // P3: laut Server (/api/auth/optionen)
   bleibenTage: 30,       // P3: „Angemeldet bleiben" in Tagen (0 = gibt es nicht)
   testdatum: null,       // P4a: Testdatum der Entwicklungs-API („2027-01-18") bzw. null
+  probebetrieb: false,   // PB-1a (299): Server im Probebetrieb (nur Testdaten) – Band unter dem Kopf
   modus: "klasse",
   werte: leereWerte(),   // zuletzt gewählter Wert je Ansicht (schueler: Id)
   montag: "",            // ISO-Datum des Montags der angezeigten Woche
@@ -396,7 +399,7 @@ function zugriffsFehler(fehler) {
     abmelden("Deine Anmeldung ist abgelaufen oder wurde beendet. Bitte melde dich neu an.");
   } else {
     state.anmeldungNoetig = true;
-    lokal.schreiben("optionen", { anmeldungNoetig: true });
+    lokal.schreiben("optionen", { ...lokal.lesen("optionen", {}), anmeldungNoetig: true });   // PB-1a: Band, Schule bleiben
     zeigeAnmeldung("Bitte melde dich an, um die Pläne zu sehen.");
   }
   return true;
@@ -1168,7 +1171,7 @@ async function anmelden(e) {
     if (!resp.ok) {
       anmeldeFehler(resp.status === 401 || resp.status === 403 || resp.status === 429
         ? (d && d.fehler) || "Benutzername oder Passwort falsch."
-        : `Anmeldung zurzeit nicht möglich (Fehler ${resp.status}).`);
+        : (resp.status === 400 && d && d.fehler) || `Anmeldung zurzeit nicht möglich (Fehler ${resp.status}).`);   // PB-1a (318)
       el("passwort").select();
       return;
     }
@@ -1304,7 +1307,7 @@ async function codeSenden(e) {
     }
     codeFehler(resp.status === 401 || resp.status === 403 || resp.status === 429
       ? (d && d.fehler) || "Der Code stimmt nicht."
-      : `Anmeldung zurzeit nicht möglich (Fehler ${resp.status}).`);
+      : (resp.status === 400 && d && d.fehler) || `Anmeldung zurzeit nicht möglich (Fehler ${resp.status}).`);   // PB-1a (318)
     el("codeEingabe").select();
   } catch {
     if (anmeldeCode === a) codeFehler("Keine Verbindung zum Schulserver. Prüfe die Internetverbindung und versuche es erneut.");
@@ -1385,7 +1388,7 @@ async function ladeOptionen() {
     state.anmeldungNoetig = d.anmeldungNoetig !== false;
     optionenUebernehmen(d);
     lokal.schreiben("optionen", { anmeldungNoetig: state.anmeldungNoetig, schule: state.schule, bleibenTage: state.bleibenTage,
-      testdatum: state.testdatum });
+      testdatum: state.testdatum, probebetrieb: state.probebetrieb });
     if (!el("anmeldung").hidden) el("ohneAnmeldung").hidden = state.anmeldungNoetig;
     schuleAnzeigen();
   } catch { /* offline: der zuletzt bekannte Wert gilt */ }
@@ -1402,6 +1405,15 @@ function optionenUebernehmen(d) {
   // P4a (221): Testdatum der Entwicklung
   state.testdatum = d && istIso(d.testdatum) ? d.testdatum : null;
   testdatumAnzeigen();
+  // PB-1a (299 c): Probebetrieb
+  state.probebetrieb = !!(d && d.probebetrieb === true);
+  probebetriebAnzeigen();
+}
+
+/** PB-1a (299 c): Band „Probebetrieb – nur Testdaten“ unter dem Kopf – vor und nach der Anmeldung. */
+function probebetriebAnzeigen() {
+  const b = el("probebetriebBand");
+  if (b) b.hidden = !state.probebetrieb;
 }
 
 /** P4a (221): Band „Testdatum …" unter dem Kopf (nur, wenn die Entwicklungs-API eines setzt). */

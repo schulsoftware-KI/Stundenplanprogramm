@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
+using VertretungApi.Helpers;
 
 namespace VertretungApi.Services;
 
@@ -104,7 +105,7 @@ public sealed class AesZipSchreiber
             throw new ArchivZuGrossException($"Mehr als {MaxDateien} Dateien – das passt nicht in eine Zip-Datei ohne Zip64.");
 
         var nameBytes = Encoding.UTF8.GetBytes(name);
-        var (dosZeit, dosDatum) = Dos(zeit ?? DateTime.Now);
+        var (dosZeit, dosDatum) = Dos(zeit ?? Ortszeit.Jetzt);   // PB-1a (310): Wanduhr der Zeitzone des Programms
         string sha = Convert.ToHexString(SHA256.HashData(daten));
 
         byte[] komprimiert;

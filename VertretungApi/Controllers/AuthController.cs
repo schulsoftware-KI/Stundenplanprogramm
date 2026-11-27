@@ -14,7 +14,8 @@ namespace VertretungApi.Controllers;
 // =====================================================================
 //  Auth (Phase 1C, erweitert in Phase 2 Schritt 4):
 //    GET  api/auth/optionen                – braucht die App eine Anmeldung? (offen); seit P3 auch Name und
-//                                            Kurzname der Schule und die Dauer von „Angemeldet bleiben“ (201)
+//                                            Kurzname der Schule und die Dauer von „Angemeldet bleiben“ (201);
+//                                            seit PB-1a „probebetrieb“ (Band in der App, 299)
 //    POST api/auth/login                   – Login -> JWT (mit „angemeldet bleiben"); seit P6a bei einem Konto mit
 //                                            zweitem Faktor stattdessen { codeNoetig, vorgang } (5 Minuten)
 //    POST api/auth/login/code              – P6a: { vorgang, code } -> JWT (Code der App bzw. Wiederherstellungscode)
@@ -89,7 +90,9 @@ public class AuthController : ControllerBase
             schule = new { name = w.SchuleName, kurzname = w.SchuleKurzname, app = w.AppName },
             angemeldetBleibenTage = w.AngemeldetBleibenTage,
             // P4a (221): Testdatum der Entwicklung (Band in der App); im Echtbetrieb immer null.
-            testdatum = Testdatum.Wert
+            testdatum = Testdatum.Wert,
+            // PB-1a (299 c): Probebetrieb – Band „Probebetrieb – nur Testdaten“, auch vor der Anmeldung
+            probebetrieb = Betrieb.Probebetrieb
         });
     }
 

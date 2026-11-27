@@ -33,7 +33,9 @@ public sealed record EinstellungDto(
     int? Max,
     int? MaxLaenge,
     string? Einheit,
-    bool Loescht);
+    bool Loescht,
+    string? StandardWert);      // PB-1a (319): Standard laut Katalog („true“/„false“, Zahl, Text; null = berechnet) – für
+                                // den Haken eines Schalters ohne gespeicherten Wert
 
 public sealed record EinstellungKalenderDto(string Schuljahr, DateOnly Start, DateOnly Ende);
 

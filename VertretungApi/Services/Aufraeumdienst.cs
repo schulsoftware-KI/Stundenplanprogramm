@@ -1,14 +1,15 @@
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using VertretungApi.Data;
+using VertretungApi.Helpers;
 using VertretungApi.Model;
 using K = VertretungApi.Services.EinstellungsKatalog;
 
 namespace VertretungApi.Services;
 
 // =====================================================================
-//  P3 – E-1 (Entscheidung 141): Aufräumen nach Fristen – beim Start, täglich um 3 Uhr (Ortszeit des
-//  Servers) und gleich nach einer bestätigten kürzeren Frist in den Einstellungen.
+//  P3 – E-1 (Entscheidung 141): Aufräumen nach Fristen – beim Start, täglich um 3 Uhr (seit PB-1a in der Zeitzone
+//  des Programms, Betrieb:Zeitzone) und gleich nach einer bestätigten kürzeren Frist in den Einstellungen.
 //    - Kontenprotokoll, Download-Protokoll, Einstellungsprotokoll: „Aufbewahrung der Protokolle“
 //      (Datenschutz.ProtokollTage, 0 = nicht löschen; Entscheidung 202: eine Frist für alle drei).
 //    - Klassenbucheinträge samt Verlauf: „Löschfrist der Klassenbucheinträge“ (0 = aus, Entscheidung 39).
@@ -292,13 +293,11 @@ public sealed class Aufraeumdienst : BackgroundService
         _log = log;
     }
 
-    /// <summary>Zeit bis zum nächsten Lauf um 3 Uhr (Ortszeit).</summary>
-    public static TimeSpan BisNaechsterLauf(DateTime jetzt)
-    {
-        var ziel = jetzt.Date.AddHours(3);
-        if (ziel <= jetzt) ziel = ziel.AddDays(1);
-        return ziel - jetzt;
-    }
+    /// <summary>
+    /// Zeit bis zum nächsten Lauf um 3 Uhr in der Zeitzone des Programms (PB-1a, 310 – vorher die Uhr des Rechners; auf
+    /// einem Server mit UTC lief es sonst um 4 bzw. 5 Uhr). An den Umstellungstagen gibt es 3:00 genau einmal.
+    /// </summary>
+    public static TimeSpan BisNaechsterLauf(DateTime jetztUtc) => Ortszeit.BisNaechsteUhrzeit(jetztUtc, 3, Ortszeit.Zone);
 
     protected override async Task ExecuteAsync(CancellationToken stop)
     {
@@ -306,7 +305,7 @@ public sealed class Aufraeumdienst : BackgroundService
         {
             try
             {
-                await Task.Delay(BisNaechsterLauf(DateTime.Now), stop);
+                await Task.Delay(BisNaechsterLauf(DateTime.UtcNow), stop);
             }
             catch (OperationCanceledException)
             {

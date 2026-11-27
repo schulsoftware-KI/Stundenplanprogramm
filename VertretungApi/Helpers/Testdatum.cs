@@ -41,8 +41,8 @@ public static class Testdatum
     /// <summary>Beim Start (Program.cs) – nur in der Entwicklung.</summary>
     public static void Setzen(DateOnly? tag) => Wert = tag;
 
-    /// <summary>„Heute“ der API: das Testdatum bzw. das Datum dieses Rechners.</summary>
-    public static DateOnly Heute() => Wert ?? DateOnly.FromDateTime(DateTime.Now);
+    /// <summary>„Heute“ der API: das Testdatum bzw. das Datum in der Zeitzone des Programms (PB-1a, 310: Helpers/Ortszeit.cs).</summary>
+    public static DateOnly Heute() => Wert ?? Ortszeit.Heute;
 
     public static string? Text => Wert?.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture);
 }

@@ -11,6 +11,7 @@ namespace VertretungApi.Services;
 //
 //  A4 hoch. Kopf auf jeder Seite: Art + Klasse/Kurs, Zeitraum, Schuljahr.
 //  Fuß: „Enthält personenbezogene Daten", erstellt am/von, „Seite x von y".
+//  PB-1a (299 e): im Probebetrieb oben auf jeder Seite der Vermerk „PROBEBETRIEB – Testdaten …“.
 //  Inhalt: Übersicht (Stunden, davon nicht erfasst) → je Unterrichtstag eine
 //  Tabelle (Std · Fach/Lehrkraft · Thema/Hausaufgabe/Einträge · Anwesenheit) →
 //  neue Seite: Fehlzeiten je Schüler (wie die Konferenzübersicht) → ggf.
@@ -63,6 +64,9 @@ public static class KlassenbuchPdf
             {
                 row.RelativeItem().Column(links =>
                 {
+                    // PB-1a (299 e, F11): im Probebetrieb auf jeder Seite – keine Verwechslung mit einem echten Ausdruck
+                    if (VertretungApi.Helpers.Betrieb.Probebetrieb)
+                        links.Item().Text(ExportService.ProbebetriebVermerk).FontSize(9).SemiBold().FontColor(Colors.Red.Darken2);
                     if (!string.IsNullOrWhiteSpace(schule))
                         links.Item().Text(schule).FontSize(8).FontColor(Colors.Grey.Darken1);
                     links.Item().Text($"{k.Art} · {k.Titel}").FontSize(14).SemiBold();

@@ -23,7 +23,8 @@ namespace VertretungApi.Controllers;
 //      POST   api/schild/rueckweg/datei       – Meldung „Datei geschrieben“ (vollständig bzw. Probedatei), ohne Namen;
 //                                              Eintrag im Download-Protokoll (Art „SchildRueckwegDatei“ bzw. „…Probe“)
 //
-//  Pseudodaten nur in der Entwicklung, echte Daten nur im Echtbetrieb (83). Log und Protokoll nennen nur Zahlen.
+//  Pseudodaten nur in der Entwicklung und im Probebetrieb (PB-1a, 299), echte Daten nur im Echtbetrieb (83). Log und
+//  Protokoll nennen nur Zahlen.
 // =====================================================================
 
 [ApiController]
@@ -48,7 +49,7 @@ public class RueckwegController : ControllerBase
         _codes = codes;
     }
 
-    private bool Pseudo => !Betrieb.Produktiv(_env);
+    private bool Pseudo => Betrieb.PseudoErwartet(Betrieb.Produktiv(_env));   // PB-1a (299): auch im Probebetrieb
     private string Akteur => User.Identity?.Name ?? "";
 
     private static ObjectResult Fehler(int code, string text) => new(new { fehler = text }) { StatusCode = code };
@@ -121,10 +122,12 @@ public class RueckwegController : ControllerBase
 
         // Erst prüfen, was ohne Code geht – dann bleibt der Code bei einem Fehler gültig.
         if (dto.Pseudo != Pseudo)
-            return Fehler(409, Pseudo
-                ? "Die API läuft in der Entwicklung und gibt nur Pseudodaten heraus (Entscheidung 83) – für echte Daten den " +
-                  "Server im Echtbetrieb verwenden."
-                : "Die API läuft im Echtbetrieb und gibt keine Pseudodaten heraus (Entscheidung 83).");
+            return Fehler(409, !Pseudo
+                ? "Die API läuft im Echtbetrieb und gibt keine Pseudodaten heraus (Entscheidung 83)."
+                : Betrieb.Probebetrieb
+                    ? "Die API läuft im Probebetrieb und gibt nur Pseudodaten heraus – echte Daten gibt es auf diesem Server nicht."
+                    : "Die API läuft in der Entwicklung und gibt nur Pseudodaten heraus (Entscheidung 83) – für echte Daten den " +
+                      "Server im Echtbetrieb verwenden.");
         string? kennung = await _db.SchildImportProtokolle.AsNoTracking()
             .Where(p => p.IstPseudo == Pseudo && p.SchluesselKennung != null)
             .OrderByDescending(p => p.Zeit).ThenByDescending(p => p.Id)

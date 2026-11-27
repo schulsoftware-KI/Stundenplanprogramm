@@ -6,7 +6,7 @@
 //    Anfragen mit Anmeldung (Authorization) landen nie im Cache.
 //  Neue Version = neuer Cache-Name; alte Caches werden beim Aktivieren gelöscht.
 
-const CACHE = "stundenplan-shell-v29";   // P5c-2 (Löschen ganzer Schuljahre, Befunde A–E)
+const CACHE = "stundenplan-shell-v30";   // PB-1a (Band „Probebetrieb“, Schalter mit Standard, Meldung bei 400)
 const SHELL = [
   "./",
   "index.html",

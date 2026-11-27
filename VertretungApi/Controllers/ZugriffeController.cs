@@ -16,7 +16,7 @@ namespace VertretungApi.Controllers;
 //    GET api/zugriffe/anmeldungen?konto=&ergebnis=&von=&bis=&limit=
 //        konto    – Teil des Benutzernamens; „-“ = unbekannte Konten
 //        ergebnis – „erfolglos“ | „erfolgreich“ | ein Ergebnis aus der Liste (Antwort: ergebnisse)
-//        von, bis – Tage (JJJJ-MM-TT, Ortszeit des Servers), beide einschließlich
+//        von, bis – Tage (JJJJ-MM-TT, Zeitzone des Programms – PB-1a), beide einschließlich
 //
 //  Oben „letzte 24 Stunden: n erfolglos“ (ohne Filter). Kein Löschen von Hand; die Frist ist „Aufbewahrung der
 //  Protokolle“.
@@ -154,9 +154,8 @@ public class ZugriffeController : ControllerBase
         => DateOnly.TryParseExact((text ?? "").Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var t)
             ? t : null;
 
-    /// <summary>Beginn eines Tages (Ortszeit des Servers) als UTC.</summary>
-    private static DateTime Utc(DateOnly tag)
-        => DateTime.SpecifyKind(tag.ToDateTime(TimeOnly.MinValue), DateTimeKind.Local).ToUniversalTime();
+    /// <summary>Beginn eines Tages (Zeitzone des Programms, PB-1a 310) als UTC.</summary>
+    private static DateTime Utc(DateOnly tag) => Ortszeit.TagesbeginnUtc(tag);
 
     private static string? RollenText(string? rolle)
         => Enum.TryParse<BenutzerRolle>(rolle, out var r) && Enum.IsDefined(r) ? KontenService.RollenText(r) : rolle;

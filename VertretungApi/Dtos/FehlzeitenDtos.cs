@@ -127,7 +127,8 @@ public record FzNeStundeDto(
     bool AnwesenheitFehlt,                 // Phase 3.3
     bool ThemaFehlt);
 
-public record FzEntschuldigungNeuDto(DateOnly Von, DateOnly Bis, string Grund);
+/// <summary>PB-1a (318, Befund T6-2): Grund null = ohne Angabe (Schalter „Grund der Entschuldigung erfassen“ aus).</summary>
+public record FzEntschuldigungNeuDto(DateOnly Von, DateOnly Bis, string? Grund);
 
 public record FzBewertungDto(string Bewertung, string? Grund);
 

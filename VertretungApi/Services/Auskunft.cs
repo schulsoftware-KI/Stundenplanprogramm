@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using VertretungApi.Data;
+using VertretungApi.Helpers;
 using VertretungApi.Model;
 
 namespace VertretungApi.Services;
@@ -80,9 +81,9 @@ public static class Auskunft
     internal static string D(DateOnly d) => d.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture);
     internal static string D(DateOnly? d) => d is DateOnly x ? D(x) : Leer;
 
-    /// <summary>UTC → Ortszeit des Servers.</summary>
+    /// <summary>UTC → Zeitzone des Programms (PB-1a, 310; vorher Ortszeit des Servers).</summary>
     internal static string Z(DateTime utc)
-        => DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture);
+        => Ortszeit.AusUtc(utc).ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture);
 
     internal static string Z(DateTime? utc) => utc is DateTime x ? Z(x) : Leer;
 
@@ -92,7 +93,7 @@ public static class Auskunft
             ? $"{Monate[t.Month - 1]} {t.Year}" : schluessel;
 
     internal static string Monat(DateOnly d) => d.ToString("yyyy-MM", CultureInfo.InvariantCulture);
-    internal static string Monat(DateTime utc) => DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime().ToString("yyyy-MM", CultureInfo.InvariantCulture);
+    internal static string Monat(DateTime utc) => Ortszeit.AusUtc(utc).ToString("yyyy-MM", CultureInfo.InvariantCulture);
 
     internal static string N(int n) => n == 0 ? Leer : n.ToString(CultureInfo.InvariantCulture);
 
@@ -519,7 +520,7 @@ public static class Auskunft
         abschnitte.Add(a9);
 
         string untertitel = klasse != null ? $"{name} ({klasse})" : name;
-        return new AuskunftDokument("Auskunft nach Art. 15 DSGVO", untertitel, w.SchuleName, DateTime.Now, erstelltVon, s.IstPseudo,
+        return new AuskunftDokument("Auskunft nach Art. 15 DSGVO", untertitel, w.SchuleName, Ortszeit.Jetzt, erstelltVon, s.IstPseudo,
             abschnitte, BerichtService.SichererName($"Auskunft_Art15_Schueler_{s.Id}_{heute:yyyy-MM-dd}", ".pdf"));
     }
 
@@ -656,7 +657,7 @@ public static class Auskunft
         abschnitte.Add(a6);
 
         string untertitel = $"Konto {k.Benutzername} ({KontenService.RollenText(k.Rolle)})";
-        return new AuskunftDokument("Auskunft nach Art. 15 DSGVO", untertitel, w.SchuleName, DateTime.Now, erstelltVon, false,
+        return new AuskunftDokument("Auskunft nach Art. 15 DSGVO", untertitel, w.SchuleName, Ortszeit.Jetzt, erstelltVon, false,
             abschnitte, BerichtService.SichererName($"Auskunft_Art15_Konto_{k.Id}_{heute:yyyy-MM-dd}", ".pdf"));
     }
 

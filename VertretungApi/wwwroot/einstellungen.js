@@ -232,7 +232,7 @@ function esFeld(e, gruppe) {
   let zeile;
   if (e.typ === "schalter") {
     eingabe = h("input", { type: "checkbox", id });
-    eingabe.checked = e.wert === "true";
+    eingabe.checked = esSchalterAn(e);
     zeile = h("label", { class: "schalter gross es-schalter", for: id }, eingabe, h("span", null, e.titel));
   } else {
     const p = { id, class: "eingabe", autocomplete: "off" };
@@ -360,8 +360,13 @@ function esGruendeBlock() {
 //  Eingaben, Änderungen
 // ---------------------------------------------------------------------
 
+/**
+ * PB-1a (319, Befund T6-1): Ein Schalter ohne gespeicherten Wert (wert = null) steht auf seinem Standard – der Haken
+ * richtet sich nach dem wirksamen Wert (wert ?? standardWert), beim Anzeigen und beim Vergleich „vorher“.
+ */
+const esSchalterAn = (e) => (e.wert ?? e.standardWert) === "true";
 const esWert = (f) => f.e.typ === "schalter" ? (f.eingabe.checked ? "true" : "false") : f.eingabe.value.trim();
-const esWertVorher = (f) => f.e.typ === "schalter" ? (f.e.wert === "true" ? "true" : "false") : (f.e.wert || "");
+const esWertVorher = (f) => f.e.typ === "schalter" ? (esSchalterAn(f.e) ? "true" : "false") : (f.e.wert || "");
 const esWertGeaendert = (f) => esWert(f) !== esWertVorher(f);
 const esDsbGeaendert = (f) => !!f.am && (f.am.value !== (f.e.abgestimmtAm || "") || f.mit.value.trim() !== (f.e.abgestimmtMit || ""));
 const esFeldGeaendert = (f) => esWertGeaendert(f) || esDsbGeaendert(f);
@@ -473,7 +478,8 @@ async function esSpeichern(gruppe) {
         if (es.bestaetigen === gruppe && knopf.isConnected) knopf.disabled = false;
       }, ES_BESTAETIGEN_SPERRE_MS);
       return;
-    } else if (f instanceof HttpFehler && f.status === 400 && daten && daten.felder) {
+    } else if (f instanceof HttpFehler && f.status === 400 && daten && daten.felder && !Array.isArray(daten.felder)) {
+      // (PB-1a, 318: eine Liste „felder“ kommt von der allgemeinen Prüfung der Eingabe – dann nur „fehler“ zeigen)
       let ausserhalb = false;
       for (const [s, text] of Object.entries(daten.felder)) {
         const feld = es.felder.get(s);

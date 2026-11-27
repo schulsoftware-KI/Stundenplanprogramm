@@ -25,24 +25,45 @@ if (args.Length > 0 && args[0].Equals(Notfallzugang.Befehl, StringComparison.Ord
 }
 
 var builder = WebApplication.CreateBuilder(hostArgs);
+bool produktiv = Betrieb.Produktiv(builder.Environment);
+
+// PB-1a (Entscheidung 312): Einstellungsdatei außerhalb des Programmordners (Umgebungsvariable VERTRETUNG_EINSTELLUNGEN,
+// Linux: /etc/vertretung/appsettings.Production.json) – zusätzlich nach den appsettings-Dateien, vor Umgebungsvariablen.
+// Fehlt sie bzw. ist sie kein gültiges JSON, startet die API nicht (auch nicht admin-anlegen: ohne sie fehlt die Datenbank).
+var einstellungsdatei = Betrieb.EinstellungsdateiEinbinden(builder.Configuration, out var dateiFehler);
+if (dateiFehler != null)
+{
+    Betrieb.FehlerAusgeben(new[] { dateiFehler }, produktiv);
+    return 1;
+}
+
+// PB-1a (Entscheidung 310): Zeitzone des Programms – vor allem anderen, auch für admin-anlegen. Ein unbekannter Name ist
+// ein Fehler der Startprüfung (unten); beim Befehl admin-anlegen bleibt dann der Standard Europe/Berlin.
+if (Ortszeit.Lesen(builder.Configuration, out var zonenName, out _) is TimeZoneInfo zone)
+    Ortszeit.Setzen(zone, zonenName);
 
 // Phase 5.1: Echtbetrieb = jede Umgebung außer Development. Ungeeignete Einstellungen
 // (Schlüssel aus dem Repo, Woche:OhneLogin, Standardpasswort der Datenbank …) beenden
 // den Start mit einer Meldung, statt unsicher zu laufen. Der Befehl admin-anlegen braucht
 // nur die Datenbank und wird deshalb nicht geprüft.
-bool produktiv = Betrieb.Produktiv(builder.Environment);
 var pruefung = Betrieb.Pruefen(builder.Configuration, produktiv);
 if (befehl == null && pruefung.Fehler.Count > 0)
 {
-    Betrieb.FehlerAusgeben(pruefung.Fehler);
+    Betrieb.FehlerAusgeben(pruefung.Fehler, produktiv);
     return 1;
 }
+
+// PB-1a (Entscheidung 299): Betriebsart „Probebetrieb“ (nur im Echtbetrieb wirksam) – Pseudodaten statt echter Daten.
+Betrieb.ProbebetriebFestlegen(builder.Configuration, produktiv);
 
 // P4a (Entscheidung 221): Testdatum „Entwicklung:Heute“ – nur in der Entwicklung (Helpers/Testdatum.cs).
 if (!produktiv)
     Testdatum.Setzen(Testdatum.Lesen(builder.Configuration, out _));
 
-builder.Services.AddControllers();
+// PB-1a (Entscheidung 318): ungültige Eingaben (fehlende Pflichtfelder, unlesbares JSON) → 400 mit deutschem Text in
+// „fehler“ und den Feldnamen – ohne die eingegebenen Werte; Warnung im Log (Helpers/UngueltigeEingabe.cs).
+builder.Services.AddControllers()
+    .ConfigureApiBehaviorOptions(o => o.InvalidModelStateResponseFactory = UngueltigeEingabe.Antwort);
 builder.Services.AddOpenApi();   // OpenAPI-Dokument unter /openapi/v1.json (nur Entwicklung)
 
 // P6a (Entscheidung 231): Kestrel ohne „Server“-Kopf; HSTS 365 Tage mit includeSubDomains, ohne preload.
@@ -206,8 +227,15 @@ if (befehl == Notfallzugang.Befehl)
 bool httpsErzwingen = app.Configuration.GetValue("Betrieb:HttpsErzwingen", true);
 app.Logger.LogInformation(
     "Betrieb: {Modus} · Datenbank {Provider} · Proxy {Proxy} · HTTPS erzwingen {Https}",
-    produktiv ? $"Echtbetrieb ({app.Environment.EnvironmentName})" : "Entwicklung",
+    produktiv ? $"{Betrieb.Art(produktiv)} ({app.Environment.EnvironmentName})" : "Entwicklung",
     provider, proxyAktiv ? "an" : "aus", produktiv && httpsErzwingen ? "an" : "aus");
+// PB-1a (299 c, 310, 312): Betriebsart, Zeitzone und Einstellungsdatei sichtbar im Startlog
+if (Betrieb.Probebetrieb)
+    app.Logger.LogWarning("PROBEBETRIEB: Die API nimmt nur Pseudodaten an (SchILD-Import, Rückweg, Jahreswechsel-Import); " +
+                          "sonst gelten alle Regeln des Echtbetriebs. Die App zeigt das Band „Probebetrieb – nur Testdaten“.");
+app.Logger.LogInformation("{Zeitzone}", Ortszeit.StartText());
+if (einstellungsdatei != null)
+    app.Logger.LogInformation("Einstellungsdatei: {Datei} ({Variable})", einstellungsdatei, Betrieb.EinstellungsdateiVariable);
 foreach (var hinweis in pruefung.Hinweise)
     app.Logger.LogWarning("Einstellungen: {Hinweis}", hinweis);
 app.Logger.LogInformation(

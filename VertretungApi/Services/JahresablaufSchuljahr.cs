@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using VertretungApi.Data;
 using VertretungApi.Dtos;
+using VertretungApi.Helpers;
 using VertretungApi.Model;
 using K = VertretungApi.Services.EinstellungsKatalog;
 
@@ -188,7 +189,7 @@ public static partial class Jahresablauf
         punkte.Add(AbschlussPunkt(jahr, kal, zeile, abgeschlossen, heute));
         if (abgeschlossen && zeile != null) punkte.Add(ArchivSprungPunkt(zeile, heute));   // P5c-1 (271)
         punkte.Add(await NeuesJahrPunktAsync(db, w, stand, kalender, zeilen, kal, heute));
-        punkte.Add(await JahreswechselImportPunktAsync(db, stand.NeuesJahr, !produktiv));   // P5b-1 (218, 246)
+        punkte.Add(await JahreswechselImportPunktAsync(db, stand.NeuesJahr, Betrieb.PseudoErwartet(produktiv)));   // P5b-1 (218, 246), PB-1a (299)
         punkte.Add((await ZustaendigkeitPunktAsync(db, w, jahr, stand.NeuesJahr))!);   // P5b-2 (249)
         punkte.AddRange(weiterePunkte);
 
@@ -206,7 +207,7 @@ public static partial class Jahresablauf
     private static string Zeitpunkt(DateTime? am, string? von)
     {
         if (am is not DateTime t) return "";
-        var lokal = DateTime.SpecifyKind(t, DateTimeKind.Utc).ToLocalTime();
+        var lokal = Ortszeit.AusUtc(t);   // PB-1a (310)
         return $"am {lokal.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)}" + (string.IsNullOrWhiteSpace(von) ? "" : $" von {von}");
     }
 
@@ -443,7 +444,7 @@ public static partial class Jahresablauf
                 $"Noch kein SchILD-Import für {neu}{art}. Nach „Schuljahr {neu} vorbereiten…“: in SchILD das neue Schuljahr " +
                 $"exportieren, dann im Desktop (Wocheneditor mit dem Schuljahr {neu}) „SchILD-Daten…“. Die Vorschau vergleicht " +
                 $"mit {Verschieben(neu, -1)}: versetzt, wiederholt, Abgänge, fehlt im Export.", Ziele: ziel);
-        var am = DateOnly.FromDateTime(DateTime.SpecifyKind(erster.Zeit, DateTimeKind.Utc).ToLocalTime());
+        var am = Ortszeit.TagAusUtc(erster.Zeit);
         return new JaPunktDto("jahreswechselImport", titel, Gruen,
             $"Import Nr. {erster.Id} vom {D(am)}{art}, gilt ab {D(erster.GiltAb)}: neu {erster.Neu}, Abgänge {erster.Abgaenge}, " +
             $"versetzt bzw. Klassenwechsel {erster.Klassenwechsel}." +

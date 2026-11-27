@@ -23,7 +23,7 @@ namespace VertretungApi.Services;
 //  Schalter „Leseprotokoll“ (Einstellungen → Datenschutz, Standard aus, 233) – gelesen aus dem Zwischenspeicher der
 //  Einstellungen. Geschrieben wird in einem eigenen DbContext (berührt die Anfrage nicht) und nacheinander (eine
 //  Sperre – sonst entstünden bei gleichzeitigen Aufrufen doppelte Zeilen). Kann ein Eintrag nicht geschrieben werden,
-//  geht die Ansicht trotzdem (Warnung im Log, höchstens alle 5 Minuten). Tag = Ortszeit des Servers (echte Uhr, nicht
+//  geht die Ansicht trotzdem (Warnung im Log, höchstens alle 5 Minuten). Tag = Zeitzone des Programms (PB-1a; echte Uhr, nicht
 //  das Testdatum – wie die übrigen Zeitstempel). Frist: „Aufbewahrung der Protokolle“ (Aufraeumdienst).
 // =====================================================================
 
@@ -199,7 +199,7 @@ public sealed class Leseprotokoll
 
     private async Task SchreibenAsync(AppDbContext db, int kontoId, string akteur, string rolle, LeseZugriff z, DateTime jetzt)
     {
-        var tag = DateOnly.FromDateTime(jetzt.ToLocalTime());
+        var tag = Ortszeit.TagAusUtc(jetzt);   // PB-1a (310): Tag in der Zeitzone des Programms
         string gegenstand = Kuerzen(z.Gegenstand, MaxGegenstand);
         int? schuelerId = z.SchuelerId;
         string ansicht = z.Ansicht;
@@ -266,8 +266,8 @@ public sealed class Leseprotokoll
     //  Frist (Aufräumen) – „Aufbewahrung der Protokolle“
     // -----------------------------------------------------------------
 
-    /// <summary>Erster Tag, der bei dieser Frist bleibt (Ortszeit des Servers, echte Uhr).</summary>
-    public static DateOnly Grenze(int tage) => DateOnly.FromDateTime(DateTime.Now).AddDays(-tage);
+    /// <summary>Erster Tag, der bei dieser Frist bleibt (Zeitzone des Programms, echte Uhr – PB-1a, 310).</summary>
+    public static DateOnly Grenze(int tage) => Ortszeit.Heute.AddDays(-tage);
 
     /// <summary>Einträge älter als die Frist löschen (0 = nicht löschen).</summary>
     public static int Aufraeumen(AppDbContext db, int tage)

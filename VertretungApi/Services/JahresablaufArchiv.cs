@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using VertretungApi.Data;
 using VertretungApi.Dtos;
+using VertretungApi.Helpers;
 using VertretungApi.Model;
 using K = VertretungApi.Services.EinstellungsKatalog;
 
@@ -109,7 +110,7 @@ public static partial class Jahresablauf
     /// <summary>Text zum Auftrag im Hintergrund, wenn er zu diesem Schuljahr gehört.</summary>
     private static string AuftragText(JaArchivAuftragDto a)
     {
-        string start = DateTime.SpecifyKind(a.Start, DateTimeKind.Utc).ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture);
+        string start = Ortszeit.AusUtc(a.Start).ToString("HH:mm", CultureInfo.InvariantCulture);
         return a.Status switch
         {
             ArchivAuftraege.Laeuft => $" Gerade: Der Archiv-Export wird erstellt ({a.Schritt}; gestartet {start} Uhr von {a.Akteur}).",
@@ -122,7 +123,7 @@ public static partial class Jahresablauf
     }
 
     private static string Uhr(DateTime? utc)
-        => utc is DateTime t ? DateTime.SpecifyKind(t, DateTimeKind.Utc).ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture) : "";
+        => utc is DateTime t ? Ortszeit.AusUtc(t).ToString("HH:mm", CultureInfo.InvariantCulture) : "";
 
     /// <summary>Punkt eines Schuljahres in der Karte „Archiv und Fristen“ (ohne Datenbank, für den Nachbau prüfbar).</summary>
     /// <param name="frist">P5c-2: Frist „Klassenbuchdaten ganzer Schuljahre behalten“ für dieses Jahr (null = wie „aus“).</param>
@@ -357,7 +358,7 @@ public static partial class Jahresablauf
             $"Archiv-Export des Schuljahres {jahr}",
             "Schule: " + (schule.Length > 0 ? schule : "(kein Name eingetragen)") + (kurz.Length > 0 ? $" ({kurz})" : ""),
             $"Zeitraum: {D(kal.Start)} – {D(ExportService.BisHoechstensHeute(kal.Ende))} (laut Kalender)",
-            $"Erstellt am {DateTime.Now.ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture)} von {akteur}",
+            $"Erstellt am {Ortszeit.Jetzt.ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture)} von {akteur}",
             schuelerEintraege ? "Schülereinträge: aufgenommen" : "Schülereinträge: nicht aufgenommen",
             "",
             "Verschlüsselt mit AES-256 (WinZip-AES). Öffnen mit 7-Zip, WinZip oder WinRAR und dem Kennwort – der Windows-",
@@ -368,7 +369,7 @@ public static partial class Jahresablauf
             "VO-DV I); danach vernichtet die Schule die Datei selbst. Namen stehen nur in den PDF- und CSV-Dateien.",
         };
         string name = BerichtService.SichererName(
-            $"Archiv_{kurz}_{sj}_{DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}", ".zip");
+            $"Archiv_{kurz}_{sj}_{Ortszeit.Jetzt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}", ".zip");
         return (null, new ArchivPlan(ArchivArt.Export, jahr, kal.Start, kal.Ende, schuelerEintraege, name,
             schule.Length > 0 ? schule : null, kopf, csv));
     }

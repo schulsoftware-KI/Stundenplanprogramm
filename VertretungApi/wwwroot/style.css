@@ -1778,6 +1778,18 @@ main.klassenbuch > .hi-karte, main.fehlzeiten > .hi-karte { margin-top: 2px; }
   border-bottom: 2px solid var(--verlegung);
   overflow-wrap: anywhere;
 }
+/* PB-1a (Entscheidung 299): Band „Probebetrieb – nur Testdaten“ (anders als das Testdatum: violett, immer oben) */
+.probe-band {
+  margin: 0;
+  padding: 6px 16px;
+  font-size: 0.86rem;
+  color: var(--tinte);
+  background: repeating-linear-gradient(135deg, var(--sonst-t) 0 14px, var(--klausur-t) 14px 28px);
+  border-bottom: 2px solid var(--sonst);
+  overflow-wrap: anywhere;
+}
+.probe-band strong { font-weight: 750; }
+.probe-band-zusatz { font-weight: 500; }
 .ja-stand { margin: 8px 0 0 0; font-size: 0.9rem; font-weight: 650; color: var(--leise); overflow-wrap: anywhere; }
 .ja-karten { display: grid; gap: 12px; margin-top: 10px; }
 .ja-karte { padding: 18px 16px 16px 16px; border-left-width: 6px; }

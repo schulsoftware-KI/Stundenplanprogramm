@@ -5,6 +5,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using VertretungApi.Data;
 using VertretungApi.Dtos;
+using VertretungApi.Helpers;
 using VertretungApi.Model;
 
 namespace VertretungApi.Services;
@@ -382,12 +383,14 @@ public static partial class Jahresablauf
                 await QZustaendigkeiten().CountAsync());
     }
 
-    /// <summary>Zeitpunkt der Verlaufszeilen ohne Stunde: 01.08. (Ortszeit) des ersten bis 01.08. des zweiten Jahres, als UTC.</summary>
+    /// <summary>
+    /// Zeitpunkt der Verlaufszeilen ohne Stunde: 01.08. (0 Uhr in der Zeitzone des Programms, PB-1a 310) des ersten bis
+    /// 01.08. des zweiten Jahres, als UTC.
+    /// </summary>
     private static (DateTime Ab, DateTime Bis) VerlaufZeitraum(string sj)
     {
         int a = EndeNachDatum(sj).Year - 1;
-        return (new DateTime(a, 8, 1, 0, 0, 0, DateTimeKind.Local).ToUniversalTime(),
-                new DateTime(a + 1, 8, 1, 0, 0, 0, DateTimeKind.Local).ToUniversalTime());
+        return (Ortszeit.TagesbeginnUtc(new DateOnly(a, 8, 1)), Ortszeit.TagesbeginnUtc(new DateOnly(a + 1, 8, 1)));
     }
 
     // -----------------------------------------------------------------
@@ -435,7 +438,7 @@ public static partial class Jahresablauf
     {
         string jahr = p.Schuljahr;
         var z = p.Zeile;
-        var (vAb, vBis) = (DateOnly.FromDateTime(p.VerlaufAb.ToLocalTime()), DateOnly.FromDateTime(p.VerlaufBis.ToLocalTime()).AddDays(-1));
+        var (vAb, vBis) = (Ortszeit.TagAusUtc(p.VerlaufAb), Ortszeit.TagAusUtc(p.VerlaufBis).AddDays(-1));
         var hinweise = new List<string>
         {
             $"Zeitraum: Kalender {D(p.Von)} – {D(p.Bis)}. Entschuldigungen, die darüber hinausreichen, behalten den Teil " +

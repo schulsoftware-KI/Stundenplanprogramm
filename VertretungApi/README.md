@@ -51,6 +51,11 @@ API dann unter `http://localhost:5080`, OpenAPI-Doc unter `http://localhost:5080
   Startwerte**: Beim ersten Start mit P3 übernimmt die API sie in die Schuleinstellungen; danach gilt, was der Admin in
   der App einstellt (Kontomenü → „Einstellungen“), und die Dateiwerte werden ignoriert (Hinweis im Log, wenn sie abweichen).
 - `Betrieb:HttpsErzwingen` (`true`) – im Echtbetrieb HSTS und Umleitung auf https (Phase 5.1).
+- `Betrieb:Zeitzone` (`Europe/Berlin`) – Zone, in der die API „heute“, Fristen, Uhrzeiten in PDFs/Archiven und das
+  Aufräumen um 3 Uhr rechnet (PB-1a, unabhängig von der Uhr des Servers).
+- `Betrieb:Probebetrieb` (`false`) – Testserver mit Pseudodaten (PB-1a, nur im Echtbetrieb wirksam).
+- Umgebungsvariable `VERTRETUNG_EINSTELLUNGEN` – Pfad einer zusätzlichen Einstellungsdatei außerhalb des
+  Programmordners (PB-1a). Alle drei: Abschnitt „Probebetrieb, Zeitzone, Einstellungsdatei (PB-1a)“.
 - `Proxy:Aktiv` (`false`) / `Proxy:BekannteProxys` (`[]`) – hinter einem Reverse Proxy die echte
   Absenderadresse übernehmen (Phase 5.1).
 - `Cors:Herkuenfte` (`[]`) – im Echtbetrieb erlaubte fremde Herkünfte (normalerweise keine).
@@ -702,6 +707,55 @@ pg_restore -U vertretung --no-owner --no-privileges -d vertretung C:\Temp\rueck\
 ```
 (Linux: `gpg --decrypt datei.dump.gpg > sicherung.dump`, dann dieselben drei Befehle.) Danach die Datei
 `sicherung.dump` löschen und die API starten.
+
+## Probebetrieb, Zeitzone, Einstellungsdatei (PB-1a)
+
+### Betriebsart „Probebetrieb“ (Entscheidung 299)
+
+Für einen **Testserver mit Pseudodaten** (z. B. bei Hostinger): `Betrieb:Probebetrieb = true` in der Einstellungsdatei
+bzw. `Betrieb__Probebetrieb=true`. Wirkt **nur im Echtbetrieb** (in der Entwicklung ein Hinweis im Log – dort gelten ohnehin
+Pseudodaten); ein anderer Wert als `true`/`false` beendet den Start.
+
+| | Entwicklung | Echtbetrieb | Probebetrieb |
+|---|---|---|---|
+| SchILD-Import, Status für den Desktop, Rückweg, Jahreswechsel-Import | nur Pseudodaten | nur echte Daten | **nur Pseudodaten** |
+| Startprüfung, Schlüssel, HTTPS, TOTP-Pflicht für Admins | – | ja | ja |
+| Seeds, Testkonten, Testdatum, „Seed-Schüler entfernen“, `Woche:OhneLogin` | ja | gesperrt | gesperrt |
+| Band in der App | Testdatum (falls gesetzt) | – | **„Probebetrieb – nur Testdaten“** (auch vor der Anmeldung) |
+| Klassenbuch-PDF, Jahresarchiv/Archiv-Export, Fehlzeiten-CSV | – | – | Vermerk „PROBEBETRIEB – Testdaten …“ |
+
+Die Frage „Pseudo oder echt?“ beantwortet nur `Betrieb.PseudoErwartet()` (`Helpers/Betrieb.cs`). Startlog: „Betrieb:
+Probebetrieb (Production) · …“ und eine Warnung „PROBEBETRIEB: …“; `GET /api/auth/optionen` liefert `probebetrieb: true`,
+der SchILD-Status für den Desktop `betrieb: "Probebetrieb"`. Die Sperre „Datenbank enthält Pseudo-Schüler“ verhindert
+weiterhin jeden echten Import. Daten kommen nur über den echten Weg (Grundplan, Vertretungen, SchILD-Pseudo-Import, Konten
+aus SchILD), das erste Admin-Konto über `admin-anlegen`.
+
+### Zeitzone (Entscheidung 310)
+
+`Betrieb:Zeitzone` (Standard `Europe/Berlin`; IANA-Name, unter Windows geht auch „W. Europe Standard Time“). Die API
+rechnet damit „heute“ (ohne Testdatum), Tagesgrenzen der Fristen, den Tag einer Zeile im Leseprotokoll, Uhrzeiten in
+PDFs, Archiven und Texten, Dateinamen mit Datum und das tägliche **Aufräumen um 3 Uhr** – auch wenn der Server auf UTC
+steht. Gespeichert wird weiter UTC. Ein unbekannter Name beendet den Start (auch in der Entwicklung). Startlog:
+„Zeitzone Europe/Berlin · jetzt 27.11.2026 18:05 · Uhr des Rechners: …“ (mit „weicht ab“, wenn die Uhr des Rechners eine
+andere Zone hat). Alles läuft über `Helpers/Ortszeit.cs`; außer dort gibt es im Programm kein `DateTime.Now` und kein
+`ToLocalTime()`. Ausprobieren: `$env:Betrieb__Zeitzone = "Asia/Tokyo"` vor `dotnet run`.
+
+### Einstellungsdatei außerhalb des Programmordners (Entscheidung 312)
+
+Ist die Umgebungsvariable `VERTRETUNG_EINSTELLUNGEN` gesetzt (voller Pfad, z. B. `/etc/vertretung/appsettings.Production.json`),
+liest die API diese JSON-Datei **zusätzlich**: nach `appsettings.json` und `appsettings.<Umgebung>.json`, vor
+Umgebungsvariablen und Befehlszeile. Reihenfolge (spätere gewinnt): `appsettings.json` → `appsettings.Production.json`
+(Programmordner) → Datei aus `VERTRETUNG_EINSTELLUNGEN` → Umgebungsvariablen → Befehlszeile. Fehlt die Datei oder ist sie
+kein gültiges JSON, startet die API nicht (auch `admin-anlegen` nicht). Startlog: „Einstellungsdatei: … (VERTRETUNG_EINSTELLUNGEN)“.
+So bleibt die Datei auf dem Server bei jedem Update, wo sie ist; unter Windows ändert sich ohne die Variable nichts.
+
+### Ungültige Eingaben (Entscheidung 318)
+
+Fehlt ein Pflichtfeld, ist das JSON unlesbar oder passt ein Wert nicht (Datum, Zahl), antwortet die API für alle Aufrufer
+mit **400** und `{ "fehler": "Die Angaben sind unvollständig oder ungültig (grund). Bitte die Seite neu laden; …",
+"felder": ["grund"] }` (unlesbar: „Die Angaben konnten nicht gelesen werden …“) – ohne die eingegebenen Werte. Im Log
+eine Warnung „Ungültige Eingabe: POST api/… – Felder: …“ (Pfadvorlage, keine Werte). App und Desktop zeigen `fehler`.
+Eingabe-DTOs: Wo `null` „keine Angabe“ heißt, ist das Feld nullbar (z. B. `FzEntschuldigungNeuDto.Grund`), sonst Pflicht.
 
 ## SchILD-Daten prüfen und Pseudo-Export (Phase 5.2a, Desktop)
 

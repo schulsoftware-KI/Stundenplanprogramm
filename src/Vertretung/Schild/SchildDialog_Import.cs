@@ -141,8 +141,9 @@ namespace Stundenplan_V2.Vertretung
             "Ohne ihn erkennt der nächste Import die Schüler nicht wieder. Deshalb nach dem ersten echten Import „Schlüssel " +
             "sichern…“: Datei mit Kennwort auf einen USB-Stick bzw. in den Tresor, das Kennwort getrennt davon. Auf einem neuen " +
             "Rechner oder für einen anderen Windows-Benutzer „Schlüssel einlesen…“. Pseudodaten haben einen eigenen Schlüssel.\n\n" +
-            "Wohin? Die Entwicklungs-API nimmt nur Pseudodaten, der Echtbetrieb nur echte Daten; echte Daten gehen nur über " +
-            "HTTPS. Server-Adresse und API-Key: „Online-Einstellungen…“ (dieselben wie für „Online veröffentlichen“). In der " +
+            "Wohin? Entwicklung und Probebetrieb (Testserver) nehmen nur Pseudodaten, der Echtbetrieb nur echte Daten; echte " +
+            "Daten gehen nur über HTTPS. Verbindung und Schlüssel: „Server verbinden…“ (dieselben wie für „Online " +
+            "veröffentlichen“; oben steht „veröffentlicht nach: …“). In der " +
             "Entwicklung sperrt die Vorschau, solange Schüler aus dem Seed in der Datenbank stehen – „Seed-Schüler entfernen…“ " +
             "löscht sie samt Klassenbuchdaten.\n\n" +
             "„Bericht kopieren“ enthält nur Zahlen, Kurs- und Gruppenbezeichnungen – keine Namen. Die Namen der Vorschau bleiben " +
@@ -300,7 +301,8 @@ namespace Stundenplan_V2.Vertretung
             BtnImSichern.IsEnabled = an && _export != null && SchildSchluessel.Vorhanden(pseudo);
             DpImGiltAb.IsEnabled = an && vor == null;
             var st = _imStatus;
-            BtnImSeed.Visibility = st != null && st.Pseudo && st.Schueler.Seed + st.Schueler.PseudoImportiert > 0
+            // PB-2 (299 d, F12): nur in der Entwicklung – im Probebetrieb lehnt der Server ab (st.Pseudo gilt dort auch).
+            BtnImSeed.Visibility = st != null && st.IstEntwicklung && st.Schueler.Seed + st.Schueler.PseudoImportiert > 0
                 ? Visibility.Visible : Visibility.Collapsed;
             BtnImSeed.IsEnabled = an;
             bool bestaetigbar = DgImport.ItemsSource is IEnumerable<SchildImportZeile> sichtbar && sichtbar.Any(x => x.Bestaetigbar);
@@ -504,25 +506,15 @@ namespace Stundenplan_V2.Vertretung
 
         private SchildImportClient? ImClient()
         {
-            var einst = OnlineSync.LadeEinstellungen(_planOrdner);
-            if (string.IsNullOrWhiteSpace(einst.BaseUrl))
-            {
-                var neu = OnlineSync.FrageEinstellungen(this, einst, _planOrdner);
-                if (neu == null) return null;
-                try { OnlineSync.SpeichereEinstellungen(_planOrdner, neu); }
-                catch (Exception ex)
-                {
-                    MessageBox.Show(this, "Die Online-Einstellungen konnten nicht gespeichert werden:\n\n" + ex.Message,
-                        "SchILD-Import", MessageBoxButton.OK, MessageBoxImage.Warning);
-                }
-                einst = neu;
-            }
+            // PB-2 (302): aktive Verbindung (Umzug des Schlüssels, „Server verbinden…“, Prüfung der Adresse)
+            var einst = OnlineSync.Verbindung(this, _planOrdner);
+            ZeigeZiel();
+            if (einst == null) return null;
             var client = new SchildImportClient(einst, _planOrdner);
             if (client.AdresseUri == null)
             {
                 MessageBox.Show(this, $"Die Server-Adresse „{client.Adresse}“ ist ungültig (Beispiel: https://klassenbuch.schule.de " +
-                                      "bzw. in der Entwicklung http://localhost:5080).\n\nEinstellungen: " +
-                                      OnlineSync.EinstellungsPfad(_planOrdner),
+                                      "bzw. in der Entwicklung http://localhost:5080).\n\n" + OnlineSync.OrtText(einst),
                     "SchILD-Import", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return null;
             }
@@ -557,18 +549,13 @@ namespace Stundenplan_V2.Vertretung
         private void BtnImEinstellungen_Click(object sender, RoutedEventArgs e)
         {
             if (_laeuft) return;
-            var neu = OnlineSync.FrageEinstellungen(this, OnlineSync.LadeEinstellungen(_planOrdner), _planOrdner);
+            // PB-2 (302): „Server verbinden…“ statt „Online-Einstellungen…“
+            var neu = OnlineSync.ServerVerbinden(this, _planOrdner);
+            ZeigeZiel();
             if (neu == null) return;
-            try { OnlineSync.SpeichereEinstellungen(_planOrdner, neu); }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, "Speichern fehlgeschlagen:\n\n" + ex.Message, "Online-Einstellungen",
-                    MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
             _imStatus = null;
             TxtImServer.Text = "Server: noch nicht abgefragt.";
-            ImVorschauVerwerfen("Online-Einstellungen geändert – bitte die Vorschau neu berechnen.");
+            ImVorschauVerwerfen("Verbindung geändert – bitte die Vorschau neu berechnen.");
         }
 
         private void DpImGiltAb_SelectedDateChanged(object? sender, SelectionChangedEventArgs e)
@@ -684,7 +671,7 @@ namespace Stundenplan_V2.Vertretung
             var uri = client.AdresseUri!;
             if (!pseudo && uri.Scheme != Uri.UriSchemeHttps && !OnlineVerbindung.IstLokal(uri))
                 return $"Echte Schülerdaten werden nur über HTTPS gesendet – die Server-Adresse „{client.Adresse}“ beginnt mit " +
-                       "http://. Bitte die https://-Adresse des Servers in die Online-Einstellungen eintragen.";
+                       "http://. Bitte die https://-Adresse des Servers unter „Server verbinden…“ eintragen.";
 
             // 1. Status
             var st = await client.StatusAsync(ImSchuljahr(), erg.Abschnitt);
@@ -693,11 +680,11 @@ namespace Stundenplan_V2.Vertretung
 
             // 2. Art der Daten passt zur API (83) – sonst gehen keine Namen hinaus.
             if (st.Pseudo && !pseudo)
-                return "Die API läuft in der Entwicklung und nimmt nur Pseudodaten an (Entscheidung 83). Echte SchILD-Daten " +
+                return $"Die API läuft {st.ImBetrieb} und nimmt nur Pseudodaten an (Entscheidung 83). Echte SchILD-Daten " +
                        "werden deshalb nicht gesendet – nur an den Server im Echtbetrieb.";
             if (!st.Pseudo && pseudo)
-                return "Die API läuft im Echtbetrieb und nimmt keine Pseudodaten an (Entscheidung 83). Pseudodaten nur an die " +
-                       "Entwicklungs-API senden.";
+                return $"Die API läuft {st.ImBetrieb} und nimmt keine Pseudodaten an (Entscheidung 83). Pseudodaten nur an die " +
+                       "Entwicklungs-API bzw. den Testserver (Probebetrieb) senden.";
             if (st.Kalender == null)
                 return $"Für das Schuljahr „{ImSchuljahr()}“ gibt es in der API keinen Kalender" +
                        (st.Schuljahre.Count > 0 ? $" (vorhanden: {string.Join(", ", st.Schuljahre)})" : "") +
@@ -744,7 +731,7 @@ namespace Stundenplan_V2.Vertretung
                            $"stehen aber schon {st.Schueler.Importiert} importierte Schüler. Ohne den bisherigen Schlüssel erkennt " +
                            "der Import sie nicht wieder (alle wären „neu“). Abhilfe: „Schlüssel einlesen…“ mit der Sicherung vom " +
                            "bisherigen Rechner bzw. Benutzer." + neuZu +
-                           (st.Pseudo ? " In der Entwicklung geht auch „Seed-Schüler entfernen…“ – das entfernt auch die früher " +
+                           (st.IstEntwicklung ? " In der Entwicklung geht auch „Seed-Schüler entfernen…“ – das entfernt auch die früher " +
                                         "importierten Pseudo-Schüler." : "");
                 // 5.2c-1 (189): ein anderer Schlüssel als beim letzten Import würde niemanden wiedererkennen.
                 if (_imSchluessel != null && st.Schueler.Importiert > 0 && st.KennungLetzterImport != null
@@ -1226,7 +1213,7 @@ namespace Stundenplan_V2.Vertretung
         private async void BtnImSeed_Click(object sender, RoutedEventArgs e)
         {
             var st = _imStatus;
-            if (_laeuft || st == null || !st.Pseudo) return;
+            if (_laeuft || st == null || !st.IstEntwicklung) return;   // PB-2 (299 d)
             if (MessageBox.Show(this,
                     "Nur Entwicklung: In der Entwicklungsdatenbank alle Pseudo-Schüler entfernen – " +
                     $"{st.Schueler.Seed} aus dem Seed und {st.Schueler.PseudoImportiert} früher importierte – samt ihren " +

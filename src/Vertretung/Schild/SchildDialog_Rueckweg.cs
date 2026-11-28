@@ -316,7 +316,7 @@ namespace Stundenplan_V2.Vertretung
             if (!pseudo && uri.Scheme != Uri.UriSchemeHttps && !OnlineVerbindung.IstLokal(uri))
             {
                 MessageBox.Show(this, $"Echte Fehlstunden werden nur über HTTPS abgeholt – die Server-Adresse „{client.Adresse}“ " +
-                                      "beginnt mit http://. Bitte die https://-Adresse in die Online-Einstellungen eintragen.",
+                                      "beginnt mit http://. Bitte die https://-Adresse unter „Server verbinden…“ eintragen.",
                     "Rückweg nach SchILD", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
@@ -331,9 +331,9 @@ namespace Stundenplan_V2.Vertretung
                 ImZeigeStatus(st, client.Adresse);
                 if (st.Pseudo != pseudo)
                     fehler = st.Pseudo
-                        ? "Die API läuft in der Entwicklung und gibt nur Pseudodaten heraus (Entscheidung 83) – für echte Daten den " +
+                        ? $"Die API läuft {st.ImBetrieb} und gibt nur Pseudodaten heraus (Entscheidung 83) – für echte Daten den " +
                           "Server im Echtbetrieb verwenden bzw. hier einen Pseudo-Export wählen."
-                        : "Die API läuft im Echtbetrieb und gibt keine Pseudodaten heraus – bitte den echten SchILD-Export wählen.";
+                        : $"Die API läuft {st.ImBetrieb} und gibt keine Pseudodaten heraus – bitte den echten SchILD-Export wählen.";
                 else if (st.KennungLetzterImport != null &&
                          !string.Equals(k.Kennung, st.KennungLetzterImport, StringComparison.OrdinalIgnoreCase))
                     fehler = $"Der Schlüssel dieses Rechners (Kennung {k.Kennung}) ist ein anderer als beim letzten Import (Kennung " +

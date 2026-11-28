@@ -568,9 +568,10 @@ Zufälligen Schlüssel erzeugen (PowerShell, zweimal ausführen – je einer fü
 ```powershell
 $b = New-Object byte[] 48; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
 ```
-Den `Api:PushKey` im Desktop unter „Online-Einstellungen…“ eintragen. Das Fenster zeigt, in welcher Datei die
-Einstellungen stehen (`vertretung_online.json` neben der geöffneten Plandatei – jede Kopie der Plandatei hat ihre
-eigene), mit Knopf „Ordner öffnen“. Bei „Server 401“ bzw. „Server 404“ nennt die Fehlermeldung diesen Pfad.
+Den `Api:PushKey` im Desktop unter „Server verbinden…“ eintragen (seit PB-2; Abschnitt „Desktop: Server verbinden (PB-2)“).
+Adressen, Auswahl und Quelle stehen in `vertretung_online.json` neben der geöffneten Plandatei (jede Kopie der Plandatei hat
+ihre eigene), der Schlüssel verschlüsselt im Benutzerprofil. Bei „Server 401“ bzw. „Server 404“ nennt die Fehlermeldung die
+aktive Verbindung.
 
 ### Migrations (PostgreSQL)
 
@@ -673,7 +674,7 @@ Echtbetrieb wird er nach dem eigenen Passwort neu eingerichtet.
   steht einmal eine Warnung im Log. Die Umleitung von http auf https übernimmt am besten der Proxy (sonst
   `"https_port": 443` setzen).
 - `AllowedHosts` auf die eigene Adresse beschränken, z. B. `"klassenbuch.meine-schule.de;localhost"`.
-- Der Desktop pusht an die https-Adresse („Online-Einstellungen…“).
+- Der Desktop pusht an die https-Adresse („Server verbinden…“; http:// nimmt er nur für localhost).
 
 ### Logs
 
@@ -783,6 +784,33 @@ bash installieren.sh
   schluessel, adresse, ssh-passwort-aus).
 - Units: `vertretung.service`, `vertretung-sicherung.service/.timer`, `vertretung-pruefung.service/.timer`; Vorlage
   `Caddyfile.vorlage`; gemeinsame Teile `gemeinsam.sh`.
+
+## Desktop: Server verbinden (PB-2)
+
+Knopf **„Server verbinden…“** im Wocheneditor und im SchILD-Fenster (Reiter „Import“; vorher „Online-Einstellungen…“).
+Code: `src/Vertretung/ServerVerbindenDialog.cs`, `OnlineSync_Verbindung.cs`, `PushSchluessel.cs`. Keine API-Änderung.
+
+- **Zwei Verbindungen**, eine aktiv: **„Entwicklung“** (Vorgabe `http://localhost:5080`; ohne gespeicherten Schlüssel gilt
+  `CHANGE-ME-dev-key`) und **„Testserver“** (Adresse + Push-Schlüssel, auf dem Server `vertretung schluessel`). „Testserver“
+  lässt sich nur mit Adresse und Schlüssel speichern.
+- **Schlüssel** verdeckt eingeben (leer = der gespeicherte bleibt); gespeichert mit DPAPI für diesen Windows-Benutzer unter
+  `%LOCALAPPDATA%\Stundenplan\push_entwicklung.dat` bzw. `push_testserver.dat`, **gebunden an die Adresse**: Zeigt die
+  Verbindung auf eine andere Adresse, wird er nicht gesendet. Nie in einer Meldung oder im Log.
+- **`vertretung_online.json`** enthält nur noch Adressen, Auswahl und Quelle (`"Format": 2`, `"Aktiv"`, `"Verbindungen"`,
+  `"BaseUrl"` = Adresse der aktiven Verbindung für ältere Desktop-Stände, `"Quelle"`). Steht in einer älteren Datei noch ein
+  `"ApiKey"`, bietet der Desktop beim ersten Senden bzw. bei „Server verbinden…“ den **Umzug** an (localhost → „Entwicklung“,
+  sonst „Testserver“); danach steht er nicht mehr in der Datei. „Nein“ gilt bis zum nächsten Programmstart.
+- **http:// nur für diesen Rechner** (localhost, 127.0.0.1, ::1), sonst nur https://; Anfragen mit Schlüssel folgen keiner
+  Weiterleitung (Meldung „Server leitet weiter …“).
+- **„Verbindung testen“:** 1. `GET /api/gesundheit` (ohne Schlüssel), 2. `GET /api/auth/optionen` (Name der Schule),
+  3. `GET /api/schild/status` mit Schlüssel (gültig bzw. 401), 4. Betriebsart (Entwicklung | Probebetrieb | Echtbetrieb) mit
+  Hinweis, wenn sie nicht zur Verbindung passt. Der Schlüssel geht erst hinaus, wenn 1. geklappt hat.
+- **Anzeige „veröffentlicht nach: …“** im Wocheneditor, SchILD- und Untis-Fenster (Testserver violett); aktualisiert beim
+  Aktivieren des Fensters. „Ordner beobachten“ (Untis) meldet eine Umstellung im Protokoll und hält Tage, wenn Adresse oder
+  Schlüssel fehlen.
+- **„Seed-Schüler entfernen…“** erscheint nur, wenn der Status `betrieb = "Entwicklung"` meldet (nicht im Probebetrieb, 299 d).
+- **Rückweg:** ein älterer Desktop liest `BaseUrl` und `Quelle`, findet aber keinen Schlüssel (401) – dann die gesicherte
+  alte `vertretung_online.json` zurückkopieren. Die DPAPI-Dateien stören ihn nicht.
 
 ## SchILD-Daten prüfen und Pseudo-Export (Phase 5.2a, Desktop)
 
@@ -947,7 +975,7 @@ den Reiter **„Import“**. Code: `src/Vertretung/Schild/SchildDialog_Import.cs
 `SchildImportClient.cs`; Verbindungsmeldungen `src/Vertretung/OnlineVerbindung.cs`. Keine API- und keine Schemaänderung.
 
 - **Voraussetzungen:** Prüflauf ohne Fehler, Zuordnung möglich und gespeichert, Abschnitt im Schuljahr des Wocheneditors.
-  Server-Adresse und API-Key wie beim Veröffentlichen (`vertretung_online.json`, Knopf „Online-Einstellungen…“).
+  Server-Adresse und Schlüssel wie beim Veröffentlichen (aktive Verbindung, Knopf „Server verbinden…“).
 - **„Vorschau berechnen“:** fragt zuerst `GET /api/schild/status` ab. **Passt die Art der Daten nicht zur API
   (Entwicklung nur Pseudodaten, Echtbetrieb nur echte), sendet der Desktop nichts** – echte Namen gehen nie an eine
   Entwicklungs-API; echte Daten nur über HTTPS (außer an `localhost`). „Änderungen gelten ab“ = Vorschlag der API, solange
@@ -1530,7 +1558,7 @@ oben unter „Plan“ gewählte Plan-Spalte. Code: `src/Vertretung/Untis/`, Konz
   in der App komplett ersetzt** – auch Tage ohne Zeilen (dann leer), damit in Untis gelöschte Vertretungen verschwinden;
   Ferien/Feiertage laut Kalender werden übersprungen. Tag für Tag über `POST /api/plan/push`, mit Fortschritt und
   „Abbrechen“. Die Rückfrage nennt Tage mit Buchungen im Vertretungsmodul, Fehlerzeilen und Zeilen ohne Gegenstück.
-- **Eine Quelle je Tag:** „Online-Einstellungen…“ hat den Schalter **„Vertretungen kommen aus: Vertretungsmodul |
+- **Eine Quelle je Tag:** „Server verbinden…“ (vor PB-2 „Online-Einstellungen…“) hat den Schalter **„Vertretungen kommen aus: Vertretungsmodul |
   Untis“** (`"Quelle"` in `vertretung_online.json`). Bei „Untis“ fragt „Online veröffentlichen“ im Wocheneditor nach,
   bevor ein Tag aus dem Vertretungsmodul die Untis-Vertretungen ersetzt; steht die Quelle auf „Vertretungsmodul“, bietet
   das Untis-Fenster beim Veröffentlichen an, sie umzustellen.

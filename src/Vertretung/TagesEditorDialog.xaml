@@ -67,8 +67,11 @@
             <Button x:Name="BtnUntis" Content="Untis-Vertretungen…" Padding="10,3"
                     Margin="0,0,6,0" Click="BtnUntis_Click"
                     ToolTip="Vertretungen aus der Untis-Datei GPU014.TXT prüfen und veröffentlichen (Übergangsphase)"/>
-            <Button x:Name="BtnOnlineEinst" Content="Online-Einstellungen…" Padding="10,3"
-                    Click="BtnOnlineEinst_Click"/>
+            <Button x:Name="BtnOnlineEinst" Content="Server verbinden…" Padding="10,3"
+                    Click="BtnOnlineEinst_Click"
+                    ToolTip="Verbindung „Entwicklung“ oder „Testserver“, Schlüssel, Verbindung testen, Quelle der Vertretungen"/>
+            <!-- PB-2 (302): wohin „Online veröffentlichen“, Zeitraum und Grundplan gehen -->
+            <TextBlock x:Name="TxtZiel" VerticalAlignment="Center" Margin="10,0,0,0"/>
         </WrapPanel>
 
         <!-- Legende -->

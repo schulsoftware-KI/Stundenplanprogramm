@@ -12,8 +12,8 @@ namespace Stundenplan_V2.Vertretung
 {
     // =====================================================================
     //  SchildImportClient – Phase 5.2b-2b: der Weg Desktop → API für den
-    //  SchILD-Import (wie GrundplanSync: Server-Adresse + X-Api-Key aus
-    //  vertretung_online.json neben der Plandatei).
+    //  SchILD-Import (wie GrundplanSync: Server-Adresse + X-Api-Key der aktiven
+    //  Verbindung – seit PB-2 „Server verbinden…“, Schlüssel mit DPAPI).
     //
     //    GET  api/schild/status          – Betriebsart, Kalender, Schülerzahlen, letzter Import, Vorschlag
     //    POST api/schild/import          – Probelauf (Vorschau) bzw. Import
@@ -31,8 +31,23 @@ namespace Stundenplan_V2.Vertretung
     public sealed class SchildStatusAntwort
     {
         public string Betrieb { get; set; } = "";
-        /// <summary>true = Entwicklung (nimmt nur Pseudodaten), false = Echtbetrieb (nur echte Daten).</summary>
+        /// <summary>true = Entwicklung bzw. (seit PB-1a) Probebetrieb – nimmt nur Pseudodaten; false = Echtbetrieb (nur echte Daten).</summary>
         public bool Pseudo { get; set; }
+
+        /// <summary>PB-2 (299 d): nur in der Entwicklung gibt es „Seed-Schüler entfernen“.</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public bool IstEntwicklung => string.Equals(Betrieb, "Entwicklung", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>„in der Entwicklung“ | „im Probebetrieb“ | „im Echtbetrieb“ (für Meldungen; ohne Angabe nach Pseudo).</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string ImBetrieb => (Betrieb ?? "").Trim().ToLowerInvariant() switch
+        {
+            "entwicklung" => "in der Entwicklung",
+            "probebetrieb" => "im Probebetrieb",
+            "echtbetrieb" => "im Echtbetrieb",
+            "" => Pseudo ? "in der Entwicklung" : "im Echtbetrieb",
+            _ => "in der Betriebsart „" + Betrieb + "“"
+        };
         public string Nimmt { get; set; } = "";
         public string Schuljahr { get; set; } = "";
         public int Abschnitt { get; set; }
@@ -264,12 +279,12 @@ namespace Stundenplan_V2.Vertretung
         private static readonly TimeSpan LangeZeit = TimeSpan.FromMinutes(5);
 
         private readonly OnlineEinstellungen _einst;
-        private readonly string _ordner;
 
+        /// <param name="ordner">Ordner der Plandatei (seit PB-2 nicht mehr nötig – Meldungen nennen die Verbindung).</param>
         public SchildImportClient(OnlineEinstellungen einst, string ordner)
         {
             _einst = einst;
-            _ordner = ordner;
+            _ = ordner;
         }
 
         public string Adresse => (_einst.BaseUrl ?? "").Trim().TrimEnd('/');
@@ -349,8 +364,10 @@ namespace Stundenplan_V2.Vertretung
         private async Task<(int Code, string Body)> SendeAsync(HttpMethod methode, string pfad, object? inhalt, TimeSpan zeit)
         {
             if (AdresseUri == null)
-                throw new SchildServerFehler("Keine gültige Server-Adresse in den Online-Einstellungen.\nEinstellungen: " +
-                                             OnlineSync.EinstellungsPfad(_ordner));
+                throw new SchildServerFehler("Keine gültige Server-Adresse.\n" + OnlineSync.OrtText(_einst));
+            // PB-2 (V3): den Schlüssel nie unverschlüsselt an einen anderen Rechner.
+            if (OnlineVerbindung.ZielFehler(Adresse) is string ziel)
+                throw new SchildServerFehler(ziel);
             using var cts = new CancellationTokenSource(zeit);
             using var req = new HttpRequestMessage(methode, Adresse + pfad);
             if (!string.IsNullOrWhiteSpace(_einst.ApiKey)) req.Headers.Add("X-Api-Key", _einst.ApiKey);
@@ -365,8 +382,8 @@ namespace Stundenplan_V2.Vertretung
             {
                 string erkl = OnlineVerbindung.Erklaerung(ex) ??
                               (ex is OperationCanceledException ? OnlineVerbindung.TextZeit : ex.Message);
-                throw new SchildServerFehler($"Keine Verbindung zu {Adresse}.\n\n{erkl}\n\nEinstellungen: " +
-                                             OnlineSync.EinstellungsPfad(_ordner), null, ex);
+                throw new SchildServerFehler($"Keine Verbindung zu {Adresse}.\n\n{erkl}\n\n" +
+                                             OnlineSync.OrtText(_einst), null, ex);
             }
         }
 
@@ -387,10 +404,10 @@ namespace Stundenplan_V2.Vertretung
             string? text = FehlerAusAntwort(body);
             string erkl = code switch
             {
-                401 => "Der API-Key passt nicht zu „Api:PushKey“ der API.\nEinstellungen: " + OnlineSync.EinstellungsPfad(_ordner),
+                401 => OnlineSync.SchluesselFalschText(_einst),
                 404 => "Die API kennt diese Funktion nicht (404). Stimmt die Server-Adresse (nur die Adresse, ohne Pfad)? Ist " +
                        "die API auf dem Stand 5.2b-2a oder neuer? „Seed-Schüler entfernen“ gibt es nur in der Entwicklung.\n" +
-                       "Einstellungen: " + OnlineSync.EinstellungsPfad(_ordner),
+                       OnlineSync.OrtText(_einst),
                 400 => "Die API hat die Nutzlast abgelehnt.",
                 409 => "Die API hat abgelehnt.",
                 413 => "Die Nutzlast ist dem Server zu groß (HTTP 413) – die Grenze des Reverse Proxys erhöhen.",

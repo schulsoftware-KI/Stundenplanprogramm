@@ -41,6 +41,8 @@
             </Border>
             <TextBlock x:Name="TxtPlan" VerticalAlignment="Center" Margin="0,0,16,0" Foreground="DimGray"/>
             <TextBlock x:Name="TxtQuelle" VerticalAlignment="Center" Foreground="DimGray"/>
+            <!-- PB-2 (302): wohin „Veröffentlichen“ und „Ordner beobachten“ senden -->
+            <TextBlock x:Name="TxtZiel" VerticalAlignment="Center" Margin="16,0,0,0"/>
         </WrapPanel>
 
         <TabControl Grid.Row="3" x:Name="Tabs">

@@ -68,6 +68,8 @@ namespace Stundenplan_V2.Vertretung
         private Gehalten? _gehalten;
         private DateTime? _zuletztGeprueft;
         private string? _zuletztGesendet;
+        /// <summary>PB-2 (302, F4): Verbindung beim letzten Senden – meldet eine Umstellung im Protokoll.</summary>
+        private string? _letztesZiel;
 
         /// <summary>Angehaltener Stand: geändert, aber aus Sicherheitsgründen nicht automatisch gesendet.</summary>
         private sealed class Gehalten
@@ -380,15 +382,22 @@ namespace Stundenplan_V2.Vertretung
                 return;
             }
 
+            // PB-2 (302): aktive Verbindung ohne Fenster – fehlt etwas (Adresse, Schlüssel, https), wird gehalten.
             var einst = OnlineSync.LadeEinstellungen(_planOrdner);
-            if (string.IsNullOrWhiteSpace(einst.BaseUrl))
+            if (string.IsNullOrWhiteSpace(einst.BaseUrl) || einst.Problem != null)
             {
-                _gehalten = new Gehalten { Datei = datei, Ergebnis = erg, Grund = "keine Serveradresse in den Online-Einstellungen" };
-                Protokoll(kopf + $"{geaendert.Count} Tag(e) geändert, NICHT gesendet: keine Serveradresse in den Online-Einstellungen.");
+                string warum = einst.Problem ?? "keine Serveradresse („Server verbinden…“)";
+                _gehalten = new Gehalten { Datei = datei, Ergebnis = erg, Grund = warum };
+                Protokoll(kopf + $"{geaendert.Count} Tag(e) geändert, NICHT gesendet: {EineZeile(warum)}");
                 BtnJetztSenden.Visibility = Visibility.Visible;
                 ZeigeBeobachtenStatus();
                 return;
             }
+            string ziel = $"{einst.Verbindung} ({einst.BaseUrl})";
+            if (_letztesZiel != null && _letztesZiel != ziel)
+                Protokoll($"  Hinweis: Die Verbindung wurde umgestellt – gesendet wird jetzt an {ziel} (vorher {_letztesZiel}).");
+            _letztesZiel = ziel;
+            ZeigeQuelle();
 
             // Heute und künftige Tage zuerst (morgens zählt der heutige Tag), danach vergangene.
             DateTime heute = DateTime.Today;

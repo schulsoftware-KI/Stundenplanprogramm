@@ -92,8 +92,14 @@ namespace Stundenplan_V2.Vertretung
             CbGrund.ItemsSource = Zaehlung.LehrerGruende;
             CbGrund.SelectedItem = VertretungsGrund.Krankheit;
 
+            // PB-2 (302): „veröffentlicht nach: …“ – beim Aktivieren neu, falls ein anderes Fenster die Verbindung umgestellt hat.
+            ZeigeZiel();
+            Activated += (_, __) => ZeigeZiel();
+
             LadeDaten();
         }
+
+        private void ZeigeZiel() => OnlineSync.ZeigeZiel(TxtZiel, _ordner);
 
         // =====================================================
         //  Laden
@@ -252,14 +258,10 @@ namespace Stundenplan_V2.Vertretung
             if (!_bereit || _plan == null || DpTag.SelectedDate == null)
             { SetzeInfo("Kein Tag gewählt."); return; }
 
-            var einst = OnlineSync.LadeEinstellungen(_ordner);
-            if (string.IsNullOrWhiteSpace(einst.BaseUrl))
-            {
-                var neu = OnlineSync.FrageEinstellungen(this, einst, _ordner);
-                if (neu == null) return;
-                OnlineSync.SpeichereEinstellungen(_ordner, neu);
-                einst = neu;
-            }
+            // PB-2 (302): aktive Verbindung (Umzug des Schlüssels, „Server verbinden…“, Prüfung der Adresse)
+            var einst = OnlineSync.Verbindung(this, _ordner);
+            ZeigeZiel();
+            if (einst == null) return;
 
             DateTime tag = DpTag.SelectedDate.Value.Date;
             var tp = Tagesplan(tag);
@@ -289,7 +291,7 @@ namespace Stundenplan_V2.Vertretung
             {
                 string? stand = UntisImportProtokoll.TagText(_ordner, tag);
                 string frage =
-                    "In den Online-Einstellungen ist „Untis“ als Quelle der Vertretungen eingestellt.\n\n" +
+                    "Unter „Server verbinden…“ ist „Untis“ als Quelle der Vertretungen eingestellt.\n\n" +
                     (stand != null ? stand + "\n\n" : "") +
                     $"„Online veröffentlichen“ ersetzt den {tag:dd.MM.yyyy} in der App durch die Buchungen des " +
                     $"Vertretungsmoduls ({anz} Änderung(en)) – die Untis-Vertretungen dieses Tages verschwinden dort.\n\n" +
@@ -323,13 +325,11 @@ namespace Stundenplan_V2.Vertretung
 
         private void BtnOnlineEinst_Click(object sender, RoutedEventArgs e)
         {
-            var einst = OnlineSync.LadeEinstellungen(_ordner);
-            var neu = OnlineSync.FrageEinstellungen(this, einst, _ordner);
+            // PB-2 (302): „Server verbinden…“ statt „Online-Einstellungen…“
+            var neu = OnlineSync.ServerVerbinden(this, _ordner);
+            ZeigeZiel();
             if (neu != null)
-            {
-                OnlineSync.SpeichereEinstellungen(_ordner, neu);
-                SetzeInfo($"Online-Einstellungen gespeichert (Quelle: {neu.Quelle}): {OnlineSync.EinstellungsPfad(_ordner)}");
-            }
+                SetzeInfo($"Verbindung gespeichert: {neu.Verbindung} ({neu.BaseUrl}), Quelle: {neu.Quelle}.");
         }
 
         // =====================================================

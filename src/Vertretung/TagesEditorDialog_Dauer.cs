@@ -272,7 +272,7 @@ namespace Stundenplan_V2.Vertretung
             if (einst.QuelleIstUntis)
                 oben.Children.Add(new TextBlock
                 {
-                    Text = "⚠ In den Online-Einstellungen ist „Untis“ als Quelle der Vertretungen eingestellt – beim " +
+                    Text = "⚠ Unter „Server verbinden…“ ist „Untis“ als Quelle der Vertretungen eingestellt – beim " +
                            "Veröffentlichen wird nachgefragt; veröffentlichte Tage ersetzen dort die Untis-Vertretungen.",
                     Foreground = Brushes.DarkRed, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0)
                 });

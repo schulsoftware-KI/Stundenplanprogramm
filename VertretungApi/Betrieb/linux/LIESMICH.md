@@ -46,8 +46,9 @@ kein neues Admin-Konto, kein Update.
 
 1. Browser: `https://<adresse>` → Band **„Probebetrieb – nur Testdaten“** → anmelden als `admin` mit dem Startpasswort →
    eigenes Passwort → **zweiter Faktor** (Pflicht für Admins, z. B. Microsoft Authenticator) → Einstellungen der Schule.
-2. Desktop verbinden: Push-Schlüssel und `https://<adresse>` eintragen („Server verbinden…“ ab PB-2, bis dahin
-   „Online-Einstellungen…“), Grundplan veröffentlichen, SchILD-Pseudo-Import.
+2. Desktop verbinden: Wocheneditor → „Server verbinden…“ → Verbindung „Testserver“: `https://<adresse>` und den
+   Push-Schlüssel (`vertretung schluessel`) eintragen → „Verbindung testen“ (zeigt „Probebetrieb“) → OK; danach
+   Grundplan veröffentlichen, SchILD-Pseudo-Import.
 3. Kolleg:innen nur mit Pseudo-Konten (z. B. ein Kürzel aus dem Pseudo-SchILD), nie mit echten Namen.
 
 ## Befehle (als root)

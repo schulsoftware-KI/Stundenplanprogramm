@@ -25,11 +25,15 @@ namespace Stundenplan_V2.Vertretung
     //  Adressen der Schule beschränken (403 „Adresse nicht freigegeben“) und bremst zu
     //  viele Anfragen (429 mit Wartezeit). Beides wird hier verständlich erklärt; der
     //  Text der API („fehler“) erscheint statt der rohen JSON-Antwort.
+    //
+    //  PB-2 (V3, V4): Anfragen mit Schlüssel nur über https – außer an diesen Rechner
+    //  (ZielFehler) – und ohne automatische Weiterleitung: HttpClient behielte den Kopf
+    //  X-Api-Key auch bei einer Weiterleitung an eine andere Adresse.
     // =====================================================================
     public static class OnlineVerbindung
     {
         public const string TextDns =
-            "Der Servername ließ sich nicht auflösen. Stimmt die Server-Adresse in den Online-Einstellungen? Im Schulnetz " +
+            "Der Servername ließ sich nicht auflösen. Stimmt die Server-Adresse („Server verbinden…“)? Im Schulnetz " +
             "kann auch ein DNS-Filter oder Proxy der Grund sein – dann die IT bitten, die Adresse freizugeben.";
 
         public const string TextAbgelehnt =
@@ -65,7 +69,8 @@ namespace Stundenplan_V2.Vertretung
             var handler = new HttpClientHandler
             {
                 UseProxy = true,
-                DefaultProxyCredentials = CredentialCache.DefaultCredentials
+                DefaultProxyCredentials = CredentialCache.DefaultCredentials,
+                AllowAutoRedirect = false   // PB-2 (V4): der Schlüssel folgt keiner Weiterleitung
             };
             return new HttpClient(handler) { Timeout = timeout };
         }
@@ -135,9 +140,33 @@ namespace Stundenplan_V2.Vertretung
             "erneut versuchen; beim Veröffentlichen eines langen Zeitraums ggf. in Teilen. Tritt es oft auf, die Betreuung des " +
             "Servers bitten, „Begrenzung:DesktopJeMinute“ zu erhöhen.";
 
+        public const string TextNurHttps =
+            "über http:// ginge der Schlüssel unverschlüsselt durchs Netz. http:// gilt nur für diesen Rechner (localhost); " +
+            "für jeden anderen Server die Adresse mit https:// eintragen („Server verbinden…“).";
+
+        public const string TextWeiterleitung =
+            "Der Server leitet auf eine andere Adresse weiter. Der Desktop folgt Weiterleitungen nicht (der Schlüssel ginge " +
+            "sonst mit). Die Adresse so eintragen, wie sie nach dem Laden im Browser steht (meist https://…, ohne Pfad) – " +
+            "unter „Server verbinden…“.";
+
+        /// <summary>
+        /// PB-2 (V3): Fehlertext, wenn an diese Adresse kein Schlüssel gehen darf (http:// an einen anderen Rechner bzw.
+        /// keine gültige Adresse) – sonst null.
+        /// </summary>
+        public static string? ZielFehler(string url)
+        {
+            if (!Uri.TryCreate((url ?? "").Trim(), UriKind.Absolute, out var u)
+                || (u.Scheme != Uri.UriSchemeHttp && u.Scheme != Uri.UriSchemeHttps))
+                return $"„{url}“ ist keine gültige Server-Adresse („Server verbinden…“).";
+            if (u.Scheme == Uri.UriSchemeHttp && !IstLokal(u))
+                return $"Nicht gesendet: Die Adresse {u.GetLeftPart(UriPartial.Authority)} beginnt mit http:// – " + TextNurHttps;
+            return null;
+        }
+
         /// <summary>Erklärung zu einem HTTP-Fehlercode, der meist nicht von der API selbst kommt – sonst null.</summary>
         public static string? StatusErklaerung(int status) => status switch
         {
+            301 or 302 or 303 or 307 or 308 => $"HTTP {status}: " + TextWeiterleitung,
             403 => TextAdresse,
             407 => TextProxyAnmeldung,
             429 => TextZuViele,

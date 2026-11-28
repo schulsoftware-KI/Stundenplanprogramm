@@ -30,14 +30,10 @@ namespace Stundenplan_V2.Vertretung
                 return;
             }
 
-            var einst = OnlineSync.LadeEinstellungen(_ordner);
-            if (string.IsNullOrWhiteSpace(einst.BaseUrl))
-            {
-                var neu = OnlineSync.FrageEinstellungen(this, einst, _ordner);
-                if (neu == null) return;
-                OnlineSync.SpeichereEinstellungen(_ordner, neu);
-                einst = neu;
-            }
+            // PB-2 (302): aktive Verbindung (Umzug des Schlüssels, „Server verbinden…“, Prüfung der Adresse)
+            var einst = OnlineSync.Verbindung(this, _ordner);
+            ZeigeZiel();
+            if (einst == null) return;
 
             DateTime? gueltigAb = FrageGueltigAb();
             if (gueltigAb == null) return;

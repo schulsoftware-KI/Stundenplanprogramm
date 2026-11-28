@@ -103,9 +103,11 @@ namespace Stundenplan_V2.Vertretung
         public static async Task<string> PushAsync(OnlineEinstellungen einst, GrundplanPushDto dto)
         {
             if (string.IsNullOrWhiteSpace(einst.BaseUrl))
-                throw new InvalidOperationException("Keine Server-URL konfiguriert (Online-Einstellungen).");
+                throw new InvalidOperationException("Keine Server-Adresse eingetragen („Server verbinden…“).");
 
             var url = einst.BaseUrl.TrimEnd('/') + "/api/grundplan/push";
+            // PB-2 (V3): den Schlüssel nie unverschlüsselt an einen anderen Rechner.
+            if (OnlineVerbindung.ZielFehler(url) is string ziel) throw new InvalidOperationException(ziel);
             using var req = new HttpRequestMessage(HttpMethod.Post, url);
             if (!string.IsNullOrWhiteSpace(einst.ApiKey)) req.Headers.Add("X-Api-Key", einst.ApiKey);
             req.Content = JsonContent.Create(dto);

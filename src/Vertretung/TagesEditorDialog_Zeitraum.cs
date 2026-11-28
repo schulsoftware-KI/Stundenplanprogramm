@@ -15,7 +15,7 @@ namespace Stundenplan_V2.Vertretung
     /// Wocheneditor. Statt nur des einen Tags im Feld „Woche um“ werden alle Schultage von–bis (laut Kalender)
     /// veröffentlicht – wie im Untis-Fenster mit Fortschritt, Abbruch und der Meldung „n von m Tag(en)
     /// veröffentlicht“. Jeder Tag wird in der App komplett ersetzt (wie bei „Online veröffentlichen“); Tage ohne
-    /// Buchungen werden dort leer. Steht die Quelle in den Online-Einstellungen auf „Untis“, wird vorher
+    /// Buchungen werden dort leer. Steht die Quelle („Server verbinden…“) auf „Untis“, wird vorher
     /// nachgefragt (wie beim einen Tag). Es gilt der geladene Plan (wie bei „Online veröffentlichen“).
     /// Teil der partiellen Klasse TagesEditorDialog; V3 nutzt das später mit.
     /// </summary>
@@ -178,14 +178,10 @@ namespace Stundenplan_V2.Vertretung
                     return;
                 }
 
-                var einst = OnlineSync.LadeEinstellungen(_ordner);
-                if (string.IsNullOrWhiteSpace(einst.BaseUrl))
-                {
-                    var neu = OnlineSync.FrageEinstellungen(win, einst, _ordner);
-                    if (neu == null) return;
-                    OnlineSync.SpeichereEinstellungen(_ordner, neu);
-                    einst = neu;
-                }
+                // PB-2 (302): aktive Verbindung (Umzug des Schlüssels, „Server verbinden…“, Prüfung der Adresse)
+                var einst = OnlineSync.Verbindung(win, _ordner);
+                ZeigeZiel();
+                if (einst == null) return;
 
                 // P3 (Kleinigkeit c, Entscheidung 199): Passt der geladene Plan zum Grundplan der App im Zeitraum?
                 bool planOk;
@@ -269,7 +265,7 @@ namespace Stundenplan_V2.Vertretung
                 var ausUntis = tage.Where(t => prot.Tage.ContainsKey(UntisImportProtokoll.TagSchluessel(t.Datum)))
                                    .Select(t => t.Datum).ToList();
                 string frage =
-                    "In den Online-Einstellungen ist „Untis“ als Quelle der Vertretungen eingestellt.\n\n" +
+                    "Unter „Server verbinden…“ ist „Untis“ als Quelle der Vertretungen eingestellt.\n\n" +
                     (ausUntis.Count > 0
                         ? $"{ausUntis.Count} dieser Tage wurden zuletzt aus Untis veröffentlicht (z. B. " +
                           string.Join(", ", ausUntis.Take(3).Select(d => d.ToString("dd.MM.yyyy"))) + ").\n\n"

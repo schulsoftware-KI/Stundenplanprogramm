@@ -98,7 +98,12 @@ namespace Stundenplan_V2.Vertretung
             LadeProfil();
             ImAnzeigen();
             RwAnzeigen();
+            // PB-2 (302): „veröffentlicht nach: …“ – beim Aktivieren neu, falls ein anderes Fenster die Verbindung umgestellt hat.
+            ZeigeZiel();
+            Activated += (_, __) => ZeigeZiel();
         }
+
+        private void ZeigeZiel() => OnlineSync.ZeigeZiel(TxtZiel, _planOrdner);
 
         // =====================================================
         //  Profil

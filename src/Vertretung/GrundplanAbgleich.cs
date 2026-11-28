@@ -53,6 +53,7 @@ namespace Stundenplan_V2.Vertretung
             try
             {
                 var url = einst.BaseUrl.TrimEnd('/') + "/api/grundplan/veroeffentlicht?schuljahr=" + Uri.EscapeDataString(schuljahr.Trim());
+                if (OnlineVerbindung.ZielFehler(url) != null) return null;   // PB-2 (V3): kein Schlüssel über http nach außen
                 using var req = new HttpRequestMessage(HttpMethod.Get, url);
                 if (!string.IsNullOrWhiteSpace(einst.ApiKey)) req.Headers.Add("X-Api-Key", einst.ApiKey);
                 using var resp = await _http.SendAsync(req);

@@ -62,7 +62,9 @@ namespace Stundenplan_V2.Vertretung
             "Klassenwechsel. Nicht übernommen: Pausenaufsichten, Klausuraufsichten ohne Klasse („Klau“) und Zeilen mit „nicht " +
             "drucken“. Absenzgrund (Feld 16) und Text zur Vertretung (Feld 17) werden nie gelesen, angezeigt, gespeichert oder " +
             "gesendet.\n\n" +
-            "Quelle: In „Online-Einstellungen…“ „Untis“ wählen. Dann fragt „Online veröffentlichen“ im Wocheneditor nach, bevor " +
+            "Wohin: oben „veröffentlicht nach: …“ – die Verbindung stellt der Wocheneditor unter „Server verbinden…“ ein; wird " +
+            "sie umgestellt, während „Ordner beobachten“ läuft, sendet es ab dann an die neue (Hinweis im Protokoll).\n\n" +
+            "Quelle: Unter „Server verbinden…“ „Untis“ wählen. Dann fragt „Online veröffentlichen“ im Wocheneditor nach, bevor " +
             "ein Tag aus dem Vertretungsmodul die Untis-Vertretungen in der App ersetzt.\n\n" +
             "Protokoll: untis_import.json neben der Plandatei – wann welche Datei für welche Tage veröffentlicht wurde, ohne " +
             "Inhalte.\n\n" +
@@ -86,6 +88,8 @@ namespace Stundenplan_V2.Vertretung
             LbBeobachten.ItemsSource = _beobProtokoll;
             TxtPlan.Text = "Plan: wird beim Prüfen gelesen (Auswahl „Plan“ im Wocheneditor)";
             ZeigeQuelle();
+            // PB-2 (302): beim Aktivieren neu, falls der Wocheneditor die Verbindung umgestellt hat.
+            Activated += (_, __) => ZeigeQuelle();
         }
 
         // =====================================================
@@ -401,20 +405,16 @@ namespace Stundenplan_V2.Vertretung
         /// </summary>
         private OnlineEinstellungen? HoleEinstellungenMitQuelle(string wozu)
         {
-            var einst = OnlineSync.LadeEinstellungen(_planOrdner);
-            if (string.IsNullOrWhiteSpace(einst.BaseUrl))
-            {
-                var neu = OnlineSync.FrageEinstellungen(this, einst, _planOrdner);
-                if (neu == null) return null;
-                OnlineSync.SpeichereEinstellungen(_planOrdner, neu);
-                einst = neu;
-            }
+            // PB-2 (302): aktive Verbindung (Umzug des Schlüssels, „Server verbinden…“, Prüfung der Adresse)
+            var einst = OnlineSync.Verbindung(this, _planOrdner);
+            ZeigeQuelle();
+            if (einst == null) return null;
 
             // Eine Quelle je Tag (Entscheidung 120).
             if (!einst.QuelleIstUntis)
             {
                 var r = MessageBox.Show(this,
-                    "In den Online-Einstellungen ist „Vertretungsmodul“ als Quelle der Vertretungen eingestellt.\n\n" +
+                    "Unter „Server verbinden…“ ist „Vertretungsmodul“ als Quelle der Vertretungen eingestellt.\n\n" +
                     $"Ja = Quelle auf „Untis“ umstellen und {wozu} (empfohlen: dann fragt „Online veröffentlichen“ im " +
                     "Wocheneditor nach, bevor ein Tag aus dem Vertretungsmodul die Untis-Vertretungen ersetzt).\n" +
                     $"Nein = nur {wozu}, Quelle bleibt „Vertretungsmodul“.",
@@ -423,10 +423,11 @@ namespace Stundenplan_V2.Vertretung
                 if (r == MessageBoxResult.Yes)
                 {
                     einst.Quelle = OnlineEinstellungen.QuelleUntis;
-                    try { OnlineSync.SpeichereEinstellungen(_planOrdner, einst); }
+                    // PB-2: nur die Quelle ändern – Verbindungen (und ggf. die alte Form) bleiben, wie sie sind.
+                    try { OnlineSync.SpeichereQuelle(_planOrdner, OnlineEinstellungen.QuelleUntis); }
                     catch (Exception ex)
                     {
-                        MessageBox.Show(this, "Die Online-Einstellungen konnten nicht gespeichert werden:\n\n" + ex.Message,
+                        MessageBox.Show(this, "Die Quelle konnte nicht gespeichert werden:\n\n" + ex.Message,
                             "Quelle der Vertretungen", MessageBoxButton.OK, MessageBoxImage.Warning);
                     }
                     ZeigeQuelle();
@@ -788,9 +789,10 @@ namespace Stundenplan_V2.Vertretung
         {
             var einst = OnlineSync.LadeEinstellungen(_planOrdner);
             TxtQuelle.Text = einst.QuelleIstUntis
-                ? "Quelle (Online-Einstellungen): Untis"
-                : "Quelle (Online-Einstellungen): Vertretungsmodul – beim Veröffentlichen fragt das Fenster nach";
+                ? "Quelle: Untis"
+                : "Quelle: Vertretungsmodul – beim Veröffentlichen fragt das Fenster nach";
             TxtQuelle.Foreground = einst.QuelleIstUntis ? Brushes.DimGray : Brushes.DarkOrange;
+            OnlineSync.ZeigeZiel(TxtZiel, _planOrdner);   // PB-2 (302)
         }
 
         private void SetzeKnoepfe(bool an)

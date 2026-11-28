@@ -43,6 +43,8 @@
             <ComboBox x:Name="CbAbschnitt" Width="250" VerticalAlignment="Center" Margin="0,0,12,0"
                       DisplayMemberPath="Anzeige" SelectionChanged="CbAbschnitt_SelectionChanged"/>
             <TextBlock x:Name="TxtProfil" VerticalAlignment="Center" Foreground="DimGray"/>
+            <!-- PB-2 (302): wohin Import und Rückweg gehen -->
+            <TextBlock x:Name="TxtZiel" VerticalAlignment="Center" Margin="16,0,0,0"/>
         </WrapPanel>
 
         <TabControl Grid.Row="3" x:Name="Tabs">
@@ -180,7 +182,7 @@
                         <TextBlock x:Name="TxtImHinweis" TextWrapping="Wrap" Text="Zuerst einen Ordner wählen und den Prüflauf starten."/>
                     </Border>
                     <DockPanel Grid.Row="1" Margin="0,0,0,6" LastChildFill="True">
-                        <Button DockPanel.Dock="Right" x:Name="BtnImEinstellungen" Content="Online-Einstellungen…" Padding="10,3"
+                        <Button DockPanel.Dock="Right" x:Name="BtnImEinstellungen" Content="Server verbinden…" Padding="10,3"
                                 Margin="6,0,0,0" Click="BtnImEinstellungen_Click"/>
                         <Button DockPanel.Dock="Right" x:Name="BtnImStatus" Content="Status abfragen" Padding="10,3"
                                 Margin="6,0,0,0" Click="BtnImStatus_Click"/>

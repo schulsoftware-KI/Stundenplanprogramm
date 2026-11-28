@@ -1,0 +1,212 @@
+#!/usr/bin/env bash
+# =====================================================================
+#  vertretung – Befehl für den Alltag auf dem Testserver (PB-1b, Entscheidung 315). Liegt als Verweis in
+#  /usr/local/bin/vertretung (→ /opt/vertretung/aktuell/betrieb/vertretung), damit im Browser-Terminal kurze
+#  Wörter statt langer Pfade reichen. Alle Befehle als root; „vertretung hilfe“ zeigt die Übersicht.
+# =====================================================================
+set -euo pipefail
+umask 022
+HIER="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+# shellcheck source=gemeinsam.sh
+. "$HIER/gemeinsam.sh"
+
+hilfe() {
+    cat <<'EOF'
+Vertretung – Befehle für den Testserver (als root):
+  vertretung status                   Dienst, Version, Betriebsart, Adresse, Zertifikat, Sicherungen
+  vertretung log [n] [-f] [caddy|sicherung|pruefung]
+                                      die letzten n Zeilen (Standard 50) bzw. laufend mitlesen (-f, Ende: Strg+C)
+  vertretung admin-anlegen [name]     Admin-Konto anlegen bzw. neues Startpasswort (setzt auch den zweiten Faktor zurück)
+  vertretung neustart                 API neu starten und prüfen (z. B. nach einer Änderung der Einstellungsdatei)
+  vertretung sicherung                jetzt sichern
+  vertretung pruefen [datei]          Rücksicherungstest (neueste bzw. genannte Sicherung)
+  vertretung zurueckspielen [datei]   Datenbank auf den Stand einer Sicherung setzen (ohne Datei: Liste)
+  vertretung aktualisieren [commit]   Update auf den neuesten Stand von master bzw. einen Commit daraus
+  vertretung zurueck                  eine Version zurück
+  vertretung schluessel               Push-Schlüssel und Passphrase der Sicherung noch einmal zeigen
+  vertretung adresse <name>           andere Adresse (Caddy, Zertifikat, AllowedHosts)
+  vertretung ssh-passwort-aus         SSH-Anmeldung nur noch mit Schlüssel (erst nach Test vom PC aus)
+  vertretung hilfe                    diese Übersicht
+Einstellungen: /etc/vertretung/appsettings.Production.json (danach: vertretung neustart)
+Anleitung:     VertretungApi/Betrieb/linux/LIESMICH.md im Repo
+EOF
+}
+
+datum_de() {   # beliebige Datumsangabe → TT.MM.JJJJ HH:MM (bzw. unverändert)
+    date -d "$1" '+%d.%m.%Y %H:%M' 2>/dev/null || printf '%s' "$1"
+}
+
+zertifikat_bis() {   # $1 = Adresse → Ablaufdatum des Zertifikats bzw. leer
+    local ende
+    ende=$(echo | timeout 15 openssl s_client -connect "$1:443" -servername "$1" 2>/dev/null \
+        | openssl x509 -noout -enddate 2>/dev/null | sed 's/^notAfter=//' || true)
+    if [[ -n "$ende" ]]; then datum_de "$ende"; fi
+}
+
+status() {
+    local aktiv adresse betrieb bis neueste n
+    aktiv=$(version_aktiv)
+    schritt "Vertretung – Status"
+    if systemctl is-active --quiet "$DIENST"; then
+        ok "Dienst läuft (seit $(datum_de "$(systemctl show -p ActiveEnterTimestamp --value "$DIENST")"))."
+    else
+        warnung "Dienst läuft nicht ($(systemctl is-active "$DIENST" 2>/dev/null || true)) – vertretung log 50"
+    fi
+    if [[ -n "$aktiv" ]]; then
+        info "Version:      $(version_text "$aktiv")"
+    else
+        warnung "Keine Version installiert."
+    fi
+    if gesund_lokal; then
+        betrieb=$(api_option probebetrieb)
+        case "$betrieb" in
+            true)  info "Betriebsart:  Probebetrieb (nur Pseudodaten)" ;;
+            false) info "Betriebsart:  Echtbetrieb" ;;
+            *)     info "Betriebsart:  ?" ;;
+        esac
+        ok "Lebenszeichen (lokal): ok"
+    else
+        warnung "Lebenszeichen (lokal): keine Antwort"
+    fi
+    if [[ -s "$ADRESSDATEI" ]]; then
+        adresse=$(head -n 1 "$ADRESSDATEI")
+        if gesund_aussen "$adresse"; then ok "https://$adresse: ok"; else warnung "https://$adresse: keine Antwort"; fi
+        bis=$(zertifikat_bis "$adresse")
+        if [[ -n "$bis" ]]; then info "Zertifikat:   gültig bis $bis (Caddy erneuert selbst)"; fi
+    fi
+    n=$(migrationen_in_db | wc -l)
+    info "Datenbank:    $n Migration(en), $(anzahl_konten || true) Konto/Konten"
+    neueste=$(neueste_sicherung)
+    if [[ -n "$neueste" ]]; then
+        info "Sicherung:    $(basename "$neueste") ($(du -h "$neueste" | cut -f1)); nächste: $(datum_de "$(systemctl show -p NextElapseUSecRealtime --value vertretung-sicherung.timer 2>/dev/null || true)")"
+    else
+        warnung "Sicherung:    noch keine – vertretung sicherung"
+    fi
+    local ergebnis zeit
+    ergebnis=$(systemctl show -p Result --value vertretung-pruefung.service 2>/dev/null || true)
+    zeit=$(systemctl show -p ExecMainExitTimestamp --value vertretung-pruefung.service 2>/dev/null || true)
+    if [[ -n "$zeit" ]]; then
+        info "Prüfung:      zuletzt $(datum_de "$zeit") – $( [[ "$ergebnis" == success ]] && echo "in Ordnung" || echo "FEHLER ($ergebnis), journalctl -u vertretung-pruefung")"
+    else
+        info "Prüfung:      noch nicht gelaufen (monatlich am 1.; von Hand: vertretung pruefen)"
+    fi
+    info "Platz:        $(df -h / | awk 'NR==2 { print $4 " frei von " $2 }') · Speicher: $(free -m | awk '/^Mem:/ { print $7 " MB frei von " $2 " MB" }')"
+    if [[ -f /var/run/reboot-required ]]; then info "Neustart:     nötig nach Updates (automatisch um 04:30)"; fi
+    info "Firewall:     $(ufw status 2>/dev/null | head -n 1 || echo '?')"
+}
+
+log() {
+    local einheit="$DIENST" n=50 folgen=0 a
+    for a in "$@"; do
+        case "$a" in
+            -f)                folgen=1 ;;
+            api)               einheit="$DIENST" ;;
+            caddy)             einheit=caddy.service ;;
+            sicherung)         einheit=vertretung-sicherung.service ;;
+            pruefung)          einheit=vertretung-pruefung.service ;;
+            ''|*[!0-9]*)       fehler "Aufruf: vertretung log [n] [-f] [caddy|sicherung|pruefung]" ;;
+            *)                 n="$a" ;;
+        esac
+    done
+    if (( folgen )); then
+        exec journalctl -u "$einheit" -f -n "$n" --no-pager -o short-iso
+    fi
+    journalctl -u "$einheit" -n "$n" --no-pager -o short-iso
+}
+
+admin_anlegen() {
+    [[ -n "$(version_aktiv)" ]] || fehler "Hier ist noch nichts installiert."
+    (( $# <= 1 )) || fehler "Aufruf: vertretung admin-anlegen [name]"
+    programm_ausfuehren admin-anlegen "$@"
+}
+
+sicherung_pfad() {   # Dateiname (im Sicherungsordner) oder Pfad → Pfad
+    if [[ -z "$1" ]]; then return 0; fi
+    if [[ "$1" == */* ]]; then printf '%s' "$1"; else printf '%s' "$SICHERUNGEN/$1"; fi
+}
+
+sicherung_befehl() {
+    als_dienst env SICHERUNG_CONF="$SICHERUNG_CONF" "$(sicherungsskript)"
+}
+
+pruefen_befehl() {
+    local datei
+    datei=$(sicherung_pfad "${1:-}")
+    if [[ -n "$datei" ]]; then
+        als_dienst env SICHERUNG_CONF="$SICHERUNG_CONF" "$(sicherungsskript)" --pruefen "$datei"
+    else
+        als_dienst env SICHERUNG_CONF="$SICHERUNG_CONF" "$(sicherungsskript)" --pruefen
+    fi
+}
+
+zurueckspielen_befehl() {
+    local datei aktiv fremd
+    if [[ -z "${1:-}" ]]; then
+        schritt "Sicherungen (neueste zuerst)"
+        ls -1t "$SICHERUNGEN"/"$DB_NAME"_*.dump.gpg 2>/dev/null | head -n 20 | while IFS= read -r datei; do
+            info "$(basename "$datei")  ($(du -h "$datei" | cut -f1))"
+        done || true
+        info "Aufruf: vertretung zurueckspielen <dateiname>"
+        return 0
+    fi
+    datei=$(sicherung_pfad "$1")
+    [[ -f "$datei" ]] || fehler "Die Sicherung $datei gibt es nicht (Liste: vertretung zurueckspielen)."
+    aktiv=$(version_aktiv)
+    [[ -n "$aktiv" ]] || fehler "Hier ist noch nichts installiert."
+    sperren
+    schritt "Datenbank zurückspielen"
+    info "Sicherung: $(basename "$datei")"
+    warnung "Die API wird kurz angehalten; alles, was seit dieser Sicherung eingetragen wurde, geht verloren (der jetzige Stand wird vorher gesichert)."
+    if ! frage_jn "Zurückspielen?" n; then
+        info "Abgebrochen – nichts geändert."
+        return 0
+    fi
+    sicherung_anlegen "vor-rueckspielen" || fehler "Die Sicherung des jetzigen Stands ist fehlgeschlagen – nichts geändert."
+    systemctl stop "$DIENST" 2>/dev/null || true
+    if ! rueckspielen "$datei"; then
+        warnung "Zurückspielen fehlgeschlagen – die Datenbank ist unverändert; die API startet wieder."
+        dienst_starten_pruefen || true
+        fehler "Zurückspielen fehlgeschlagen (Meldung oben)."
+    fi
+    dienst_starten_pruefen || fehler "Die API startet nach dem Zurückspielen nicht – bitte: vertretung log 100"
+    migrationen_pruefen "$aktiv" || true
+    fremd=$(LC_ALL=C comm -23 <(migrationen_in_db) "$aktiv/MIGRATIONEN" | paste -sd ' ' || true)
+    if [[ -n "$fremd" ]]; then
+        warnung "Die Sicherung hat Migrationen, die dieses Programm nicht kennt ($fremd) – passende Version: vertretung aktualisieren <commit>"
+    fi
+    ok "Die Datenbank ist auf dem Stand von $(basename "$datei")."
+}
+
+schluessel() {
+    local push pass
+    push=$(json_wert "$EINSTELLUNGEN" Api:PushKey 2>/dev/null) || fehler "Der Push-Schlüssel steht nicht lesbar in $EINSTELLUNGEN."
+    pass=$(cat "$PASSPHRASE" 2>/dev/null) || fehler "Die Passphrase ($PASSPHRASE) ist nicht lesbar."
+    ADRESSE=$(head -n 1 "$ADRESSDATEI" 2>/dev/null || true)
+    geheimnisse_zeigen "$push" "$pass"
+}
+
+main() {
+    local befehl="${1:-hilfe}"
+    if (( $# > 0 )); then shift; fi
+    case "$befehl" in
+        hilfe|-h|--hilfe|help) hilfe; return 0 ;;
+    esac
+    pruefe_root
+    case "$befehl" in
+        status)           status ;;
+        log)              log "$@" ;;
+        admin-anlegen)    admin_anlegen "$@" ;;
+        neustart)         exec "$HIER/aktualisieren.sh" --neustart ;;
+        sicherung)        sicherung_befehl ;;
+        pruefen)          pruefen_befehl "${1:-}" ;;
+        zurueckspielen)   zurueckspielen_befehl "${1:-}" ;;
+        aktualisieren)    exec "$HIER/aktualisieren.sh" "$@" ;;
+        zurueck)          exec "$HIER/aktualisieren.sh" --zurueck ;;
+        schluessel)       schluessel ;;
+        adresse)          exec "$HIER/installieren.sh" --adresse "$@" ;;
+        ssh-passwort-aus) exec "$HIER/installieren.sh" --ssh-passwort-aus ;;
+        *)                hilfe >&2; fehler "Unbekannter Befehl „$befehl“." ;;
+    esac
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi

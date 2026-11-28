@@ -1,0 +1,3 @@
+# Zeilenenden: Linux-Skripte und Units des Testservers immer mit LF (PB-1b) – sonst scheitern sie unter Linux.
+*.sh text eol=lf
+VertretungApi/Betrieb/linux/** text eol=lf

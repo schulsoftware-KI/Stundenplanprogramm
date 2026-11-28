@@ -1,0 +1,68 @@
+# =====================================================================
+#  Vertretung – Dienst der API (Testserver, PB-1b). Vorlage aus dem Repo; installieren.sh bzw. aktualisieren.sh
+#  kopieren sie nach /etc/systemd/system/ – Änderungen dort gehen beim nächsten Update verloren.
+#
+#  - läuft als Benutzer „vertretung“ (ohne Anmeldung), nur auf 127.0.0.1:5080 – nach außen nur über Caddy (HTTPS)
+#  - Einstellungen (Schlüssel, Datenbank, Adresse, Probebetrieb): /etc/vertretung/appsettings.Production.json
+#    (Entscheidung 312, Umgebungsvariable VERTRETUNG_EINSTELLUNGEN)
+#  - Programm: /opt/vertretung/aktuell/app (Verweis auf die laufende Version, framework-abhängig gebaut, 313)
+#  - Log: journalctl -u vertretung (bzw. „vertretung log“); eine Zeile je Meldung mit Priorität (Formatierer
+#    „systemd“) – „journalctl -u vertretung -p crit“ zeigt nur kritische Fehler.
+#  Die Zeilen mit Environment= liest der Befehl „vertretung admin-anlegen“ mit (eine Stelle für die Umgebung).
+# =====================================================================
+[Unit]
+Description=Vertretung – Klassenbuch- und Vertretungs-API
+Documentation=https://github.com/schulsoftware-KI/Stundenplanprogramm/blob/master/VertretungApi/Betrieb/linux/LIESMICH.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=vertretung
+Group=vertretung
+WorkingDirectory=/opt/vertretung/aktuell/app
+ExecStart=/usr/bin/dotnet /opt/vertretung/aktuell/app/VertretungApi.dll
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=ASPNETCORE_URLS=http://127.0.0.1:5080
+Environment=ASPNETCORE_HTTPS_PORT=443
+Environment=VERTRETUNG_EINSTELLUNGEN=/etc/vertretung/appsettings.Production.json
+Environment=TZ=Europe/Berlin
+Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
+Environment=DOTNET_NOLOGO=1
+Environment=DOTNET_EnableDiagnostics=0
+Environment=Logging__Console__FormatterName=systemd
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=180
+TimeoutStopSec=30
+SyslogIdentifier=vertretung
+StateDirectory=vertretung
+StateDirectoryMode=0700
+UMask=0077
+
+# Schutz: nur lesen außer /tmp (privat) und /var/lib/vertretung; keine Rechte, keine fremden Prozesse.
+# Nicht gesetzt: MemoryDenyWriteExecute (.NET übersetzt zur Laufzeit), SystemCallFilter (in PB-E prüfen).
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

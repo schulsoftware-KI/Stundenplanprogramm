@@ -1,0 +1,12 @@
+# Vertretung – tägliche Sicherung um 01:30 (PB-1b, 316): außerhalb der Umstellungsstunde 2–3 Uhr; das Aufräumen der
+# API bleibt um 3 Uhr, Neustarts nach Sicherheitsupdates um 04:30. Persistent: nach einer Pause sofort nachholen.
+[Unit]
+Description=Vertretung – tägliche Sicherung (01:30)
+
+[Timer]
+OnCalendar=*-*-* 01:30:00
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

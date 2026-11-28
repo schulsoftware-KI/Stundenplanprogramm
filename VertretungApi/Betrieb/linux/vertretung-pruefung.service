@@ -1,0 +1,42 @@
+# =====================================================================
+#  Vertretung – Rücksicherungstest (--pruefen, PB-1b, Entscheidung 316). Gestartet vom Timer
+#  vertretung-pruefung.timer (monatlich am 1. um 01:45) bzw. von Hand mit „vertretung pruefen“.
+#  Einstellungen: /etc/vertretung/sicherung.conf · Sicherungen: /var/backups/vertretung (30 Tage)
+#  Spielt die neueste Sicherung in eine Testdatenbank zurück, zählt Datensätze und löscht sie wieder.
+#  Ergebnis: journalctl -u vertretung-pruefung
+# =====================================================================
+[Unit]
+Description=Vertretung – Rücksicherungstest der neuesten Sicherung
+Documentation=https://github.com/schulsoftware-KI/Stundenplanprogramm/blob/master/VertretungApi/Betrieb/linux/LIESMICH.md
+After=postgresql.service vertretung-sicherung.service
+
+[Service]
+Type=oneshot
+User=vertretung
+Group=vertretung
+Environment=SICHERUNG_CONF=/etc/vertretung/sicherung.conf
+Environment=TZ=Europe/Berlin
+ExecStart=/opt/vertretung/aktuell/betrieb/sicherung.sh --pruefen
+Nice=10
+IOSchedulingClass=idle
+SyslogIdentifier=vertretung-pruefung
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ReadWritePaths=/var/backups/vertretung
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK

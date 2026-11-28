@@ -1,0 +1,19 @@
+# =====================================================================
+#  Caddy – Vertretung (Testserver, PB-1b). Erzeugt von installieren.sh aus Betrieb/linux/Caddyfile.vorlage
+#  (@ADRESSE@ = Adresse des Servers); „vertretung adresse <name>“ schreibt die Datei neu.
+#
+#  - HTTPS mit Zertifikat von Let's Encrypt – Caddy holt und erneuert es selbst, ohne E-Mail-Adresse (F4);
+#    http wird auf https umgeleitet.
+#  - Kein Zugriffsprotokoll (317): Ohne „log“ schreibt Caddy keine Anfragen mit Adressen auf (die App führt ihr
+#    eigenes, gekürztes Anmeldeprotokoll).
+#  - Die API hört nur auf 127.0.0.1:5080; Caddy reicht Absenderadresse und https weiter (X-Forwarded-For/-Proto,
+#    in der API Proxy:Aktiv mit 127.0.0.1 und ::1).
+#  - Komprimiert werden nur die Dateien der App, nicht die Antworten unter /api (Anmeldungen, Personendaten).
+#  - Sicherheits-Header setzt die API selbst; Caddy entfernt nur seinen „Server“-Kopf.
+# =====================================================================
+@ADRESSE@ {
+	@app not path /api/*
+	encode @app zstd gzip
+	header -Server
+	reverse_proxy 127.0.0.1:5080
+}

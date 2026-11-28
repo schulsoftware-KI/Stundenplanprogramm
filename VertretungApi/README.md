@@ -687,7 +687,13 @@ darauf hin).
 Skripte in `Betrieb/` (Einstellungen jeweils in einer Datei neben dem Skript, nicht im Repo):
 - **Windows:** `sicherung.ps1` – `pg_dump` + 7-Zip (AES-256, verschlüsselte Dateinamen). Einstellungen in
   `sicherung.einstellungen.ps1` (Beispiel im Kopf des Skripts).
-- **Linux:** `sicherung.sh` – `pg_dump` + gpg (AES-256). Einstellungen in `sicherung.conf`.
+- **Linux:** `sicherung.sh` – `pg_dump` + gpg (AES-256). Einstellungen in `sicherung.conf` (gesucht seit PB-1b: Datei aus
+  `SICHERUNG_CONF`, `sicherung.conf` neben dem Skript, `/etc/vertretung/sicherung.conf`). Seit PB-1b außerdem
+  `--pruefen [DATEI]`, `--zurueckspielen DATEI` (Datenbank durch den Stand der Sicherung ersetzen: erst in eine neue
+  Datenbank zurückspielen und prüfen, dann tauschen; nur bei angehaltener API), `SICHERUNG_ZUSATZ` im Dateinamen
+  (z. B. `vor-update-<commit>`), eine Sperre gegen zwei gleichzeitige Läufe und ein eigener, leerer gpg-Ordner je Lauf.
+  Auf dem Testserver ruft man es über `vertretung sicherung | pruefen | zurueckspielen` auf (Abschnitt „Testserver unter
+  Linux (PB-1b)“).
 
 Beide: ohne Angabe = neue Sicherung `vertretung_JJJJ-MM-TT_hhmmss.dump.7z|.gpg`, Sicherungen älter als
 `Tage` (30) werden gelöscht; bricht `pg_dump` ab, bleibt keine halbe Datei liegen. Mit `-Pruefen` bzw.
@@ -756,6 +762,27 @@ mit **400** und `{ "fehler": "Die Angaben sind unvollständig oder ungültig (gr
 "felder": ["grund"] }` (unlesbar: „Die Angaben konnten nicht gelesen werden …“) – ohne die eingegebenen Werte. Im Log
 eine Warnung „Ungültige Eingabe: POST api/… – Felder: …“ (Pfadvorlage, keine Werte). App und Desktop zeigen `fehler`.
 Eingabe-DTOs: Wo `null` „keine Angabe“ heißt, ist das Feld nullbar (z. B. `FzEntschuldigungNeuDto.Grund`), sonst Pflicht.
+
+## Testserver unter Linux (PB-1b)
+
+Skripte in `Betrieb/linux/` für einen **Testserver mit Pseudodaten** (Ubuntu 24.04 LTS, z. B. Hostinger) – Kurzanleitung:
+`Betrieb/linux/LIESMICH.md`. Einrichten mit zwei Zeilen im Browser-Terminal:
+```bash
+curl -fsSLO https://raw.githubusercontent.com/schulsoftware-KI/Stundenplanprogramm/master/VertretungApi/Betrieb/linux/installieren.sh
+bash installieren.sh
+```
+- `installieren.sh` (Entscheidungen 300, 304, 305, 312–317): bestätigter Commit aus master, Adresse (Name des VPS, sonst
+  `<ip>.sslip.io`), PostgreSQL 17 und Caddy aus den offiziellen Quellen (Fingerabdruck geprüft), .NET 10 aus Ubuntu
+  (framework-abhängig gebaut, 313), Benutzer `vertretung`/`vertretung-bau`, Datenbank mit zufälligem Passwort,
+  `/etc/vertretung/appsettings.Production.json` mit neuen Schlüsseln und `Betrieb:Probebetrieb = true` (über
+  `VERTRETUNG_EINSTELLUNGEN`), Dienst `vertretung.service` (nur `127.0.0.1:5080`, Logs im Journal mit Priorität), ufw,
+  Caddy mit Let's Encrypt (ohne Zugriffsprotokoll), Sicherung täglich 01:30 und monatlich `--pruefen`; wiederholbar.
+- `aktualisieren.sh [commit]`: bauen → Sicherung → umstellen → prüfen; bei Fehler zurück zur alten Version, nach
+  Migrationen mit Rückfrage zur Rücksicherung. `--zurueck`, `--neustart`.
+- Befehl `vertretung` (status, log, admin-anlegen, neustart, sicherung, pruefen, zurueckspielen, aktualisieren, zurueck,
+  schluessel, adresse, ssh-passwort-aus).
+- Units: `vertretung.service`, `vertretung-sicherung.service/.timer`, `vertretung-pruefung.service/.timer`; Vorlage
+  `Caddyfile.vorlage`; gemeinsame Teile `gemeinsam.sh`.
 
 ## SchILD-Daten prüfen und Pseudo-Export (Phase 5.2a, Desktop)
 

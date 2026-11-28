@@ -1,0 +1,11 @@
+# Vertretung – monatlicher Rücksicherungstest am 1. um 01:45 (PB-1b, 316), nach der täglichen Sicherung.
+[Unit]
+Description=Vertretung – monatlicher Rücksicherungstest (1. des Monats, 01:45)
+
+[Timer]
+OnCalendar=*-*-01 01:45:00
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
